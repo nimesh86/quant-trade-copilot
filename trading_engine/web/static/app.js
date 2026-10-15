@@ -67,10 +67,14 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchStatus();
             fetchPrediction();
             fetchOptionChain(App.selectedDate);
-            if (App.mode !== 'simulation') {
-                fetchCandles(false, App.selectedDate);
-                fetchTrades(null, App.selectedDate);
-            }
+        }
+    }, 5000);
+
+    // Continuous Live Candle & Trade Sync (every 5 seconds during active session)
+    setInterval(() => {
+        if (App.mode !== 'simulation') {
+            fetchCandles(false, App.selectedDate);
+            fetchTrades(null, App.selectedDate);
         }
     }, 5000);
 });
@@ -1056,7 +1060,8 @@ async function fetchCandles(forceFit = false, customDate = null) {
             if (App.candleSeries) {
                 const aggregated = aggregateCandles(formatted, currentTf);
                 const hasCandlesChanged = (formatted.length !== lastRenderedCandleCount);
-                if (isNewDate || forceFit || isInitialCandleLoad || hasCandlesChanged) {
+                const wasEmpty = (lastRenderedCandleCount === 0 && formatted.length > 0);
+                if (isNewDate || forceFit || isInitialCandleLoad || hasCandlesChanged || wasEmpty) {
                     applySMFCloud(aggregated, App.markers);
                     lastRenderedCandleCount = formatted.length;
                     lastLoadedChartDate = sessionDate;
@@ -1069,7 +1074,7 @@ async function fetchCandles(forceFit = false, customDate = null) {
                     const badge = document.getElementById('sim-current-date-badge');
                     if (badge && sessionDate) badge.innerText = sessionDate;
 
-                    if (App.chart && aggregated.length > 0 && (isNewDate || isInitialCandleLoad || forceFit)) {
+                    if (App.chart && aggregated.length > 0 && (isNewDate || isInitialCandleLoad || forceFit || wasEmpty)) {
                         App.chart.timeScale().fitContent();
                     }
                     isInitialCandleLoad = false;
@@ -2028,6 +2033,11 @@ function initWebSocket() {
             // 1. Standard Live Mode Tick Update
             if (data.type === 'TICK_UPDATE') {
                 App.spotPrice = data.spot;
+
+                // Auto-fetch candles if chart is currently empty (e.g. loaded pre-market)
+                if (App.mode !== 'simulation' && (!App.lastCandles || App.lastCandles.length === 0)) {
+                    fetchCandles(true, App.selectedDate);
+                }
 
                 // Update spot price on header
                 const spotEl = document.getElementById('header-spot-val');
