@@ -1,0 +1,3 @@
+"""
+Trading Engine Package.
+"""

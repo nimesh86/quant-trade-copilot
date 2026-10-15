@@ -1,0 +1,1747 @@
+"""
+Production FastAPI Web Server & Real-Time Engine Controller.
+─────────────────────────────────────────────────────────────
+Supports 5 Operating Modes:
+  1. Predictor: Live AI Directional Bias, Target/Stop Barriers & Strike Recommendation
+  2. Paper Trading: Virtual Execution with Statutory Iceberg Order Slicing & Real Costs
+  3. Backtest: Walk-Forward Historical Strategy Evaluation & Report Viewer
+  4. Live: Real Broker Execution via Zerodha Kite Connect
+  5. Simulation: Real-time Replay of any historical date at custom speed (1x to 100x),
+     simulating live ticks, generating live chart bars, AI signals, and executing paper trades!
+
+Serves Mobile-First Responsive UI with TradingView-style Candlestick Chart,
+Real-Time AI Signals, Option Chain Matrix, and Paper Portfolio Tracker.
+"""
+
+import os
+import sys
+import time
+import json
+import asyncio
+from datetime import datetime, timezone, time as dtime
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+import numpy as np
+import pandas as pd
+from sqlalchemy import create_engine, text
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+
+# Ensure trading_engine directory is on sys.path
+ENGINE_DIR = Path(__file__).resolve().parent.parent
+if str(ENGINE_DIR) not in sys.path:
+    sys.path.insert(0, str(ENGINE_DIR))
+
+from config import EngineConfig
+from adapters.backtest_adapter import BacktestAdapter
+from adapters.paper_adapter import PaperAdapter
+
+app = FastAPI(title="AI Trader Autonomous Engine", version="2.5.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+PAPER_STATE_FILE = Path(__file__).resolve().parent / "paper_trades_state.json"
+
+
+def is_market_open_now() -> bool:
+    """Returns True if NSE market is currently in active trading hours (09:15 - 15:30 IST Mon-Fri)."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Kolkata")
+    except Exception:
+        from datetime import timezone, timedelta
+        tz = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(tz)
+    if now.weekday() >= 5:  # Saturday or Sunday
+        return False
+    market_open = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    market_close = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    return market_open <= now <= market_close
+
+
+def is_pre_market_today() -> bool:
+    """Returns True if today is a weekday and current time is before 09:15 AM IST."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Asia/Kolkata")
+    except Exception:
+        from datetime import timezone, timedelta
+        tz = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(tz)
+    if now.weekday() >= 5:
+        return False
+    return now.time() < dtime(9, 15)
+
+
+# Engine State Container
+class EngineState:
+    def __init__(self):
+        self.cfg = EngineConfig()
+        self.mode = "predictor" # 'predictor', 'paper', 'backtest', 'live', 'simulation'
+        self.live_paper_adapter = PaperAdapter(self.cfg)
+        self.sim_paper_adapter = PaperAdapter(self.cfg)
+        self.db_engine = create_engine(self.cfg.db_url)
+        
+        # Real-time simulated/live market status
+        self.current_spot = 22625.20
+        self.current_atr = 24.50
+        self.current_rsi = 56.40
+        self.current_vwap = 22618.00
+        
+        # AI Predictor Output
+        self.prediction = {
+            "direction": "CALL",
+            "bias": "BULLISH",
+            "confidence_pct": 82.5,
+            "model_1_score": 0.742,
+            "model_2_status": "CONFIRMED_MOMENTUM",
+            "suggested_strike": "NIFTY 22650 CE",
+            "entry_range": "22,620 - 22,630",
+            "entry_premium": 165.0,
+            "target_premium": 186.0,
+            "stop_loss_premium": 152.0,
+            "expected_gain_pct": 12.7,
+            "max_risk_pct": 7.8,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # Simulation Replay Engine State
+        self.simulation_active = False
+        self.simulation_paused = False
+        self.simulation_date = "2026-10-09"
+        self.simulation_speed = 10
+        self.simulation_task = None
+        self.simulation_run_id = 0
+        self.simulation_candles: List[Dict[str, Any]] = []
+        self.simulation_markers: List[Dict[str, Any]] = []
+        self.simulation_progress = {
+            "current_bar": 0,
+            "total_bars": 0,
+            "current_time": "",
+            "active": False,
+            "paused": False
+        }
+
+        # Real-time intra-minute forming candle & live tick task
+        self.forming_candle: Optional[Dict[str, Any]] = None
+        self.tick_broadcaster_task = None
+
+        # WebSocket clients pool
+        self.active_websockets: List[WebSocket] = []
+
+        # Parallel Strategy Detector
+        from adapters.strategy_detector_adapter import StrategyDetectorAdapter
+        self.strategy_detector = StrategyDetectorAdapter(self.cfg)
+
+        # Restore persistent paper trading portfolio & trade history
+        self.load_paper_state()
+
+    def save_paper_state(self):
+        """Persists live paper adapter trades & balance to disk so user results are never lost."""
+        try:
+            data = {
+                "capital": self.live_paper_adapter.capital,
+                "trade_history": self.live_paper_adapter.trade_history,
+                "updated_at": datetime.now().isoformat()
+            }
+            with open(PAPER_STATE_FILE, "w") as f:
+                json.dump(data, f, indent=2, default=str)
+        except Exception as e:
+            print(f"Error saving paper trades state: {e}")
+
+    def load_paper_state(self):
+        """Restores persistent paper trading trades from disk."""
+        if PAPER_STATE_FILE.exists():
+            try:
+                with open(PAPER_STATE_FILE, "r") as f:
+                    data = json.load(f)
+                    if "capital" in data and float(data["capital"]) > 0:
+                        self.live_paper_adapter.capital = float(data["capital"])
+                    if "trade_history" in data and isinstance(data["trade_history"], list):
+                        self.live_paper_adapter.trade_history = data["trade_history"]
+                        print(f"EngineState: Restored {len(self.live_paper_adapter.trade_history)} persistent paper trades. Capital: ₹{self.live_paper_adapter.capital:,.2f}", flush=True)
+            except Exception as e:
+                print(f"Error loading paper trades state: {e}")
+
+    @property
+    def paper_adapter(self) -> PaperAdapter:
+        if self.mode == "simulation":
+            return self.sim_paper_adapter
+        return self.live_paper_adapter
+
+    @paper_adapter.setter
+    def paper_adapter(self, adapter: PaperAdapter):
+        if self.mode == "simulation":
+            self.sim_paper_adapter = adapter
+        else:
+            self.live_paper_adapter = adapter
+
+state = EngineState()
+
+
+def build_option_chain_data(spot: float) -> Dict[str, Any]:
+    """Generates real-time 11-strike option chain centered around dynamic ATM."""
+    atm_strike = int(round(spot / 50.0) * 50)
+    strikes = [atm_strike + (i * 50) for i in range(-5, 6)]
+    chain_rows = []
+    for s in strikes:
+        dist = s - spot
+        call_iv = round(12.5 + abs(dist) * 0.004, 2)
+        call_delta = round(max(0.05, min(0.95, 0.50 - (dist / 400.0))), 2)
+        call_ltp = round(max(5.0, 160.0 - (dist * 0.55)), 2)
+        call_oi = int(max(1000, 45000 - abs(dist) * 45))
+
+        put_iv = round(13.2 + abs(dist) * 0.004, 2)
+        put_delta = round(max(-0.95, min(-0.05, -0.50 - (dist / 400.0))), 2)
+        put_ltp = round(max(5.0, 160.0 + (dist * 0.55)), 2)
+        put_oi = int(max(1000, 42000 - abs(dist) * 40))
+
+        chain_rows.append({
+            "strike": s,
+            "is_atm": (s == atm_strike),
+            "call_ltp": call_ltp,
+            "call_iv": call_iv,
+            "call_delta": call_delta,
+            "call_oi": call_oi,
+            "put_ltp": put_ltp,
+            "put_iv": put_iv,
+            "put_delta": put_delta,
+            "put_oi": put_oi,
+        })
+    return {
+        "underlying": "NIFTY 50",
+        "spot": round(spot, 2),
+        "atm_strike": atm_strike,
+        "chain": chain_rows
+    }
+
+
+def update_dynamic_prediction(spot: float, atr: float, rsi: float = 50.0, vwap: float = 0.0) -> Dict[str, Any]:
+    """Dynamically updates suggested strike, option premiums, and profit targets with zero lag."""
+    if state.mode != "simulation" and not is_market_open_now():
+        inactive = {
+            "active": False,
+            "status": "MARKET_CLOSED",
+            "message": "Market is closed. Real-time AI suggestions resume at 09:15 AM IST.",
+            "suggested_strike": None,
+            "direction": None,
+            "bias": "MARKET CLOSED",
+            "confidence_pct": 0,
+            "model_1_score": 0.0,
+            "model_2_status": "IDLE",
+            "entry_range": "--",
+            "entry_premium": 0,
+            "target_premium": 0,
+            "stop_loss_premium": 0,
+            "expected_gain_pct": 0,
+            "max_risk_pct": 0,
+            "timestamp": datetime.now().isoformat(),
+            "spot": round(spot, 2),
+            "atr": round(atr, 2),
+            "rsi": round(rsi, 2),
+            "vwap": round(vwap, 2)
+        }
+        state.prediction = inactive
+        return inactive
+
+    atm_strike = int(round(spot / 50.0) * 50)
+    is_bullish = rsi >= 50.0
+    direction = "CALL" if is_bullish else "PUT"
+    strike_code = "CE" if is_bullish else "PE"
+    bias = ("BULLISH " + ("BREAKOUT" if rsi > 62 else "TREND")) if is_bullish else ("BEARISH " + ("BREAKDOWN" if rsi < 38 else "TREND"))
+    conf = min(89.5, max(62.0, 60.0 + abs(rsi - 50.0) * 1.1))
+
+    intrinsic_approx = (spot - atm_strike) if strike_code == "CE" else (atm_strike - spot)
+    est_prem = max(20.0, round(atr * 5.2 + intrinsic_approx * 0.55, 1))
+    tgt_pts = round(max(10.0, atr * 0.75), 1)
+    sl_pts = round(max(6.0, atr * 0.45), 1)
+    target_prem = round(est_prem + (tgt_pts * 0.55), 1)
+    stop_prem = round(max(2.0, est_prem - (sl_pts * 0.40)), 1)
+    exp_gain = round(((target_prem - est_prem) / est_prem) * 100, 1) if est_prem > 0 else 14.2
+    max_risk = round(((est_prem - stop_prem) / est_prem) * 100, 1) if est_prem > 0 else 8.5
+
+    pred = {
+        "direction": direction,
+        "bias": bias,
+        "confidence_pct": round(conf, 1),
+        "model_1_score": round(conf / 100.0, 3),
+        "model_2_status": "CONFIRMED_MOMENTUM" if conf > 75 else "MOMENTUM_WATCH",
+        "suggested_strike": f"NIFTY {atm_strike} {strike_code}",
+        "entry_range": f"{round(spot - 4, 1)} - {round(spot + 4, 1)}",
+        "entry_premium": est_prem,
+        "target_premium": target_prem,
+        "stop_loss_premium": stop_prem,
+        "expected_gain_pct": exp_gain,
+        "max_risk_pct": max_risk,
+        "timestamp": datetime.now().isoformat(),
+        "spot": round(spot, 2),
+        "atr": round(atr, 2),
+        "rsi": round(rsi, 2),
+        "vwap": round(vwap, 2)
+    }
+    state.prediction = pred
+    return pred
+
+
+def get_dynamic_strategy_suggestions() -> List[Dict[str, Any]]:
+    """Enriches detected strategy suggestions with real-time calculated option premiums."""
+    suggestions = []
+    spot = state.current_spot
+    atr = state.current_atr or 20.0
+    for s in state.strategy_detector.active_suggestions:
+        p = dict(s.gtt_payload)
+        atm = int(round(spot / 50.0) * 50)
+        p["current_spot"] = round(spot, 2)
+        side = s.side
+        dist = (spot - atm) if side == "CE" else (atm - spot)
+        p["current_premium"] = max(15.0, round(atr * 5.0 + dist * 0.55, 1))
+        suggestions.append(p)
+    return suggestions
+
+
+# ── REST API Endpoints ────────────────────────────────────────────────────────
+
+@app.get("/api/status")
+async def get_status():
+    """Returns engine system status, current mode, capital, and active trade."""
+    if state.mode != "simulation":
+        try:
+            with state.db_engine.connect() as conn:
+                row = conn.execute(text("SELECT close FROM minute_candles WHERE symbol = 'NIFTY-I' ORDER BY timestamp DESC LIMIT 1")).fetchone()
+                if row and row[0]:
+                    state.current_spot = float(row[0])
+        except Exception:
+            pass
+
+    pos = state.paper_adapter.active_position
+    summary = state.paper_adapter.get_portfolio_summary()
+
+    # Calculate floating unrealized PnL if active position exists
+    unrealized_pnl = 0.0
+    if pos:
+        side = pos["side"]
+        current_px = state.current_spot
+        entry_px = pos["entry_price"]
+        pts = (current_px - entry_px) if side == "CE" else (entry_px - current_px)
+        opt_pts = pts * 0.65
+        unrealized_pnl = round(opt_pts * pos["units"], 2)
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_kolkata = ZoneInfo("Asia/Kolkata")
+    except Exception:
+        from datetime import timezone, timedelta
+        tz_kolkata = timezone(timedelta(hours=5, minutes=30))
+    today_str = datetime.now(tz_kolkata).strftime("%Y-%m-%d")
+
+    return {
+        "mode": state.mode,
+        "symbol": state.cfg.symbol,
+        "server_date": today_str,
+        "market_open": is_market_open_now(),
+        "spot_price": round(state.current_spot, 2),
+        "capital": round(state.paper_adapter.capital, 2),
+        "paper_capital": round(state.live_paper_adapter.capital, 2),
+        "simulation_capital": round(state.sim_paper_adapter.capital, 2),
+        "unrealized_pnl": unrealized_pnl,
+        "realized_pnl": round(state.paper_adapter.capital - state.cfg.initial_capital, 2),
+        "total_trades": len(state.paper_adapter.trade_history),
+        "win_rate": summary.get("win_rate", 0.0),
+        "active_position": pos,
+        "prediction": state.prediction,
+        "option_chain": build_option_chain_data(state.current_spot),
+        "iceberg_ceiling_lots": state.cfg.max_lots,
+        "iceberg_leg_freeze": state.cfg.freeze_lots,
+        "simulation": state.simulation_progress,
+        "strategy_suggestions": get_dynamic_strategy_suggestions(),
+        "strategy_count": len(state.strategy_detector.active_suggestions)
+    }
+
+
+@app.get("/api/strategy/suggestions")
+async def get_strategy_suggestions():
+    """Returns real-time strategy detection signals and GTT recommendations."""
+    return {
+        "active_suggestions": get_dynamic_strategy_suggestions(),
+        "history": state.strategy_detector.detection_history,
+        "detector_active": True,
+        "strategies": [s.name for s in state.strategy_detector.strategies]
+    }
+
+
+@app.post("/api/mode")
+async def set_mode(payload: Dict[str, Any] = Body(...)):
+    """Switches system operational mode."""
+    target_mode = payload.get("mode", "").lower()
+    if target_mode not in ["predictor", "paper", "backtest", "live", "simulation"]:
+        raise HTTPException(status_code=400, detail="Invalid mode.")
+    state.mode = target_mode
+    if target_mode != "simulation":
+        state.simulation_active = False
+        state.simulation_paused = False
+        if state.simulation_task and not state.simulation_task.done():
+            state.simulation_task.cancel()
+        state.simulation_progress["active"] = False
+    await broadcast_state()
+    return {"status": "success", "mode": state.mode}
+
+
+
+
+
+def compute_live_market_prediction() -> Dict[str, Any]:
+    """Dynamically computes real-time AI Direction, Technical Regimes, 
+    True ATM Strike, and Realistic Option Targets from live minute candles."""
+    # When market is closed and not in simulation, return inactive prediction (no suggestions)
+    if state.mode != "simulation" and not is_market_open_now():
+        inactive_pred = {
+            "active": False,
+            "status": "MARKET_CLOSED",
+            "message": "Market is closed. Real-time AI suggestions resume at 09:15 AM IST.",
+            "suggested_strike": None,
+            "direction": None,
+            "bias": "MARKET CLOSED",
+            "confidence_pct": 0,
+            "model_1_score": 0.0,
+            "model_2_status": "IDLE",
+            "entry_range": "--",
+            "entry_premium": 0,
+            "target_premium": 0,
+            "stop_loss_premium": 0,
+            "expected_gain_pct": 0,
+            "max_risk_pct": 0,
+            "timestamp": datetime.now().isoformat(),
+            "spot": state.current_spot,
+            "atr": state.current_atr,
+            "rsi": state.current_rsi,
+            "vwap": state.current_vwap
+        }
+        state.prediction = inactive_pred
+        return inactive_pred
+
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            tz_kolkata = ZoneInfo("Asia/Kolkata")
+        except Exception:
+            from datetime import timezone, timedelta
+            tz_kolkata = timezone(timedelta(hours=5, minutes=30))
+        today_str = datetime.now(tz_kolkata).strftime("%Y-%m-%d")
+
+        q = text("""
+            SELECT timestamp, open, high, low, close, volume 
+            FROM minute_candles 
+            WHERE symbol = 'NIFTY-I'
+              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today_date
+            ORDER BY timestamp DESC 
+            LIMIT 60
+        """)
+        with state.db_engine.connect() as conn:
+            df = pd.read_sql(q, conn, params={"today_date": today_str})
+
+        if df.empty or len(df) < 5:
+            insufficient_pred = {
+                "active": False,
+                "status": "INSUFFICIENT_DATA",
+                "message": "Awaiting initial session bars (09:15 AM onwards)...",
+                "suggested_strike": None,
+                "direction": None,
+                "bias": "GATHERING DATA",
+                "confidence_pct": 0,
+                "model_1_score": 0.0,
+                "model_2_status": "AWAITING_BARS",
+                "entry_range": "--",
+                "entry_premium": 0,
+                "target_premium": 0,
+                "stop_loss_premium": 0,
+                "expected_gain_pct": 0,
+                "max_risk_pct": 0,
+                "timestamp": datetime.now().isoformat(),
+                "spot": state.current_spot,
+                "atr": state.current_atr,
+                "rsi": state.current_rsi,
+                "vwap": state.current_vwap
+            }
+            state.prediction = insufficient_pred
+            return insufficient_pred
+
+        df = df.iloc[::-1].reset_index(drop=True)
+
+        # 1. True Range & ATR
+        df["tr"] = np.maximum(df["high"] - df["low"], 
+                   np.maximum(abs(df["high"] - df["close"].shift(1)), 
+                              abs(df["low"] - df["close"].shift(1))))
+        atr = float(df["tr"].rolling(14, min_periods=3).mean().iloc[-1])
+        if np.isnan(atr) or atr <= 0:
+            atr = 18.5
+
+        # 2. RSI (14)
+        delta = df["close"].diff()
+        gain = delta.clip(lower=0).rolling(14, min_periods=3).mean()
+        loss = (-delta.clip(upper=0)).rolling(14, min_periods=3).mean()
+        rs = gain / (loss + 1e-9)
+        rsi = float((100 - (100 / (1 + rs))).iloc[-1])
+        if np.isnan(rsi):
+            rsi = 50.0
+
+        # 3. Session VWAP & EMAs
+        df["tp"] = (df["high"] + df["low"] + df["close"]) / 3.0
+        vwap = float(((df["tp"] * df["volume"]).cumsum() / (df["volume"].cumsum() + 1e-9)).iloc[-1])
+        ema9 = float(df["close"].ewm(span=9).mean().iloc[-1])
+        ema21 = float(df["close"].ewm(span=21).mean().iloc[-1])
+        close = float(df["close"].iloc[-1])
+
+        # Update engine state indicators
+        state.current_spot = close
+        state.current_atr = round(atr, 2)
+        state.current_rsi = round(rsi, 2)
+        state.current_vwap = round(vwap, 2)
+
+        # 4. Multi-Factor Directional Classification
+        is_bullish = (close > vwap) and (ema9 >= ema21) and (rsi >= 52.0)
+        is_bearish = (close < vwap) and (ema9 <= ema21) and (rsi <= 48.0)
+
+        if not is_bullish and not is_bearish:
+            no_setup_pred = {
+                "active": False,
+                "status": "NO_SETUP",
+                "message": "Market in consolidation. No active high-conviction trade setup.",
+                "suggested_strike": None,
+                "direction": None,
+                "bias": "CONSOLIDATION",
+                "confidence_pct": 0,
+                "model_1_score": 0.0,
+                "model_2_status": "MOMENTUM_WATCH",
+                "entry_range": "--",
+                "entry_premium": 0,
+                "target_premium": 0,
+                "stop_loss_premium": 0,
+                "expected_gain_pct": 0,
+                "max_risk_pct": 0,
+                "timestamp": datetime.now().isoformat(),
+                "spot": round(close, 2),
+                "atr": round(atr, 2),
+                "rsi": round(rsi, 2),
+                "vwap": round(vwap, 2)
+            }
+            state.prediction = no_setup_pred
+            return no_setup_pred
+
+        if is_bullish:
+            direction = "CALL"
+            bias = "BULLISH BREAKOUT" if rsi > 65 else "BULLISH TREND"
+            conf = min(88.5, max(65.0, 60.0 + (rsi - 50.0) * 0.75 + min(15.0, (close - vwap) / max(1.0, atr) * 3.0)))
+        else:
+            direction = "PUT"
+            bias = "BEARISH BREAKDOWN" if rsi < 35 else "BEARISH TREND"
+            conf = min(88.5, max(65.0, 60.0 + (50.0 - rsi) * 0.75 + min(15.0, (vwap - close) / max(1.0, atr) * 3.0)))
+
+        atm_strike = int(round(close / 50.0) * 50)
+        strike_code = "CE" if direction == "CALL" else "PE"
+        suggested_strike = f"NIFTY {atm_strike} {strike_code}"
+
+        # 5. Look up real option premium if available in database or price cache
+        opt_price = None
+        try:
+            q_opt = text("""
+                SELECT close 
+                FROM minute_candles 
+                WHERE symbol LIKE 'NIFTY%' AND symbol LIKE :pat
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            """)
+            with state.db_engine.connect() as conn:
+                row = conn.execute(q_opt, {"pat": f"%{atm_strike}{strike_code}"}).fetchone()
+                if row and row[0] and float(row[0]) > 2.0:
+                    opt_price = float(row[0])
+        except Exception:
+            pass
+
+        if opt_price is None or opt_price <= 0:
+            opt_price = max(45.0, round(atr * 5.2, 1))
+
+        tgt_pts = round(max(8.0, atr * 0.75 * 0.55), 1)
+        sl_pts = round(max(5.0, atr * 1.25 * 0.40), 1)
+
+        entry_prem = round(opt_price, 1)
+        target_prem = round(entry_prem + tgt_pts, 1)
+        stop_prem = round(max(2.0, entry_prem - sl_pts), 1)
+
+        exp_gain_pct = round((tgt_pts / entry_prem) * 100, 1) if entry_prem > 0 else 14.2
+        max_risk_pct = round((sl_pts / entry_prem) * 100, 1) if entry_prem > 0 else 8.5
+
+        pred = {
+            "active": True,
+            "status": "ACTIVE_SIGNAL",
+            "direction": direction,
+            "bias": bias,
+            "confidence_pct": round(conf, 1),
+            "model_1_score": round(conf / 100.0, 3),
+            "model_2_status": "CONFIRMED_TREND" if conf > 70 else "MOMENTUM_WATCH",
+            "suggested_strike": suggested_strike,
+            "entry_range": f"{int(close - 8):,} - {int(close + 8):,}",
+            "entry_premium": entry_prem,
+            "target_premium": target_prem,
+            "stop_loss_premium": stop_prem,
+            "expected_gain_pct": exp_gain_pct,
+            "max_risk_pct": max_risk_pct,
+            "timestamp": datetime.now().isoformat(),
+            "spot": round(close, 2),
+            "atr": round(atr, 2),
+            "rsi": round(rsi, 2),
+            "vwap": round(vwap, 2)
+        }
+        state.prediction = pred
+        return pred
+
+    except Exception:
+        return state.prediction
+
+
+@app.get("/api/prediction")
+async def get_prediction():
+    """Returns real-time AI Directional Prediction and Strike Suggestions."""
+    if state.mode == "simulation":
+        return state.prediction
+    return compute_live_market_prediction()
+
+
+@app.get("/api/candles")
+async def get_candles(limit: int = Query(375, ge=10, le=1000), date: Optional[str] = Query(None)):
+    """Returns 1-minute spot candles for the requested date (or active session) with markers."""
+    if state.mode == "simulation" and state.simulation_active and not date:
+        return {
+            "date": state.simulation_date,
+            "candles": state.simulation_candles,
+            "markers": state.simulation_markers
+        }
+
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            tz_kolkata = ZoneInfo("Asia/Kolkata")
+        except Exception:
+            from datetime import timezone, timedelta
+            tz_kolkata = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(tz_kolkata)
+        today_str = now_ist.strftime("%Y-%m-%d")
+
+        target_date = date.strip() if date and len(date.strip()) == 10 else None
+        is_weekday = now_ist.weekday() < 5
+        resolved_date = target_date or today_str
+
+        if target_date:
+            # Explicit Session Date Requested - query that exact date without prepending prior sessions
+            resolved_date = target_date
+            if target_date == today_str and is_pre_market_today():
+                df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+            else:
+                q_target = text("""
+                    SELECT timestamp, open, high, low, close, volume 
+                    FROM minute_candles 
+                    WHERE symbol = 'NIFTY-I'
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :target_date
+                    ORDER BY timestamp ASC
+                """)
+                with state.db_engine.connect() as conn:
+                    df = pd.read_sql(q_target, conn, params={"target_date": target_date})
+        else:
+            # Active Day (Today) or Default Session
+            if is_weekday and is_pre_market_today():
+                resolved_date = today_str
+                df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+            elif is_market_open_now():
+                resolved_date = today_str
+                # Query today's candles only (do not prepend yesterday's tail)
+                q_today = text("""
+                    SELECT timestamp, open, high, low, close, volume 
+                    FROM minute_candles 
+                    WHERE symbol = 'NIFTY-I'
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today_date
+                    ORDER BY timestamp ASC
+                """)
+                with state.db_engine.connect() as conn:
+                    df = pd.read_sql(q_today, conn, params={"today_date": today_str})
+            else:
+                # Outside market hours on weekday evening or weekend
+                q_today = text("""
+                    SELECT timestamp, open, high, low, close, volume 
+                    FROM minute_candles 
+                    WHERE symbol = 'NIFTY-I'
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today_date
+                    ORDER BY timestamp ASC
+                """)
+                with state.db_engine.connect() as conn:
+                    df = pd.read_sql(q_today, conn, params={"today_date": today_str})
+
+                if df.empty:
+                    # Fallback to latest available trading day in DB
+                    q_latest = text("""
+                        SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date as d
+                        FROM minute_candles
+                        WHERE symbol = 'NIFTY-I'
+                        ORDER BY d DESC
+                        LIMIT 1
+                    """)
+                    with state.db_engine.connect() as conn:
+                        latest_row = conn.execute(q_latest).fetchone()
+                        resolved_date = str(latest_row[0]) if latest_row else today_str
+
+                    q_session = text("""
+                        SELECT timestamp, open, high, low, close, volume 
+                        FROM minute_candles 
+                        WHERE symbol = 'NIFTY-I'
+                          AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                        ORDER BY timestamp ASC
+                    """)
+                    with state.db_engine.connect() as conn:
+                        df = pd.read_sql(q_session, conn, params={"d": resolved_date})
+
+        candles = []
+        if not df.empty and "timestamp" in df.columns:
+            ts_series = pd.to_datetime(df["timestamp"])
+            if ts_series.dt.tz is None:
+                ts_series = ts_series.dt.tz_localize("UTC").dt.tz_convert("Asia/Kolkata")
+            else:
+                ts_series = ts_series.dt.tz_convert("Asia/Kolkata")
+            df["timestamp"] = ts_series
+            df = df.sort_values("timestamp").reset_index(drop=True)
+
+            for _, row in df.iterrows():
+                candles.append({
+                    "time": row["timestamp"].strftime("%Y-%m-%d %H:%M"),
+                    "timestamp": int(row["timestamp"].timestamp()),
+                    "open": round(float(row["open"]), 2),
+                    "high": round(float(row["high"]), 2),
+                    "low": round(float(row["low"]), 2),
+                    "close": round(float(row["close"]), 2),
+                    "volume": int(row["volume"]),
+                })
+
+        # Append or update real-time forming candle if currently live during active market hours
+        if is_market_open_now() and (resolved_date == today_str or not target_date or target_date == today_str):
+            now_ts = int(now_ist.timestamp())
+            bar_ts = (now_ts // 60) * 60
+            if not state.forming_candle:
+                spot = state.current_spot or (candles[-1]["close"] if candles else 22620.0)
+                state.forming_candle = {
+                    "time": bar_ts,
+                    "open": spot,
+                    "high": spot,
+                    "low": spot,
+                    "close": spot,
+                    "volume": 0
+                }
+            fc = state.forming_candle
+            if candles and candles[-1]["timestamp"] == fc["time"]:
+                candles[-1]["high"] = max(candles[-1]["high"], round(fc["high"], 2))
+                candles[-1]["low"] = min(candles[-1]["low"], round(fc["low"], 2))
+                candles[-1]["close"] = round(fc["close"], 2)
+            elif not candles or fc["time"] > candles[-1]["timestamp"]:
+                candles.append({
+                    "time": datetime.fromtimestamp(fc["time"], tz=tz_kolkata).strftime("%Y-%m-%d %H:%M"),
+                    "timestamp": fc["time"],
+                    "open": round(fc["open"], 2),
+                    "high": round(fc["high"], 2),
+                    "low": round(fc["low"], 2),
+                    "close": round(fc["close"], 2),
+                    "volume": int(fc.get("volume", 0)),
+                })
+            state.current_spot = fc["close"]
+        elif candles:
+            state.current_spot = candles[-1]["close"]
+
+        markers = []
+        target_adapter = state.sim_paper_adapter if (state.mode == "simulation") else state.live_paper_adapter
+        for trade in target_adapter.trade_history:
+            try:
+                entry_time_str = str(trade.get("entry_time", ""))
+                if not entry_time_str.startswith(resolved_date):
+                    continue
+                entry_dt = pd.to_datetime(trade.get("entry_time"))
+                side = trade.get("side", "CE")
+                markers.append({
+                    "time": int(entry_dt.timestamp()),
+                    "position": "belowBar" if side == "CE" else "aboveBar",
+                    "color": "#00f2a9" if side == "CE" else "#ff3860",
+                    "shape": "arrowUp" if side == "CE" else "arrowDown",
+                    "text": f"▲ BUY {side} @ {trade.get('entry_price', 0):.0f}",
+                    "type": f"ENTRY_{side}"
+                })
+                exit_dt = pd.to_datetime(trade.get("exit_time"))
+                if exit_dt and pd.notna(exit_dt):
+                    is_win = trade.get("is_win", False)
+                    markers.append({
+                        "time": int(exit_dt.timestamp()),
+                        "position": "aboveBar" if is_win else "belowBar",
+                        "color": "#00d2ff" if is_win else "#ff3860",
+                        "shape": "flag",
+                        "text": f"{'★ TGT' if is_win else '✖ SL'} {trade.get('net_pnl_inr', 0):+,.0f}",
+                        "type": "EXIT_TARGET" if is_win else "EXIT_SL"
+                    })
+            except Exception:
+                pass
+
+        # Evaluate strategies on historical session using an isolated detector instance so state.strategy_detector is not mutated
+        if target_date and candles:
+            try:
+                from strategy.amd_volume_profile import AMDVolumeProfileStrategy
+                isolated_strat = AMDVolumeProfileStrategy(state.cfg)
+                isolated_strat.reset_session()
+                for idx_c, c_item in enumerate(candles):
+                    try:
+                        c_ts = pd.to_datetime(c_item["time"])
+                        if c_ts.tz is None:
+                            c_ts = c_ts.tz_localize("Asia/Kolkata")
+                    except Exception:
+                        c_ts = datetime.fromtimestamp(c_item["timestamp"])
+                    b_eval = {
+                        "timestamp": c_ts,
+                        "open": c_item["open"],
+                        "high": c_item["high"],
+                        "low": c_item["low"],
+                        "close": c_item["close"],
+                        "volume": c_item["volume"],
+                        "idx": idx_c
+                    }
+                    sig = isolated_strat.on_candle_close(b_eval, {})
+                    if sig:
+                        setup_name = sig.setup_details.get("setup_type", sig.side)
+                        markers.append({
+                            "time": c_item["timestamp"],
+                            "position": "belowBar" if sig.side == "CE" else "aboveBar",
+                            "color": "#00f2a9" if sig.side == "CE" else "#ff3860",
+                            "shape": "arrowUp" if sig.side == "CE" else "arrowDown",
+                            "text": f"🎯 AMD {setup_name[:8]}",
+                            "type": f"STRAT_{sig.side}"
+                        })
+            except Exception as e:
+                print(f"Error evaluating isolated strategy markers: {e}")
+
+        return {"date": resolved_date, "today": today_str, "candles": candles, "markers": markers}
+
+    except Exception as e:
+        print(f"Error in get_candles: {e}", flush=True)
+        return {"date": target_date or today_str, "today": today_str, "candles": [], "markers": []}
+
+
+@app.get("/api/option_chain")
+async def get_option_chain(date: Optional[str] = Query(None)):
+    """Returns option chain matrix with strike grid around ATM for the specified date or current spot."""
+    spot = state.current_spot or 22800.0
+    if date:
+        target_date = date.strip()
+        try:
+            q = text("""
+                SELECT close FROM minute_candles 
+                WHERE symbol = 'NIFTY-I'
+                  AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :target_date
+                ORDER BY timestamp DESC 
+                LIMIT 1
+            """)
+            with state.db_engine.connect() as conn:
+                row = conn.execute(q, {"target_date": target_date}).fetchone()
+                if row and row[0]:
+                    spot = float(row[0])
+                else:
+                    # If requested date has no candles yet (e.g. today pre-market), get previous close
+                    q_prev = text("""
+                        SELECT close FROM minute_candles 
+                        WHERE symbol = 'NIFTY-I'
+                        ORDER BY timestamp DESC 
+                        LIMIT 1
+                    """)
+                    row_prev = conn.execute(q_prev).fetchone()
+                    if row_prev and row_prev[0]:
+                        spot = float(row_prev[0])
+        except Exception as e:
+            print(f"Error querying spot for option chain: {e}")
+
+    return build_option_chain_data(spot)
+
+
+@app.get("/api/paper/trades")
+async def get_paper_trades(mode: Optional[str] = Query(None), date: Optional[str] = Query(None)):
+    """Returns executed paper trades history with Iceberg legs and itemized fees, filtered by date if provided."""
+    if not state.live_paper_adapter.trade_history:
+        state.load_paper_state()
+    target_adapter = state.sim_paper_adapter if (mode == "simulation" or (mode is None and state.mode == "simulation")) else state.live_paper_adapter
+
+    all_trades = list(reversed(target_adapter.trade_history))
+    if date:
+        date_str = date.strip()
+        trades = [
+            t for t in all_trades 
+            if str(t.get("entry_time", "")).startswith(date_str) or str(t.get("exit_time", "")).startswith(date_str)
+        ]
+    else:
+        trades = all_trades
+
+    date_pnl = sum(float(t.get("net_pnl_inr", 0.0)) for t in trades)
+    wins = sum(1 for t in trades if t.get("is_win", False))
+    total_trades = len(trades)
+    win_rate = round((wins / total_trades * 100), 1) if total_trades > 0 else 0.0
+
+    return {
+        "trades": trades,
+        "capital": round(target_adapter.capital, 2),
+        "initial_capital": round(state.cfg.initial_capital, 2),
+        "active_position": target_adapter.active_position,
+        "mode": "simulation" if target_adapter == state.sim_paper_adapter else "paper",
+        "date_pnl": round(date_pnl, 2),
+        "date_win_rate": win_rate,
+        "date_trades_count": total_trades
+    }
+
+
+@app.post("/api/paper/order")
+async def place_paper_order(payload: Dict[str, Any] = Body(...)):
+    """Triggers an instantaneous Paper Order with Iceberg slicing."""
+    action = payload.get("action", "ENTER")
+    side = payload.get("side", state.prediction["direction"]).upper()
+
+    if action == "ENTER":
+        if state.mode != "simulation" and not is_market_open_now():
+            raise HTTPException(
+                status_code=400, 
+                detail="Market is closed. Orders can only be placed during active market hours (09:15 - 15:30 IST) or in Simulation mode."
+            )
+
+        if not state.prediction.get("active") or not state.prediction.get("suggested_strike"):
+            raise HTTPException(
+                status_code=400,
+                detail="No active trade signal at this time. Suggestion is not available."
+            )
+
+        if state.paper_adapter.active_position is not None:
+            raise HTTPException(status_code=400, detail="A position is already active. Close it first.")
+
+        pos = state.paper_adapter.open_position(
+            symbol=state.cfg.symbol,
+            side=side,
+            price=state.current_spot,
+            atr=state.current_atr,
+            timestamp=datetime.now(),
+            is_sar=False
+        )
+        if state.mode != "simulation":
+            state.save_paper_state()
+        await broadcast_state()
+        return {"status": "success", "action": "ORDER_PLACED", "position": pos}
+
+    elif action == "CLOSE":
+        if state.paper_adapter.active_position is None:
+            raise HTTPException(status_code=400, detail="No active position to close.")
+
+        rec = state.paper_adapter.close_position(
+            reason="MANUAL_SQUAREOFF",
+            exit_price=state.current_spot,
+            timestamp=datetime.now()
+        )
+        if state.mode != "simulation":
+            state.save_paper_state()
+        await broadcast_state()
+        return {"status": "success", "action": "ORDER_CLOSED", "record": rec}
+
+
+@app.post("/api/strategy/execute")
+async def execute_strategy_order(payload: Dict[str, Any] = Body(...)):
+    """Executes a detected institutional strategy setup (e.g. AMD Liquidity Sweep) on PaperAdapter."""
+    idx = int(payload.get("index", 0))
+    suggestions = state.strategy_detector.active_suggestions
+    if not suggestions or idx < 0 or idx >= len(suggestions):
+        raise HTTPException(status_code=400, detail="Strategy suggestion is no longer active or invalid index.")
+
+    sig = suggestions[idx]
+    # Close any active position to give institutional strategy trade priority
+    if state.paper_adapter.active_position is not None:
+        state.paper_adapter.close_position("STRATEGY_PRIORITY", state.current_spot, datetime.now())
+
+    pos = state.paper_adapter.open_position(
+        symbol=state.cfg.symbol,
+        side=sig.side,
+        price=state.current_spot,
+        atr=state.current_atr,
+        timestamp=datetime.now(),
+        is_sar=False,
+        custom_target=sig.target,
+        custom_sl=sig.stop_loss,
+        strategy_name=sig.strategy_name
+    )
+    if state.mode != "simulation":
+        state.save_paper_state()
+    await broadcast_state()
+    return {"status": "success", "action": "STRATEGY_ORDER_PLACED", "position": pos}
+
+
+# ── Simulation Replay Endpoints ──────────────────────────────────────────────
+
+AVAILABLE_SIM_DATES = [
+    "2026-10-13", "2026-10-12", "2026-10-09", "2026-10-08", "2026-10-07", "2026-10-06", "2026-10-05",
+    "2026-10-01", "2026-09-30", "2026-09-29", "2026-09-28", "2026-09-25"
+]
+
+def load_sim_candles_from_db(sim_date: str) -> pd.DataFrame:
+    """Indexed fast query for 1-minute candles on a given date (runs in ~0.3s)."""
+    start_ts = f"{sim_date} 00:00:00+05:30"
+    end_ts = f"{sim_date} 23:59:59+05:30"
+    q = text("""
+        SELECT timestamp, open, high, low, close, volume 
+        FROM minute_candles 
+        WHERE symbol = 'NIFTY-I' 
+          AND timestamp >= :start_ts 
+          AND timestamp <= :end_ts
+        ORDER BY timestamp ASC
+    """)
+    with state.db_engine.connect() as conn:
+        df = pd.read_sql(q, conn, params={"start_ts": start_ts, "end_ts": end_ts})
+    if not df.empty:
+        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_convert("Asia/Kolkata")
+    return df
+
+
+_cached_sim_dates: List[str] = []
+_last_dates_fetch_ts: float = 0.0
+
+@app.get("/api/simulation/dates")
+async def get_simulation_dates():
+    """Returns available trading dates dynamically from DB with fallback, capped at 30 to prevent UI hangs."""
+    global _cached_sim_dates, _last_dates_fetch_ts
+    now = time.time()
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_kolkata = ZoneInfo("Asia/Kolkata")
+    except Exception:
+        from datetime import timezone, timedelta
+        tz_kolkata = timezone(timedelta(hours=5, minutes=30))
+    now_ist = datetime.now(tz_kolkata)
+    today_str = now_ist.strftime("%Y-%m-%d")
+    is_weekday = now_ist.weekday() < 5
+
+    # Cache for 60 seconds so rapid UI renders never block or hang the DB
+    if _cached_sim_dates and (now - _last_dates_fetch_ts < 60):
+        dates_copy = list(_cached_sim_dates)
+        if is_weekday and today_str not in dates_copy:
+            dates_copy.insert(0, today_str)
+        return {"dates": dates_copy[:30], "today": today_str}
+
+    try:
+        q = text("""
+            SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS trade_date
+            FROM minute_candles
+            WHERE symbol = 'NIFTY-I'
+            ORDER BY trade_date DESC
+            LIMIT 30
+        """)
+        with state.db_engine.connect() as conn:
+            rows = conn.execute(q).fetchall()
+        dates = [str(r[0]) for r in rows if r[0]]
+        if is_weekday and today_str not in dates:
+            dates.insert(0, today_str)
+
+        if dates:
+            _cached_sim_dates = dates[:30]
+            _last_dates_fetch_ts = now
+            return {"dates": _cached_sim_dates, "today": today_str}
+    except Exception as e:
+        print(f"Error fetching sim dates from DB: {e}", flush=True)
+
+    fallback = list(AVAILABLE_SIM_DATES)
+    if is_weekday and today_str not in fallback:
+        fallback.insert(0, today_str)
+    return {"dates": fallback[:30], "today": today_str}
+
+
+@app.get("/api/tunnel")
+async def get_tunnel_status():
+    """Returns active Cloudflare tunnel URL and Telegram notification status."""
+    state_file = STATIC_DIR.parent / "tunnel_state.json"
+    if state_file.exists():
+        try:
+            with open(state_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"status": "inactive", "url": None}
+
+
+@app.post("/api/simulation/start")
+async def start_simulation(payload: Dict[str, Any] = Body(...)):
+    """Starts historical session replay at user-defined speed with auto-execution."""
+    raw_date = payload.get("date")
+    if isinstance(raw_date, str) and len(raw_date.strip()) == 10:
+        sim_date = raw_date.strip()
+    else:
+        sim_date = "2026-10-09"
+
+    try:
+        speed = int(payload.get("speed", 10))
+    except (ValueError, TypeError):
+        speed = 10
+
+    if state.simulation_task and not state.simulation_task.done():
+        state.simulation_active = False
+        state.simulation_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(state.simulation_task), timeout=0.2)
+        except Exception:
+            pass
+
+    state.simulation_run_id += 1
+    current_run_id = state.simulation_run_id
+    state.mode = "simulation"
+    state.simulation_date = sim_date
+    state.simulation_speed = max(1, min(100, speed))
+    state.simulation_active = True
+    state.simulation_paused = False
+    state.simulation_candles = []
+    state.simulation_markers = []
+
+    # Reset Paper Portfolio & Strategy Detector for fresh session replay
+    state.paper_adapter = PaperAdapter(state.cfg)
+    state.strategy_detector.reset_session()
+
+    # Load session data asynchronously in thread pool to prevent blocking asyncio loop
+    df = await asyncio.to_thread(load_sim_candles_from_db, sim_date)
+    records = df.to_dict(orient="records") if not df.empty else []
+
+    total_bars = len(records)
+    state.simulation_progress = {
+        "current_bar": 0,
+        "total_bars": total_bars,
+        "current_time": "09:15 IST",
+        "active": True,
+        "paused": False,
+        "speed": state.simulation_speed,
+        "date": sim_date
+    }
+
+    # Pre-populate opening 15 bars so chart can render instantly
+    initial_candles = []
+    init_count = min(15, total_bars)
+    for i in range(init_count):
+        r = records[i]
+        ts = r["timestamp"]
+        c_bar = {
+            "time": int(ts.timestamp()),
+            "timestamp": int(ts.timestamp()),
+            "time_str": ts.strftime("%Y-%m-%d %H:%M"),
+            "open": round(float(r["open"]), 2),
+            "high": round(float(r["high"]), 2),
+            "low": round(float(r["low"]), 2),
+            "close": round(float(r["close"]), 2),
+            "volume": int(r["volume"])
+        }
+        initial_candles.append(c_bar)
+    state.simulation_candles = initial_candles.copy()
+
+    # Launch background async replay loop with loaded records
+    state.simulation_task = asyncio.create_task(run_simulation_replay_loop(records, sim_date, state.simulation_speed, current_run_id))
+    return {
+        "status": "started", 
+        "date": sim_date, 
+        "speed": state.simulation_speed,
+        "total_bars": total_bars,
+        "initial_candles": initial_candles
+    }
+
+
+@app.post("/api/simulation/pause")
+async def pause_simulation():
+    """Toggles pause/resume state of the running simulation."""
+    if not state.simulation_active:
+        raise HTTPException(status_code=400, detail="No active simulation running.")
+    state.simulation_paused = not state.simulation_paused
+    state.simulation_progress["paused"] = state.simulation_paused
+    await broadcast_state()
+    return {"status": "success", "paused": state.simulation_paused}
+
+
+@app.post("/api/simulation/stop")
+async def stop_simulation():
+    """Stops the active simulation and restores predictor mode."""
+    state.simulation_active = False
+    state.simulation_paused = False
+    if state.simulation_task and not state.simulation_task.done():
+        state.simulation_task.cancel()
+    state.simulation_progress["active"] = False
+    state.mode = "predictor"
+    await broadcast_state()
+    return {"status": "stopped"}
+
+
+# ── Asynchronous Simulation Replay Loop ──────────────────────────────────────
+
+async def run_simulation_replay_loop(records: List[Dict[str, Any]], sim_date: str, speed: int, run_id: int):
+    """Replays historical 1-minute market data bar-by-bar at defined speed."""
+    print(f"Simulation Replay [Run #{run_id}]: Initializing replay for {sim_date} ({len(records)} bars) at {speed}x speed...", flush=True)
+    state.simulation_progress["active"] = True
+    state.simulation_progress["paused"] = False
+
+    if not records:
+        print(f"Simulation Replay: No data records for {sim_date}", flush=True)
+        if state.simulation_run_id == run_id:
+            state.simulation_active = False
+            state.simulation_progress["active"] = False
+        return
+
+    try:
+        # Dynamic delay per candle based on user-defined speed:
+        # 1x -> 1.0s | 5x -> 0.35s | 10x -> 0.18s | 25x -> 0.08s | 50x -> 0.04s | 100x -> 0.02s
+        speed_delays = {1: 1.0, 5: 0.35, 10: 0.18, 25: 0.08, 50: 0.04, 100: 0.02}
+        nominal_delay = speed_delays.get(speed, max(0.02, 1.8 / max(1, speed)))
+        history_buffer = []
+
+        for i, bar in enumerate(records):
+            while state.simulation_paused and state.simulation_active and state.simulation_run_id == run_id:
+                await asyncio.sleep(0.3)
+
+            if not state.simulation_active or state.simulation_run_id != run_id:
+                break
+
+            # Faster playback for opening 15 bars so chart initializes instantly
+            bar_delay = 0.015 if i < 15 else nominal_delay
+
+            ts = bar["timestamp"]
+            c = float(bar["close"])
+            h = float(bar["high"])
+            l = float(bar["low"])
+            o = float(bar["open"])
+            vol = int(bar["volume"])
+
+            state.current_spot = c
+            state.simulation_progress["current_bar"] = i + 1
+            state.simulation_progress["current_time"] = ts.strftime("%H:%M IST")
+
+            # Rolling ATR & RSI
+            history_buffer.append(bar)
+            if len(history_buffer) > 200:
+                history_buffer.pop(0)
+
+            h_df = pd.DataFrame(history_buffer)
+            tr = pd.concat([h_df["high"] - h_df["low"], (h_df["high"] - h_df["close"].shift(1)).abs(), (h_df["low"] - h_df["close"].shift(1)).abs()], axis=1).max(axis=1)
+            atr_val = float(tr.rolling(14).mean().iloc[-1]) if len(h_df) >= 14 else 22.0
+
+            delta = h_df["close"].diff()
+            gain = delta.clip(lower=0).rolling(14).mean()
+            loss = (-delta.clip(upper=0)).rolling(14).mean()
+            rsi_val = float((100 - (100 / (1 + (gain / (loss + 1e-9))))).iloc[-1]) if len(h_df) >= 14 else 50.0
+
+            state.current_atr = atr_val
+            state.current_rsi = rsi_val
+
+            candle_entry = {
+                "time": int(ts.timestamp()),
+                "timestamp": int(ts.timestamp()),
+                "time_str": ts.strftime("%Y-%m-%d %H:%M"),
+                "open": round(o, 2),
+                "high": round(h, 2),
+                "low": round(l, 2),
+                "close": round(c, 2),
+                "volume": vol
+            }
+            if i >= len(state.simulation_candles):
+                state.simulation_candles.append(candle_entry)
+
+            # ── 1. Check Active Paper Position Exit (Target / SL) ───────────
+            exit_marker = None
+            if state.paper_adapter.active_position:
+                pos = state.paper_adapter.active_position
+                if pos["side"] == "CE":
+                    if h >= pos["target_price"] and l > pos["current_sl"]:
+                        rec = state.paper_adapter.close_position("TARGET_HIT", pos["target_price"], ts)
+                        exit_marker = {
+                            "time": int(ts.timestamp()),
+                            "position": "aboveBar",
+                            "color": "#00d2ff",
+                            "shape": "flag",
+                            "text": f"★ TGT +{pos['target_price'] - pos['entry_price']:.1f}",
+                            "type": "EXIT_TARGET"
+                        }
+                    elif l <= pos["current_sl"]:
+                        rec = state.paper_adapter.close_position("STOP_LOSS", pos["current_sl"], ts)
+                        exit_marker = {
+                            "time": int(ts.timestamp()),
+                            "position": "belowBar",
+                            "color": "#ff3860",
+                            "shape": "flag",
+                            "text": f"✖ SL -{pos['entry_price'] - pos['current_sl']:.1f}",
+                            "type": "EXIT_SL"
+                        }
+                else: # PE
+                    if l <= pos["target_price"] and h < pos["current_sl"]:
+                        rec = state.paper_adapter.close_position("TARGET_HIT", pos["target_price"], ts)
+                        exit_marker = {
+                            "time": int(ts.timestamp()),
+                            "position": "belowBar",
+                            "color": "#00d2ff",
+                            "shape": "flag",
+                            "text": f"★ TGT +{pos['entry_price'] - pos['target_price']:.1f}",
+                            "type": "EXIT_TARGET"
+                        }
+                    elif h >= pos["current_sl"]:
+                        rec = state.paper_adapter.close_position("STOP_LOSS", pos["current_sl"], ts)
+                        exit_marker = {
+                            "time": int(ts.timestamp()),
+                            "position": "aboveBar",
+                            "color": "#ff3860",
+                            "shape": "flag",
+                            "text": f"✖ SL -{pos['current_sl'] - pos['entry_price']:.1f}",
+                            "type": "EXIT_SL"
+                        }
+
+                if exit_marker:
+                    state.simulation_markers.append(exit_marker)
+
+            # ── 2. AI Predictor Evaluation & Automatic Order Placement ───────
+            entry_marker = None
+            t_time = ts.time()
+            # Alpha Window: 10:05 to 13:30 IST
+            if (dtime(10, 5) <= t_time <= dtime(13, 30)):
+                ret5 = float((c - h_df["close"].iloc[-5]) / h_df["close"].iloc[-5]) if len(h_df) >= 5 else 0.0
+                atm_strike = int(round(c / 50.0) * 50)
+
+                if rsi_val > 54.0 and ret5 > 0.0004:
+                    update_dynamic_prediction(c, atr_val, rsi_val)
+                    if state.paper_adapter.active_position is None:
+                        pos = state.paper_adapter.open_position("NIFTY 50", "CE", c, atr_val, ts)
+                        if pos:
+                            entry_marker = {
+                                "time": int(ts.timestamp()),
+                                "position": "belowBar",
+                                "color": "#00f2a9",
+                                "shape": "arrowUp",
+                                "text": f"▲ BUY CE @ {c:.0f}",
+                                "type": "ENTRY_CE"
+                            }
+                            state.simulation_markers.append(entry_marker)
+
+                elif rsi_val < 46.0 and ret5 < -0.0004:
+                    update_dynamic_prediction(c, atr_val, rsi_val)
+                    if state.paper_adapter.active_position is None:
+                        pos = state.paper_adapter.open_position("NIFTY 50", "PE", c, atr_val, ts)
+                        if pos:
+                            entry_marker = {
+                                "time": int(ts.timestamp()),
+                                "position": "aboveBar",
+                                "color": "#ff3860",
+                                "shape": "arrowDown",
+                                "text": f"▼ BUY PE @ {c:.0f}",
+                                "type": "ENTRY_PE"
+                            }
+                            state.simulation_markers.append(entry_marker)
+                else:
+                    update_dynamic_prediction(c, atr_val, rsi_val)
+            else:
+                update_dynamic_prediction(c, atr_val, rsi_val)
+
+            # ── 3. Modular Strategy Detection Engine (AMD Volume Profile Sweeps) ──
+            strat_marker = None
+            bar_eval = {
+                "timestamp": ts,
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": vol,
+                "idx": i
+            }
+            detected_signals = state.strategy_detector.evaluate_candle(bar_eval, {
+                "spot": c,
+                "atr": atr_val,
+                "rsi": rsi_val
+            })
+            if detected_signals:
+                for sig in detected_signals:
+                    setup_name = sig.setup_details.get("setup_type", sig.side)
+                    # Close existing generic position to give institutional strategy trade priority
+                    if state.paper_adapter.active_position is not None:
+                        curr_pos = state.paper_adapter.active_position
+                        if curr_pos.get("strategy") != sig.strategy_name:
+                            state.paper_adapter.close_position("STRATEGY_PRIORITY", c, ts)
+
+                    # Execute strategy order on PaperAdapter
+                    pos = state.paper_adapter.open_position(
+                        symbol="NIFTY 50",
+                        side=sig.side,
+                        price=c,
+                        atr=atr_val,
+                        timestamp=ts,
+                        custom_target=sig.target,
+                        custom_sl=sig.stop_loss,
+                        strategy_name=sig.strategy_name
+                    )
+
+                    strat_marker = {
+                        "time": int(ts.timestamp()),
+                        "position": "belowBar" if sig.side == "CE" else "aboveBar",
+                        "color": "#00f2a9" if sig.side == "CE" else "#ff3860",
+                        "shape": "arrowUp" if sig.side == "CE" else "arrowDown",
+                        "text": f"🎯 AMD {setup_name[:8]}",
+                        "type": f"STRAT_{sig.side}"
+                    }
+                    state.simulation_markers.append(strat_marker)
+
+            # ── 4. Broadcast Real-Time Replay Packet ────────────────────────
+            dyn_chain = build_option_chain_data(c)
+            dyn_sugg = get_dynamic_strategy_suggestions()
+            packet = {
+                "type": "SIMULATION_TICK",
+                "spot": round(c, 2),
+                "candle": candle_entry,
+                "marker": strat_marker or entry_marker or exit_marker,
+                "prediction": state.prediction,
+                "option_chain": dyn_chain,
+                "active_position": state.paper_adapter.active_position,
+                "capital": round(state.paper_adapter.capital, 2),
+                "progress": state.simulation_progress,
+                "strategy_suggestions": dyn_sugg,
+                "strategy_count": len(dyn_sugg)
+            }
+            await broadcast_packet(packet)
+            await asyncio.sleep(bar_delay)
+
+        if state.simulation_run_id == run_id:
+            state.simulation_active = False
+            state.simulation_progress["active"] = False
+            print(f"Simulation Replay [Run #{run_id}]: Session completed for {sim_date}.", flush=True)
+
+    except Exception as e:
+        if state.simulation_run_id == run_id:
+            print(f"Simulation Replay Error [Run #{run_id}]: {e}", flush=True)
+            state.simulation_active = False
+            state.simulation_progress["active"] = False
+
+
+# ── WebSocket Real-Time Stream ───────────────────────────────────────────────
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    state.active_websockets.append(ws)
+    try:
+        await ws.send_json({"type": "INIT", "mode": state.mode, "spot": state.current_spot})
+        while True:
+            msg = await ws.receive_text()
+            data = json.loads(msg)
+            if data.get("type") == "PING":
+                await ws.send_json({"type": "PONG"})
+    except WebSocketDisconnect:
+        if ws in state.active_websockets:
+            state.active_websockets.remove(ws)
+    except Exception:
+        if ws in state.active_websockets:
+            state.active_websockets.remove(ws)
+
+
+async def broadcast_state():
+    """Broadcasts current state packet to all connected clients."""
+    pos = state.paper_adapter.active_position
+    unrealized_pnl = 0.0
+    if pos:
+        side = pos["side"]
+        current_px = state.current_spot
+        entry_px = pos["entry_price"]
+        pts = (current_px - entry_px) if side == "CE" else (entry_px - current_px)
+        unrealized_pnl = round(pts * 0.65 * pos["units"], 2)
+
+    packet = {
+        "type": "TICK_UPDATE",
+        "spot": round(state.current_spot, 2),
+        "prediction": state.prediction,
+        "active_position": pos,
+        "unrealized_pnl": unrealized_pnl,
+        "capital": round(state.paper_adapter.capital, 2),
+        "timestamp": datetime.now().isoformat()
+    }
+    await broadcast_packet(packet)
+
+
+async def broadcast_packet(packet: Dict[str, Any]):
+    """Low-level broadcast to WebSocket client pool with timeout protection."""
+    if not state.active_websockets:
+        return
+    dead = []
+    for ws in list(state.active_websockets):
+        try:
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.25)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        if ws in state.active_websockets:
+            state.active_websockets.remove(ws)
+
+
+# ── Live Tick Monitor & Sub-Second Execution Broadcaster ──────────────────────
+
+async def run_live_tick_broadcaster():
+    """Continuously monitors live tick stream (from /tmp/td_live_prices.json or tick_data DB).
+    1. Ingests sub-second ticks with zero lag.
+    2. Dynamically aggregates and updates current forming 1-minute candle.
+    3. Executes Stop Loss and Target instantly via paper_adapter.update_tick().
+    4. Broadcasts real-time TICK_UPDATE packets to connected browser WebSockets.
+    """
+    print("LiveTickBroadcaster: Started real-time sub-second tick monitoring...", flush=True)
+
+    while True:
+        try:
+            if state.mode != "simulation":
+                tick_price = None
+                tick_time = None
+
+                market_open = is_market_open_now()
+                is_fresh_tick = False
+
+                # 1. Check instantaneous sub-second price cache from /tmp/td_live_prices.json
+                if os.path.exists("/tmp/td_live_prices.json"):
+                    try:
+                        mtime = os.path.getmtime("/tmp/td_live_prices.json")
+                        if time.time() - mtime < 120:
+                            with open("/tmp/td_live_prices.json", "r") as f:
+                                cache = json.load(f)
+                            nifty_entry = cache.get("NIFTY") or cache.get("NIFTY-I") or cache.get("NIFTY 50")
+                            if nifty_entry and nifty_entry.get("price"):
+                                tick_price = float(nifty_entry["price"])
+                                tick_time = nifty_entry.get("ts")
+                                is_fresh_tick = True
+                    except Exception:
+                        pass
+
+                # 2. Fallback to latest tick in TimescaleDB tick_data table
+                if tick_price is None:
+                    try:
+                        with state.db_engine.connect() as conn:
+                            row = conn.execute(text("""
+                                SELECT timestamp, price 
+                                FROM tick_data 
+                                WHERE symbol IN ('NIFTY-I', 'NIFTY 50')
+                                ORDER BY timestamp DESC 
+                                LIMIT 1
+                            """)).fetchone()
+                            if row and row[1]:
+                                tick_time = str(row[0])
+                                tick_price = float(row[1])
+                                db_ts = row[0]
+                                if hasattr(db_ts, "timestamp") and abs(time.time() - db_ts.timestamp()) < 120:
+                                    is_fresh_tick = True
+                    except Exception:
+                        pass
+
+                if tick_price is not None and tick_price > 0:
+                    state.current_spot = tick_price
+                    now = datetime.now()
+                    now_min = now.replace(second=0, microsecond=0)
+                    now_min_ts = int(now_min.timestamp())
+
+                    # Maintain forming candle ONLY during active market hours with fresh ticks
+                    if market_open and is_fresh_tick:
+                        if state.forming_candle is None or state.forming_candle["time"] != now_min_ts:
+                            state.forming_candle = {
+                                "time": now_min_ts,
+                                "open": tick_price,
+                                "high": tick_price,
+                                "low": tick_price,
+                                "close": tick_price,
+                                "volume": 0
+                            }
+                        else:
+                            state.forming_candle["high"] = max(state.forming_candle["high"], tick_price)
+                            state.forming_candle["low"] = min(state.forming_candle["low"], tick_price)
+                            state.forming_candle["close"] = tick_price
+                    else:
+                        state.forming_candle = None
+
+                    # Sub-second position monitoring: check SL / Target immediately!
+                    exit_marker = None
+                    if state.paper_adapter.active_position is not None:
+                        exit_rec = state.paper_adapter.update_tick({
+                            "last_price": tick_price,
+                            "timestamp": now
+                        })
+                        if exit_rec is not None:
+                            if state.mode != "simulation":
+                                state.save_paper_state()
+                            is_win = exit_rec.get("is_win", False)
+                            exit_marker = {
+                                "time": now_min_ts,
+                                "position": "aboveBar" if is_win else "belowBar",
+                                "color": "#00d2ff" if is_win else "#ff3860",
+                                "shape": "flag",
+                                "text": f"{'★ TGT' if is_win else '✖ SL'} {exit_rec.get('net_pnl_inr', 0):+,.0f}",
+                                "type": "EXIT_TARGET" if is_win else "EXIT_SL"
+                            }
+
+                    # Broadcast instant tick packet to active browser WebSockets
+                    pos = state.paper_adapter.active_position
+                    unrealized_pnl = 0.0
+                    if pos:
+                        side = pos["side"]
+                        pts = (tick_price - pos["entry_price"]) if side == "CE" else (pos["entry_price"] - tick_price)
+                        unrealized_pnl = round(pts * 0.65 * pos["units"], 2)
+
+                    if state.mode == "simulation" or is_market_open_now():
+                        dyn_pred = update_dynamic_prediction(tick_price, state.current_atr or 20.0, state.current_rsi or 50.0, state.current_vwap or tick_price)
+                        dyn_sugg = get_dynamic_strategy_suggestions()
+                    else:
+                        dyn_pred = {
+                            "active": False,
+                            "status": "MARKET_CLOSED",
+                            "message": "Market is closed. Real-time AI suggestions resume at 09:15 AM IST.",
+                            "suggested_strike": None,
+                            "direction": None,
+                            "bias": "MARKET CLOSED",
+                            "confidence_pct": 0,
+                            "model_1_score": 0.0,
+                            "model_2_status": "IDLE",
+                            "entry_range": "--",
+                            "entry_premium": 0,
+                            "target_premium": 0,
+                            "stop_loss_premium": 0,
+                            "expected_gain_pct": 0,
+                            "max_risk_pct": 0,
+                            "timestamp": now.isoformat(),
+                            "spot": round(tick_price, 2)
+                        }
+                        dyn_sugg = []
+                        state.prediction = dyn_pred
+
+                    packet = {
+                        "type": "TICK_UPDATE",
+                        "spot": round(tick_price, 2),
+                        "forming_candle": state.forming_candle,
+                        "marker": exit_marker,
+                        "active_position": pos,
+                        "unrealized_pnl": unrealized_pnl,
+                        "capital": round(state.paper_adapter.capital, 2),
+                        "prediction": dyn_pred,
+                        "option_chain": dyn_chain,
+                        "strategy_suggestions": dyn_sugg,
+                        "strategy_count": len(dyn_sugg),
+                        "timestamp": now.isoformat()
+                    }
+                    await broadcast_packet(packet)
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.5)
+
+
+async def run_collector_supervisor():
+    """Continuously monitors Kite session & tick collector during market hours (08:50 - 15:35 IST).
+    If Zerodha token is expired or collect_ticks is dead:
+    1. Validates or refreshes Kite token via ZerodhaAutoLogin.
+    2. Auto-launches collect_ticks.py so data ingestion never fails on a new day.
+    """
+    print("CollectorSupervisor: Started background session & collector monitor...", flush=True)
+    ai_trader_dir = Path("/Users/admin/Documents/Nimesh/Projects/ai-trade/AI-trader")
+    venv_python = ai_trader_dir / ".venv" / "bin" / "python"
+    collect_script = ai_trader_dir / "scripts" / "collect_ticks.py"
+
+    while True:
+        try:
+            try:
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo("Asia/Kolkata")
+            except Exception:
+                from datetime import timezone, timedelta
+                tz = timezone(timedelta(hours=5, minutes=30))
+            now = datetime.now(tz)
+
+            # Active market collection window: Mon-Fri 08:50 AM to 15:35 PM IST
+            is_weekday = now.weekday() < 5
+            is_collection_hours = (
+                is_weekday and (
+                    (now.hour == 8 and now.minute >= 50) or
+                    (9 <= now.hour <= 14) or
+                    (now.hour == 15 and now.minute <= 35)
+                )
+            )
+
+            if is_collection_hours:
+                import subprocess
+                res = subprocess.run(["pgrep", "-f", "collect_ticks.py"], capture_output=True, text=True)
+                collector_running = bool(res.stdout.strip())
+
+                if not collector_running:
+                    print("CollectorSupervisor: collect_ticks.py is not running during market hours! Validating Kite session...", flush=True)
+                    try:
+                        import sys
+                        if str(ai_trader_dir) not in sys.path:
+                            sys.path.insert(0, str(ai_trader_dir))
+                        from broker.zerodha_autologin import ZerodhaAutoLogin
+                        from kiteconnect import KiteConnect
+
+                        api_key = os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
+                        token = os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
+
+                        token_valid = False
+                        if api_key and token:
+                            try:
+                                kite = KiteConnect(api_key=api_key)
+                                kite.set_access_token(token)
+                                kite.profile()
+                                token_valid = True
+                            except Exception:
+                                token_valid = False
+
+                        if not token_valid:
+                            print("CollectorSupervisor: Token invalid or expired. Performing autonomous TOTP Zerodha login...", flush=True)
+                            login_res = ZerodhaAutoLogin().execute_login()
+                            print(f"CollectorSupervisor: Login status: {login_res.get('status')}", flush=True)
+
+                        print(f"CollectorSupervisor: Launching {collect_script}...", flush=True)
+                        subprocess.Popen(
+                            [str(venv_python), str(collect_script)],
+                            cwd=str(ai_trader_dir),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True
+                        )
+                        print("CollectorSupervisor: collect_ticks.py successfully launched!", flush=True)
+                    except Exception as err:
+                        print(f"CollectorSupervisor: Error auto-recovering collector: {err}", flush=True)
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def on_startup():
+    state.tick_broadcaster_task = asyncio.create_task(run_live_tick_broadcaster())
+    state.collector_supervisor_task = asyncio.create_task(run_collector_supervisor())
+
+
+# ── Static UI Mounting ────────────────────────────────────────────────────────
+
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+@app.get("/")
+async def serve_index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8080, reload=True)

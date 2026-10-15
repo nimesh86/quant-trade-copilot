@@ -1,0 +1,26 @@
+{
+  "capital": 168421.25,
+  "trade_history": [
+    {
+      "symbol": "NIFTY 50",
+      "side": "CE",
+      "strike": "NIFTY 23050 CE",
+      "strategy": "AMD_VOLUME_PROFILE",
+      "lots": 15,
+      "units": 975,
+      "n_slices": 1,
+      "entry_time": "2026-09-25T12:54:00",
+      "entry_price": 23095.0,
+      "target_price": 23207.0,
+      "stop_loss_price": 23065.3,
+      "exit_time": "2026-09-25T13:01:00",
+      "exit_price": 23207.0,
+      "exit_reason": "TARGET_HIT",
+      "is_win": true,
+      "gross_pnl_inr": 68737.5,
+      "brokerage": 316.25,
+      "net_pnl_inr": 68421.25
+    }
+  ],
+  "updated_at": "2026-10-15T09:17:35.000000"
+}

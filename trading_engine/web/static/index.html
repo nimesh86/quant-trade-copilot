@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Trader Engine · Live Predictor & Paper Tester</title>
+  <meta name="description" content="Autonomous High-Winrate NIFTY Trading Engine with Live AI Signals, Option Chain, and Paper Trading">
+  
+  <!-- Modern Font Family -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- TradingView Lightweight Charts Library (Local v4.2.1 bundle) -->
+  <script src="/static/lightweight-charts.standalone.production.js"></script>
+
+  <!-- Premium Mobile-First Stylesheet with Cache Busting -->
+  <link rel="stylesheet" href="/static/app.css?v=3.0">
+</head>
+<body>
+
+  <!-- ── Top App Header ────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="logo-badge">⚡</div>
+      <div class="brand-meta">
+        <h1>
+          <span>AI TRADER</span>
+          <span class="pulse-dot" title="Live Engine Connected"></span>
+        </h1>
+        <div class="ticker-spot">
+          <span>NIFTY 50: </span>
+          <span id="header-spot-val" class="spot-val">₹22,625.20</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Status Badge -->
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span class="pill-badge" id="statutory-iceberg-badge" style="background: rgba(157, 78, 221, 0.15); color: #c77dff; border: 1px solid rgba(157, 78, 221, 0.3);">
+        🧊 ICEBERG ON
+      </span>
+    </div>
+  </header>
+
+  <!-- ── 5 Operating Modes Bar ─────────────────────────────────────────── -->
+  <nav class="mode-bar" id="mode-bar-container">
+    <button class="mode-btn active" id="mode-btn-predictor" data-mode="predictor" onclick="selectMode('predictor')">
+      <span>🔮</span> Predictor
+    </button>
+    <button class="mode-btn" id="mode-btn-paper" data-mode="paper" onclick="selectMode('paper')">
+      <span>📝</span> Paper Test
+    </button>
+    <button class="mode-btn" id="mode-btn-simulation" data-mode="simulation" onclick="selectMode('simulation')">
+      <span>🎮</span> Simulation
+    </button>
+    <button class="mode-btn" id="mode-btn-backtest" data-mode="backtest" onclick="selectMode('backtest')">
+      <span>📊</span> Backtest (80%+)
+    </button>
+    <button class="mode-btn" id="mode-btn-live" data-mode="live" onclick="selectMode('live')">
+      <span>🔴</span> Live Broker
+    </button>
+  </nav>
+
+  <!-- ── Simulation Configuration Modal Dialog (Instant Feedback) ──────── -->
+  <div id="simulation-modal-overlay" class="modal-overlay" style="display: none;" onclick="closeSimulationModalOnBackdrop(event)">
+    <div class="simulation-modal glass-panel">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span style="font-size: 1.3rem;">🎮</span>
+          <span>Historical Session Simulation</span>
+        </div>
+        <button class="modal-close-btn" onclick="closeSimulationModal()">✕</button>
+      </div>
+
+      <div class="modal-desc">
+        Replay any backdated trading session bar-by-bar at accelerated speed. Simulates live ticks, updates candlestick charts, triggers real-time AI suggestions, and executes multi-leg Iceberg paper trades.
+      </div>
+
+      <div class="modal-body-grid">
+        <!-- Input 1: Historical Trading Date -->
+        <div class="sim-control-group">
+          <label for="sim-modal-date-select">1.) Select Historical Date</label>
+          <select id="sim-modal-date-select" class="sim-select" onchange="syncDateInputs(this.value)">
+            <option value="2026-10-14" selected>2026-10-14 (Today · Live Session)</option>
+            <option value="2026-10-13">2026-10-13 (Previous Session)</option>
+            <option value="2026-10-12">2026-10-12 (Historical)</option>
+            <option value="2026-10-09">2026-10-09 (Recent Friday)</option>
+            <option value="2026-10-08">2026-10-08 (Expiry Session)</option>
+            <option value="2026-10-07">2026-10-07</option>
+            <option value="2026-10-06">2026-10-06</option>
+            <option value="2026-10-05">2026-10-05</option>
+          </select>
+        </div>
+
+        <!-- Input 2: Replay Speed -->
+        <div class="sim-control-group">
+          <label for="sim-modal-speed-select">2.) Select Replay Speed</label>
+          <select id="sim-modal-speed-select" class="sim-select" onchange="syncSpeedInputs(this.value)">
+            <option value="1">1x (Realtime · 1 Bar = 3.0s)</option>
+            <option value="5">5x (Fast · 1 Bar = 0.8s)</option>
+            <option value="10" selected>10x (Optimal Replay · 1 Bar = 0.4s)</option>
+            <option value="25">25x (High Speed · 1 Bar = 0.16s)</option>
+            <option value="50">50x (Ultra Fast · 1 Bar = 0.08s)</option>
+            <option value="100">100x (Max Speed · 1 Bar = 0.04s)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top: 10px;">
+        <button id="btn-modal-start-replay" class="btn-trade-ai" style="width: 100%; justify-content: center; font-size: 0.95rem; padding: 14px;" onclick="startSimulationFromModal()">
+          ⚡ Launch Simulation Replay
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Main App Viewport ──────────────────────────────────────────────── -->
+  <main class="app-viewport">
+
+    <!-- 0. Simulation Controls Card (Visible in Simulation Mode) -->
+    <section class="simulation-panel glass-panel" id="simulation-control-card" style="display: none;">
+      <div class="sim-header-row">
+        <div class="sim-title">
+          <span>🎮</span>
+          <span>Simulation Replay Active</span>
+          <span class="pill-badge" id="sim-current-date-badge" style="background: rgba(0, 210, 255, 0.15); color: #00d2ff; border: 1px solid rgba(0, 210, 255, 0.3);">
+            2026-10-14
+          </span>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="mode-btn" onclick="openSimulationModal()" style="padding: 4px 10px; font-size: 0.74rem;">
+            ⚙ Change Date/Speed
+          </button>
+          <span class="pill-badge" id="sim-status-pill" style="background: rgba(0, 210, 255, 0.15); color: #00d2ff; border: 1px solid rgba(0, 210, 255, 0.3);">
+            ⚡ REPLAY READY
+          </span>
+        </div>
+      </div>
+
+      <div class="sim-controls-grid">
+        <!-- Input 1: Historical Trading Date -->
+        <div class="sim-control-group">
+          <label for="sim-date-select">1.) Historical Date</label>
+          <select id="sim-date-select" class="sim-select" onchange="syncDateInputs(this.value)">
+            <option value="2026-10-14" selected>2026-10-14 (Today · Live Session)</option>
+            <option value="2026-10-13">2026-10-13 (Previous Session)</option>
+            <option value="2026-10-12">2026-10-12 (Historical)</option>
+            <option value="2026-10-09">2026-10-09 (Recent Friday)</option>
+            <option value="2026-10-08">2026-10-08 (Expiry Session)</option>
+            <option value="2026-10-07">2026-10-07</option>
+            <option value="2026-10-06">2026-10-06</option>
+            <option value="2026-10-05">2026-10-05</option>
+          </select>
+        </div>
+
+        <!-- Input 2: Replay Speed -->
+        <div class="sim-control-group">
+          <label for="sim-speed-select">2.) Replay Speed</label>
+          <select id="sim-speed-select" class="sim-select" onchange="syncSpeedInputs(this.value)">
+            <option value="1">1x (Realtime · 1 Bar = 3s)</option>
+            <option value="5">5x (Fast · 1 Bar = 0.8s)</option>
+            <option value="10" selected>10x (Optimal · 1 Bar = 0.4s)</option>
+            <option value="25">25x (High Speed · 1 Bar = 0.16s)</option>
+            <option value="50">50x (Ultra Fast · 1 Bar = 0.08s)</option>
+            <option value="100">100x (Max Speed · 1 Bar = 0.04s)</option>
+          </select>
+        </div>
+
+        <!-- Action Control Buttons -->
+        <div class="sim-control-group">
+          <label>Simulation Actions</label>
+          <div class="sim-btn-row">
+            <button id="btn-sim-start" class="btn-sim start" onclick="startSimulation()">
+              <span>▶</span> Start Replay
+            </button>
+            <button id="btn-sim-pause" class="btn-sim pause" onclick="togglePauseSimulation()" disabled>
+              <span>⏸</span> Pause
+            </button>
+            <button id="btn-sim-stop" class="btn-sim stop" onclick="stopSimulation()" disabled>
+              <span>⏹</span> Stop
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Replay Progress Bar -->
+      <div>
+        <div class="sim-stats-strip">
+          <span id="sim-progress-text">Session: Ready to replay 375 bars (09:15 to 15:30 IST)</span>
+          <span id="sim-meta-time">Time: --:-- IST</span>
+        </div>
+        <div class="sim-progress-track">
+          <div id="sim-progress-fill" class="sim-progress-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. AI Predictor Hero Card -->
+    <section class="prediction-hero glass-panel" id="prediction-hero-card" style="display: none;">
+      <div class="hero-top-row">
+        <span class="pill-badge call" id="ai-direction-badge">🟢 CALL BUY · BULLISH</span>
+        <div class="confidence-meter" id="ai-confidence-container">
+          <span>🎯</span>
+          <span id="ai-confidence-val">82.5% Conviction</span>
+        </div>
+      </div>
+
+      <div class="hero-strike-title">
+        <span id="ai-suggested-strike">NIFTY 22650 CE</span>
+        <span class="strike-tag">(Optimal Delta ~0.55)</span>
+      </div>
+
+      <!-- Target & Invalidation Grid -->
+      <div class="targets-grid">
+        <div class="target-col">
+          <span class="target-label">Entry Premium</span>
+          <span class="target-val entry" id="ai-entry-range">₹45.0</span>
+        </div>
+        <div class="target-col">
+          <span class="target-label">Target Level</span>
+          <span class="target-val target" id="ai-target-val">₹186.0 (+12.7%)</span>
+        </div>
+        <div class="target-col">
+          <span class="target-label">Stop Loss</span>
+          <span class="target-val stop" id="ai-stop-val">₹152.0 (-7.8%)</span>
+        </div>
+      </div>
+
+      <!-- Quick Action Buttons -->
+      <div class="hero-action-row">
+        <button class="btn-trade-ai" id="btn-follow-ai">
+          ⚡ Follow AI Call (NIFTY 22650 CE)
+        </button>
+      </div>
+    </section>
+
+    <!-- 2. Interactive Live Candlestick Chart -->
+    <section class="chart-section glass-panel">
+      <div class="chart-header">
+        <div class="chart-title-area">
+          <h3>NIFTY 50 Index</h3>
+          <div class="timeframe-selector-group" title="Select Chart Timeframe">
+            <button class="tf-btn active" data-tf="1" onclick="setTimeframe(1)">1m</button>
+            <button class="tf-btn" data-tf="3" onclick="setTimeframe(3)">3m</button>
+            <button class="tf-btn" data-tf="5" onclick="setTimeframe(5)">5m</button>
+            <button class="tf-btn" data-tf="15" onclick="setTimeframe(15)">15m</button>
+          </div>
+          <select id="chart-session-date-select" class="sim-select" style="padding: 2px 8px; font-size: 0.72rem; height: 24px; border-color: rgba(0, 210, 255, 0.35); background: rgba(13, 20, 36, 0.9); color: #00d2ff; border-radius: 4px; cursor: pointer;" onchange="syncDateInputs(this.value)" title="Switch trading session date">
+            <option value="">Session Date...</option>
+          </select>
+        </div>
+        <div class="chart-legend">
+          <!-- Smart Money Flow Cloud Toggle Button -->
+          <button id="btn-toggle-smf" class="smf-btn" onclick="toggleSMFCloud()" title="Toggle Smart Money Flow Cloud [BOSWaves] with Adaptive Bands & Cloud">
+            ☁️ SMF Cloud
+          </button>
+
+          <button id="btn-chart-fit" class="chart-ctrl-btn" onclick="fitChartContent()" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 4px; border: 1px solid rgba(0, 210, 255, 0.4); color: #00d2ff; background: rgba(0, 210, 255, 0.12); cursor: pointer; font-weight: 600;" title="Fit full trading session so all candles & markers are visible">
+            ⤢ Fit Day
+          </button>
+          <button id="btn-chart-latest" class="chart-ctrl-btn" onclick="scrollToLatestCandle()" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.2); color: #e2e8f0; background: rgba(255, 255, 255, 0.08); cursor: pointer; font-weight: 600;" title="Scroll directly to the latest bar of the session">
+            ▶ Live Bar
+          </button>
+          <div class="legend-item smf-legend-item">
+            <span class="legend-color" style="background: #00c8ff;"></span>
+            <span>BULL</span>
+          </div>
+          <div class="legend-item smf-legend-item">
+            <span class="legend-color" style="background: #ff005d;"></span>
+            <span>BEAR</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- TradingView Container Box -->
+      <div class="chart-container-box">
+        <div id="tradingview-chart"></div>
+        <canvas id="smf-cloud-canvas"></canvas>
+
+        <!-- BOSWaves Trend Strength Gauge (Bottom Center, TradingView Style) -->
+        <div id="smf-bottom-gauge" class="smf-bottom-gauge-card" title="Smart Money Flow Trend Strength Gauge [-100% Bear to +100% Bull]">
+          <span class="smf-bg-bear-lbl">Bear</span>
+          <div class="smf-bg-track">
+            <div id="smf-bg-needle" class="smf-bg-needle" style="left: 50%;">✦</div>
+          </div>
+          <span id="smf-bg-strength-txt" class="smf-bg-strength-lbl">Strength: --%</span>
+          <span class="smf-bg-bull-lbl">Bull</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Bottom Panels: Option Chain, Live Paper Trading & Strategy Signals -->
+    <section class="right-column-panel">
+
+      <!-- View Selector Tabs -->
+      <div class="views-tab-bar">
+        <button class="tab-toggle-btn active" id="tab-btn-chain">
+          ⛓️ Option Chain
+        </button>
+        <button class="tab-toggle-btn" id="tab-btn-paper">
+          💼 Paper Trading
+        </button>
+        <button class="tab-toggle-btn" id="tab-btn-strategy">
+          🎯 Strategy Signals & GTT <span class="pill-badge" id="strategy-count-badge" style="background: rgba(0, 242, 169, 0.2); color: #00f2a9; padding: 1px 6px; font-size: 0.68rem; margin-left: 4px;">0</span>
+        </button>
+      </div>
+
+      <!-- Panel A: Live Option Chain Grid -->
+      <div class="option-chain-panel glass-panel" id="panel-option-chain" style="padding: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; color: #fff;">
+            NIFTY Option Chain (ATM ± 5 Strikes)
+          </span>
+          <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--accent-cyan);">
+            Real-Time Delta & OI
+          </span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="chain-table">
+            <thead>
+              <tr>
+                <th style="color: var(--accent-green);">Call LTP</th>
+                <th>Call IV</th>
+                <th>Call OI</th>
+                <th style="text-align: center; color: #fff;">STRIKE</th>
+                <th>Put OI</th>
+                <th>Put IV</th>
+                <th style="color: var(--accent-red);">Put LTP</th>
+              </tr>
+            </thead>
+            <tbody id="option-chain-tbody">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Panel B: Live Paper Trading & Position Card -->
+      <div class="paper-trading-panel glass-panel" id="panel-paper-trading" style="display: none; padding: 12px;">
+        
+        <!-- Account Balance & Performance Summary -->
+        <div class="portfolio-stats-bar">
+          <div class="stat-box">
+            <span class="label">Capital</span>
+            <span class="val" id="paper-capital-val">₹1,00,000</span>
+          </div>
+          <div class="stat-box">
+            <span class="label">Unrealized PnL</span>
+            <span class="val" id="paper-floating-pnl">₹0.0</span>
+          </div>
+          <div class="stat-box">
+            <span class="label">Win Rate</span>
+            <span class="val" id="paper-winrate-val">83.5%</span>
+          </div>
+        </div>
+
+        <!-- Active Position Card -->
+        <div id="active-position-container">
+          <!-- Dynamically populated active trade or idle message -->
+        </div>
+
+        <!-- Trade History List -->
+        <div style="margin-top: 6px;">
+          <div style="font-family: var(--font-display); font-size: 0.82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">
+            Recent Executed Orders (Iceberg Multi-Leg)
+          </div>
+          <div class="history-list" id="trades-history-list">
+            <!-- Dynamically populated trade history -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel C: Strategy Signals & GTT Suggestions -->
+      <div class="strategy-signals-panel glass-panel" id="panel-strategy-signals" style="display: none; padding: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; color: #fff;">
+            🎯 Strategy Detection & GTT Suggestions
+          </span>
+          <span class="pill-badge" id="strategy-detector-status-badge" style="background: rgba(0, 210, 255, 0.15); color: #00d2ff; border: 1px solid rgba(0, 210, 255, 0.3);">
+            ⚡ AMD & CORE 85 ACTIVE
+          </span>
+        </div>
+
+        <div id="strategy-signals-container">
+          <!-- Dynamically populated GTT signal cards or idle message -->
+        </div>
+      </div>
+
+      <!-- Panel D: Backtest Historical Benchmark Summary -->
+      <div class="backtest-panel glass-panel" id="panel-backtest-summary" style="display: none; padding: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-family: var(--font-display); font-size: 0.85rem; font-weight: 700; color: #fff;">
+            📊 6-Month Compounding Benchmark (85.51% Win Rate)
+          </span>
+          <span class="pill-badge" style="background: rgba(0, 242, 169, 0.15); color: #00f2a9; border: 1px solid rgba(0, 242, 169, 0.3);">
+            ₹2.86+ Cr Benchmark
+          </span>
+        </div>
+        <div class="portfolio-stats-bar">
+          <div class="stat-box">
+            <span class="label">Initial Capital</span>
+            <span class="val">₹1,00,000</span>
+          </div>
+          <div class="stat-box">
+            <span class="label">Target Growth</span>
+            <span class="val val-green">₹2,86,16,112</span>
+          </div>
+          <div class="stat-box">
+            <span class="label">Total Trades</span>
+            <span class="val">421</span>
+          </div>
+        </div>
+        <div style="margin-top: 10px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5;">
+          Architecture uses XGBoost Directional Engine with 1.5x ATR dynamic stops and Zerodha 30-lot statutory Iceberg order slicing.
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <!-- Client Logic with Cache-Busting -->
+  <script src="/static/app.js?v=8.0"></script>
+</body>
+</html>

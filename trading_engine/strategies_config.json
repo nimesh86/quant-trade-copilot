@@ -1,0 +1,25 @@
+{
+  "core_85_strategy": {
+    "enabled": true,
+    "target_atr_mult": 1.50,
+    "stop_atr_mult": 1.50,
+    "score_threshold": 0.55,
+    "max_trades_per_day": 5
+  },
+  "amd_volume_profile": {
+    "enabled": true,
+    "accumulation_start": "09:15",
+    "accumulation_end": "10:15",
+    "min_range_pts": 20.0,
+    "max_range_pts": 220.0,
+    "min_sweep_pts": 8.0,
+    "max_sweep_pts": 45.0,
+    "max_reclaim_candles": 15,
+    "sl_buffer_pts": 2.0,
+    "target_mode": "HIGH_TARGET_EXPANSION",
+    "target_multiplier_r": 3.0,
+    "min_rr_ratio": 2.0,
+    "enable_trailing_breakeven_at_r": 1.5,
+    "enable_profit_lock_at_r": 2.5
+  }
+}
