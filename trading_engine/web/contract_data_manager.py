@@ -118,9 +118,15 @@ def _get_kite():
 
         if not api_key or not access_token:
             return None
+        try:
+            from kiteconnect import KiteConnect
+        except ImportError:
+            print("ContractDataManager: 'kiteconnect' package not installed in environment.", flush=True)
+            return None
         kite = KiteConnect(api_key=api_key)
         kite.set_access_token(access_token)
         _kite_client = kite
+        print("ContractDataManager: KiteConnect client successfully initialized from KeyVault.", flush=True)
         return kite
     except Exception as e:
         print(f"ContractDataManager: Kite init error: {e}", flush=True)

@@ -1,0 +1,357 @@
+/* ==============================================================================
+   Kite KeyVault Modal Styles
+   Dark-glass aesthetic matching AI Trader & Contract Analysis Dashboard
+   ============================================================================== */
+
+/* Header Trigger Button */
+.vault-header-btn, .vault-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 13px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.vault-header-btn:hover, .vault-btn:hover {
+    background: rgba(0, 242, 169, 0.08);
+    border-color: rgba(0, 242, 169, 0.35);
+    color: #00f2a9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 242, 169, 0.15);
+}
+
+.vault-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: all 0.3s ease;
+}
+
+.vault-status-dot.configured {
+    background: #00f2a9;
+    box-shadow: 0 0 8px #00f2a9;
+}
+
+.vault-status-dot.unconfigured {
+    background: #ffb703;
+    box-shadow: 0 0 8px rgba(255, 183, 3, 0.6);
+    animation: pulseWarn 2s infinite;
+}
+
+@keyframes pulseWarn {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.9); }
+}
+
+/* Modal Backdrop */
+.vault-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 7, 18, 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: fadeInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeInModal {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Modal Card */
+.vault-modal-card {
+    background: linear-gradient(180deg, rgba(17, 24, 39, 0.94) 0%, rgba(11, 17, 30, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 242, 169, 0.05);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Modal Header */
+.vault-modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.vault-modal-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.vault-modal-icon {
+    font-size: 24px;
+    background: rgba(0, 242, 169, 0.12);
+    border: 1px solid rgba(0, 242, 169, 0.25);
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+}
+
+.vault-modal-title h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #f8fafc;
+    letter-spacing: -0.2px;
+}
+
+.vault-modal-sub {
+    margin: 3px 0 0 0;
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.vault-close-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: #94a3b8;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.vault-close-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+
+/* Modal Body */
+.vault-modal-body {
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Security Banner */
+.vault-security-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 14px;
+    background: rgba(0, 200, 255, 0.06);
+    border: 1px solid rgba(0, 200, 255, 0.2);
+    border-radius: 10px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: #bae6fd;
+}
+
+.vault-security-banner code {
+    background: rgba(0, 0, 0, 0.35);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: #7dd3fc;
+}
+
+/* Status Indicator */
+.vault-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.vault-status-indicator .indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #64748b;
+}
+
+.vault-status-indicator.is-active .indicator-dot {
+    background: #00f2a9;
+    box-shadow: 0 0 8px #00f2a9;
+}
+
+.vault-status-indicator.is-inactive .indicator-dot {
+    background: #ffb703;
+    box-shadow: 0 0 8px #ffb703;
+}
+
+/* Alert Box */
+.vault-alert-box {
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    animation: fadeInModal 0.2s ease;
+}
+
+.vault-alert-box.success {
+    background: rgba(0, 242, 169, 0.12);
+    border: 1px solid rgba(0, 242, 169, 0.3);
+    color: #a7f3d0;
+}
+
+.vault-alert-box.error {
+    background: rgba(255, 0, 93, 0.12);
+    border: 1px solid rgba(255, 0, 93, 0.3);
+    color: #fecdd3;
+}
+
+/* Form Styles */
+.vault-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vault-form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    letter-spacing: 0.1px;
+}
+
+.vault-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.vault-input-wrap input {
+    width: 100%;
+    padding: 10px 40px 10px 12px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    color: #f8fafc;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.vault-input-wrap input:focus {
+    border-color: #00f2a9;
+    background: rgba(15, 23, 42, 0.85);
+    box-shadow: 0 0 0 3px rgba(0, 242, 169, 0.15);
+}
+
+.vault-eye-btn {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    font-size: 14px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.vault-eye-btn:hover {
+    opacity: 1;
+}
+
+.vault-hint {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.35;
+    margin-top: 2px;
+}
+
+/* Form Actions */
+.vault-form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+.vault-cancel-btn {
+    padding: 9px 16px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 9px;
+    color: #94a3b8;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.vault-cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #f1f5f9;
+}
+
+.vault-submit-btn {
+    padding: 9px 20px;
+    background: linear-gradient(135deg, #00f2a9 0%, #00b4d8 100%);
+    border: none;
+    border-radius: 9px;
+    color: #06111f;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+    box-shadow: 0 4px 14px rgba(0, 242, 169, 0.25);
+}
+
+.vault-submit-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0, 242, 169, 0.4);
+}
+
+.vault-submit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.vault-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(6, 17, 31, 0.3);
+    border-top-color: #06111f;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

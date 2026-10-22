@@ -16,6 +16,7 @@
 
   <!-- Premium Mobile-First Stylesheet with Cache Busting -->
   <link rel="stylesheet" href="/static/app.css?v=3.0">
+  <link rel="stylesheet" href="/static/keyvault_modal.css?v=1.0">
 </head>
 <body>
 
@@ -35,8 +36,13 @@
       </div>
     </div>
 
-    <!-- Quick Status Badge -->
+    <!-- Quick Status Badge & KeyVault Trigger -->
     <div style="display: flex; align-items: center; gap: 8px;">
+      <button id="btn-open-vault" class="vault-header-btn" title="Kite Connect KeyVault Settings" onclick="openVaultModal()">
+        <span>🔐</span>
+        <span>Kite Vault</span>
+        <span id="vault-status-dot" class="vault-status-dot unconfigured"></span>
+      </button>
       <span class="pill-badge" id="statutory-iceberg-badge" style="background: rgba(157, 78, 221, 0.15); color: #c77dff; border: 1px solid rgba(157, 78, 221, 0.3);">
         🧊 ICEBERG ON
       </span>
@@ -417,8 +423,66 @@
         </div>
       </div>
 
-    </section>
-  </main>
+  <!-- ── KeyVault Modal ────────────────────────────────────────────────── -->
+  <div id="vault-modal-backdrop" class="vault-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeVaultModal();">
+    <div class="vault-modal-card">
+      <div class="vault-modal-header">
+        <div class="vault-modal-title">
+          <span class="vault-modal-icon">🔐</span>
+          <div>
+            <h3>Kite Connect KeyVault</h3>
+            <p class="vault-modal-sub">Direct OS/Hardware-encrypted secret store</p>
+          </div>
+        </div>
+        <button id="btn-close-vault" class="vault-close-btn" title="Close" onclick="closeVaultModal()">✕</button>
+      </div>
+
+      <div class="vault-modal-body">
+        <div class="vault-security-banner">
+          <span class="sec-shield">🛡️</span>
+          <span>Write-only secure storage in <code>~/.trading_assistant/vault.enc</code>. Values are never displayed back or stored in plaintext files.</span>
+        </div>
+
+        <div id="vault-status-indicator" class="vault-status-indicator">
+          <span class="indicator-dot"></span>
+          <span id="vault-status-text">Checking KeyVault status…</span>
+        </div>
+
+        <!-- Feedback Alert -->
+        <div id="vault-alert-box" class="vault-alert-box" style="display:none;"></div>
+
+        <form id="vault-credentials-form" autocomplete="off" onsubmit="event.preventDefault(); submitKiteVault();">
+          <div class="vault-form-group">
+            <label for="vault-api-key">Kite API Key</label>
+            <div class="vault-input-wrap">
+              <input type="password" id="vault-api-key" placeholder="Enter Zerodha API key…" required autocomplete="new-password" />
+              <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-api-key', this)">👁️</button>
+            </div>
+          </div>
+
+          <div class="vault-form-group">
+            <label for="vault-access-token">Daily Access Token</label>
+            <div class="vault-input-wrap">
+              <input type="password" id="vault-access-token" placeholder="Enter today's active access token…" required autocomplete="new-password" />
+              <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-access-token', this)">👁️</button>
+            </div>
+            <span class="vault-hint">Tokens refresh daily. Updating here instantly re-initializes live market streaming with zero downtime.</span>
+          </div>
+
+          <div class="vault-form-actions">
+            <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
+            <button type="submit" id="vault-submit-btn" class="vault-submit-btn">
+              <span id="vault-btn-spinner" class="vault-spinner" style="display:none;"></span>
+              <span id="vault-btn-text">🔒 Encrypt & Save to Vault</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- KeyVault Modal Controller -->
+  <script src="/static/keyvault_modal.js?v=1.0"></script>
 
   <!-- Client Logic with Cache-Busting -->
   <script src="/static/app.js?v=8.0"></script>

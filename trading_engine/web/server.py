@@ -2209,6 +2209,56 @@ async def api_post_order_execution(payload: Dict[str, Any] = Body(...)):
     }
 
 
+@app.get("/api/vault/kite-status")
+async def get_kite_vault_status():
+    """
+    Returns configuration status of Kite API credentials in KeyVault.
+    Values are NEVER returned to the client to ensure zero leakage.
+    """
+    from trading_engine.core.keyvault import get_secret
+    key = get_secret("KITE_API_KEY")
+    token = get_secret("KITE_ACCESS_TOKEN")
+    is_configured = bool(key and token and len(key.strip()) > 3 and len(token.strip()) > 10)
+    return {
+        "status": "ok",
+        "configured": is_configured,
+        "api_key_set": bool(key and len(key.strip()) > 0),
+        "access_token_set": bool(token and len(token.strip()) > 0)
+    }
+
+
+@app.post("/api/vault/kite-credentials")
+async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
+    """
+    Directly encrypts and persists Kite API credentials into the hardware/OS KeyVault.
+    Hot-reloads the Kite client in memory with zero downtime.
+    Credentials are NEVER logged or echoed in responses.
+    """
+    api_key = str(payload.get("api_key", "")).strip()
+    access_token = str(payload.get("access_token", "")).strip()
+
+    if not api_key:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Kite API Key cannot be empty."})
+    if not access_token:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Kite Access Token cannot be empty."})
+
+    from trading_engine.core.keyvault import set_secret
+    set_secret("KITE_API_KEY", api_key)
+    set_secret("KITE_ACCESS_TOKEN", access_token)
+
+    # Invalidate cached client to hot-reload with new credentials
+    try:
+        _cdm.reset_kite()
+        _cdm._get_kite()
+    except Exception as e:
+        print(f"Server: Error reloading Kite client: {e}", flush=True)
+
+    return {
+        "status": "success",
+        "message": "Kite credentials encrypted and saved to KeyVault. Live client reloaded."
+    }
+
+
 
 async def run_contract_tick_broadcaster():
     """
