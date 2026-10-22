@@ -1814,8 +1814,14 @@ async def run_collector_supervisor():
 
             if not collector_running:
                 # Check if managed by systemd or needs manual launch
-                res_systemd = subprocess.run(["systemctl", "is-active", "quant-collector"], capture_output=True, text=True)
-                systemd_active = (res_systemd.stdout.strip() == "active")
+                import shutil
+                systemd_active = False
+                if shutil.which("systemctl"):
+                    try:
+                        res_systemd = subprocess.run(["systemctl", "is-active", "quant-collector"], capture_output=True, text=True)
+                        systemd_active = (res_systemd.stdout.strip() == "active")
+                    except Exception:
+                        systemd_active = False
 
                 if not systemd_active:
                     print("CollectorSupervisor: market_collector daemon is not running. Launching background worker...", flush=True)
