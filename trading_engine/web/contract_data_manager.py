@@ -170,24 +170,182 @@ _instruments_ts: float = 0.0
 INSTRUMENTS_TTL = 6 * 3600  # refresh every 6 hours
 
 
+def _fetch_public_instruments(segment: str = "NFO") -> List[Dict]:
+    """Download public instruments CSV from Zerodha Kite without requiring credentials."""
+    import csv
+    import urllib.request
+    import tempfile
+
+    cache_file = os.path.join(tempfile.gettempdir(), f"kite_instruments_{segment.lower()}.csv")
+    content = None
+
+    # Check if disk cache is younger than INSTRUMENTS_TTL and non-empty
+    if os.path.exists(cache_file):
+        try:
+            mtime = os.path.getmtime(cache_file)
+            if (time.time() - mtime) < INSTRUMENTS_TTL and os.path.getsize(cache_file) > 1000:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+        except Exception:
+            content = None
+
+    if not content:
+        try:
+            url = f"https://api.kite.trade/instruments/{segment}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                content = resp.read().decode("utf-8")
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write(content)
+        except Exception as e:
+            print(f"ContractDataManager: public instruments download error for {segment}: {e}", flush=True)
+            if os.path.exists(cache_file):
+                try:
+                    with open(cache_file, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception:
+                    return []
+            else:
+                return []
+
+    lines = content.splitlines()
+    reader = csv.DictReader(lines)
+    parsed = []
+    for row in reader:
+        exp_str = row.get("expiry")
+        exp_date = None
+        if exp_str:
+            try:
+                exp_date = datetime.strptime(exp_str, "%Y-%m-%d").date()
+            except Exception:
+                pass
+        try:
+            tok = int(row.get("instrument_token", 0))
+        except Exception:
+            tok = 0
+        try:
+            stk = float(row.get("strike", 0.0) or 0.0)
+        except Exception:
+            stk = 0.0
+        try:
+            tick = float(row.get("tick_size", 0.05) or 0.05)
+        except Exception:
+            tick = 0.05
+        try:
+            lot = int(row.get("lot_size", 1) or 1)
+        except Exception:
+            lot = 1
+        try:
+            lp = float(row.get("last_price", 0.0) or 0.0)
+        except Exception:
+            lp = 0.0
+
+        parsed.append({
+            "instrument_token": tok,
+            "exchange_token": row.get("exchange_token", ""),
+            "tradingsymbol": row.get("tradingsymbol", ""),
+            "name": row.get("name", ""),
+            "last_price": lp,
+            "expiry": exp_date,
+            "strike": stk,
+            "tick_size": tick,
+            "lot_size": lot,
+            "instrument_type": row.get("instrument_type", ""),
+            "segment": row.get("segment", segment),
+            "exchange": row.get("exchange", segment),
+        })
+    return parsed
+
+
+def _sync_instruments_to_symbol_master(instruments: List[Dict]):
+    """Sync loaded active instruments into symbol_master table so DB queries and search work seamlessly."""
+    def _run_sync():
+        try:
+            from sqlalchemy import create_engine
+            db_url = os.environ.get("DB_URL") or os.environ.get("DATABASE_URL") or "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
+            if not db_url.startswith("postgresql+psycopg2://") and db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            eng = create_engine(db_url)
+            raw = eng.raw_connection()
+            try:
+                from psycopg2.extras import execute_values
+                recs = []
+                today = _get_ist_now().date()
+                for i in instruments:
+                    exp = i.get("expiry")
+                    if not exp or exp < today:
+                        continue
+                    sym = i.get("tradingsymbol")
+                    if not sym:
+                        continue
+                    recs.append((
+                        sym,
+                        i.get("instrument_token"),
+                        i.get("name"),
+                        exp,
+                        float(i.get("strike", 0.0) or 0.0),
+                        i.get("instrument_type") or "",
+                        i.get("segment") or "NFO-OPT",
+                        int(i.get("lot_size", 1) or 1),
+                        float(i.get("tick_size", 0.05) or 0.05),
+                    ))
+                if recs:
+                    with raw.cursor() as cur:
+                        query = """
+                            INSERT INTO symbol_master (
+                                symbol, symbol_id, underlying, expiry, strike, option_type, segment, lot_size, tick_size
+                            ) VALUES %s
+                            ON CONFLICT (symbol) DO UPDATE SET
+                                symbol_id = EXCLUDED.symbol_id,
+                                expiry = EXCLUDED.expiry,
+                                strike = EXCLUDED.strike,
+                                updated_at = NOW();
+                        """
+                        execute_values(cur, query, recs, page_size=2000)
+                    raw.commit()
+                    print(f"ContractDataManager: Synced {len(recs)} active instruments to symbol_master.", flush=True)
+            finally:
+                raw.close()
+        except Exception as e:
+            print(f"ContractDataManager: Note on symbol_master sync: {e}", flush=True)
+
+    t = threading.Thread(target=_run_sync, daemon=True)
+    t.start()
+
+
 def _load_instruments() -> List[Dict]:
     global _instruments_cache, _instruments_ts
     now = time.time()
     if _instruments_cache and (now - _instruments_ts) < INSTRUMENTS_TTL:
         return _instruments_cache
+
+    # 1. Try Kite authenticated client if available
     try:
         kite = _get_kite()
-        if not kite:
-            return []
-        nfo = kite.instruments("NFO")
-        nse = kite.instruments("NSE")
-        _instruments_cache = nfo + nse
-        _instruments_ts = now
-        print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from Kite.", flush=True)
-        return _instruments_cache
+        if kite:
+            nfo = kite.instruments("NFO")
+            nse = kite.instruments("NSE")
+            _instruments_cache = nfo + nse
+            _instruments_ts = now
+            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from Kite client.", flush=True)
+            _sync_instruments_to_symbol_master(_instruments_cache)
+            return _instruments_cache
     except Exception as e:
-        print(f"ContractDataManager: Failed to load instruments: {e}", flush=True)
-        return _instruments_cache or []
+        print(f"ContractDataManager: Kite client load error: {e}", flush=True)
+
+    # 2. Fallback to public Zerodha Kite instruments endpoint (zero auth needed)
+    try:
+        nfo = _fetch_public_instruments("NFO")
+        if nfo:
+            _instruments_cache = nfo
+            _instruments_ts = now
+            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from public NFO endpoint.", flush=True)
+            _sync_instruments_to_symbol_master(_instruments_cache)
+            return _instruments_cache
+    except Exception as e:
+        print(f"ContractDataManager: Failed to load public instruments: {e}", flush=True)
+
+    return _instruments_cache or []
 
 
 def resolve_token(trading_symbol: str) -> Optional[int]:
@@ -355,24 +513,36 @@ def get_option_chain_data(
         if spot_entry and spot_entry.get("price"):
             spot_price = float(spot_entry["price"])
         else:
-            # Try DB futures/index price for the expiry date
+            # Try DB futures/index price
             try:
                 from sqlalchemy import create_engine, text
-                db_engine = create_engine(os.environ.get("DB_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"))
+                db_url = os.environ.get("DB_URL") or os.environ.get("DATABASE_URL") or "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
+                if not db_url.startswith("postgresql+psycopg2://") and db_url.startswith("postgresql://"):
+                    db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+                db_engine = create_engine(db_url)
                 with db_engine.connect() as conn:
-                    q_spot = text("""
-                        SELECT close FROM minute_candles
-                        WHERE (symbol = :und OR symbol = :fut OR symbol = :sym50)
-                          AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
-                        ORDER BY timestamp DESC LIMIT 1;
-                    """)
-                    row = conn.execute(q_spot, {"und": und_upper, "fut": f"{und_upper}-I", "sym50": f"{und_upper} 50", "d": expiry}).fetchone()
+                    today_str = today.strftime("%Y-%m-%d")
+                    if expiry and expiry < today_str:
+                        q_spot = text("""
+                            SELECT close FROM minute_candles
+                            WHERE (symbol = :und OR symbol = :fut OR symbol = :sym50)
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                            ORDER BY timestamp DESC LIMIT 1;
+                        """)
+                        row = conn.execute(q_spot, {"und": und_upper, "fut": f"{und_upper}-I", "sym50": f"{und_upper} 50", "d": expiry}).fetchone()
+                    else:
+                        q_spot = text("""
+                            SELECT close FROM minute_candles
+                            WHERE (symbol = :und OR symbol = :fut OR symbol = :sym50)
+                            ORDER BY timestamp DESC LIMIT 1;
+                        """)
+                        row = conn.execute(q_spot, {"und": und_upper, "fut": f"{und_upper}-I", "sym50": f"{und_upper} 50"}).fetchone()
                     if row and row[0]:
                         spot_price = float(row[0])
             except Exception:
                 pass
             if not spot_price:
-                spot_price = 22960.0 if und_upper == "NIFTY" else 50000.0
+                spot_price = 22700.0 if und_upper == "NIFTY" else 50000.0
     else:
         live_prices = get_all_live_prices()
 
@@ -521,6 +691,7 @@ def get_option_chain_data(
         "underlying": und_upper,
         "expiry": expiry,
         "spot": round(spot_price, 2),
+        "spot_price": round(spot_price, 2),
         "atm_strike": atm_strike,
         "total_strikes": len(sorted_strikes),
         "chain": chain,

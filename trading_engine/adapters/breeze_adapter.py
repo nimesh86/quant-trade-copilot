@@ -186,3 +186,4 @@ class BreezeBrokerAdapter:
 
 
 default_breeze_adapter = BreezeBrokerAdapter()
+BreezeAdapter = BreezeBrokerAdapter

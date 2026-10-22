@@ -532,8 +532,9 @@ async function fetchOptionChain() {
 
         // Update spot display
         const spotVal = document.getElementById('oc-spot-val');
-        if (spotVal && data.spot) {
-            spotVal.textContent = `₹${Number(data.spot).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        const spotNum = (data.spot !== undefined && data.spot !== null) ? data.spot : data.spot_price;
+        if (spotVal && spotNum) {
+            spotVal.textContent = `₹${Number(spotNum).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
         }
 
         renderOptionChainTable(data);
