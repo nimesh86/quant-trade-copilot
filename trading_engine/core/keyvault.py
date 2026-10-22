@@ -319,6 +319,14 @@ def set_secret(key: str, value: str):
     """Store secret securely in KeyVault / Keychain."""
     return keyvault.set_secret(key, value)
 
+def delete_secret(key: str) -> bool:
+    """Delete a secret from KeyVault / Keychain."""
+    return keyvault.delete_secret(key)
+
+def list_secrets() -> Dict[str, str]:
+    """Returns dictionary of secret names with masked values."""
+    return keyvault.list_secrets()
+
 
 # ── CLI Interface ─────────────────────────────────────────────────────────────
 
