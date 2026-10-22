@@ -32,7 +32,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 from trading_engine.core.keyvault import get_secret
-from trading_engine.adapters.symbol_translator import SymbolTranslator
+from trading_engine.adapters.symbol_translator import canonical_to_breeze_derivative, parse_canonical_symbol
 
 # Setup logger
 logging.basicConfig(
@@ -101,7 +101,6 @@ class MarketCollectorDaemon:
     def __init__(self):
         self.running = True
         self.active_broker = "breeze"
-        self.translator = SymbolTranslator()
         self.breeze_client = None
         self.kite_client = None
         self._setup_signals()
