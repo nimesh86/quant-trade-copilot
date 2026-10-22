@@ -161,8 +161,18 @@ function initChart() {
             },
             dateFormat: "dd MMM ''yy",
         },
-        handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
-        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+        handleScale: {
+            axisPressedMouseMove: { time: true, price: true },
+            axisDoubleClickReset: { time: true, price: true },
+            mouseWheel: true,
+            pinch: true,
+        },
+        handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true,
+        },
     });
 
     C.candleSeries = C.chart.addCandlestickSeries({
