@@ -43,18 +43,22 @@ STATE_FILE = ENGINE_DIR / "web" / "tunnel_state.json"
 URL_REGEX = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
 
 
-def find_cloudflared_binary() -> str:
+def find_cloudflared_binary() -> Optional[str]:
     """Finds path to cloudflared executable."""
     candidates = [
         WORKSPACE_DIR / "venv" / "bin" / "cloudflared",
         Path("/usr/local/bin/cloudflared"),
+        Path("/usr/bin/cloudflared"),
         Path("/tmp/cloudflared"),
-        Path(shutil.which("cloudflared") or "")
     ]
+    which_path = shutil.which("cloudflared")
+    if which_path:
+        candidates.append(Path(which_path))
+
     for p in candidates:
-        if p and p.exists() and os.access(p, os.X_OK):
+        if p and p.is_file() and os.access(p, os.X_OK):
             return str(p)
-    raise FileNotFoundError("Could not find executable 'cloudflared' binary in workspace or PATH.")
+    return None
 
 
 def save_tunnel_state(url: str, status: str = "active"):
@@ -146,6 +150,10 @@ class TunnelPipeline:
 
     def run_forever(self):
         """Runs the tunnel process in a self-healing supervision loop."""
+        if not self.binary_path:
+            logger.info("cloudflared binary not found; skipping background tunnel pipeline.")
+            return
+
         logger.info(f"Starting Cloudflare Tunnel Pipeline on port {self.target_port}...")
         logger.info(f"Using cloudflared binary: {self.binary_path}")
 
