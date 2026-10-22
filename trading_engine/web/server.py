@@ -2280,6 +2280,56 @@ async def update_breeze_vault_credentials(payload: Dict[str, Any] = Body(...)):
     }
 
 
+@app.get("/api/broker/breeze/callback")
+async def breeze_oauth_callback(apisession: Optional[str] = None):
+    """
+    Callback endpoint for ICICI Direct Breeze OAuth login redirect.
+    Extracts the apisession token from the query params and updates KeyVault.
+    """
+    if not apisession:
+        return HTMLResponse(
+            "<h3>⚠️ Error: No apisession query parameter received from ICICI Direct.</h3>",
+            status_code=400
+        )
+
+    from trading_engine.core.keyvault import set_secret
+    set_secret("BREEZE_SESSION_TOKEN", apisession.strip())
+    set_secret("ACTIVE_BROKER", "breeze")
+
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        default_breeze_adapter.reset()
+        default_breeze_adapter.connect()
+    except Exception as e:
+        print(f"Server: Error reloading Breeze client on callback: {e}", flush=True)
+
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Breeze Authentication Success</title>
+        <meta http-equiv="refresh" content="3; url=/" />
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #1e293b; padding: 2rem 3rem; border-radius: 12px; border: 1px solid #334155; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h2 { color: #10b981; margin-bottom: 0.5rem; }
+            p { color: #94a3b8; font-size: 0.95rem; }
+            .btn { display: inline-block; margin-top: 1rem; padding: 0.6rem 1.2rem; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>✅ Breeze Authenticated Successfully!</h2>
+            <p>Your ICICI Direct session token has been encrypted into KeyVault.</p>
+            <p>Redirecting to dashboard in 3 seconds...</p>
+            <a href="/" class="btn">Return to Dashboard</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
 @app.post("/api/vault/active-broker")
 async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
     """
