@@ -35,7 +35,7 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 # Ensure trading_engine directory and project root are on sys.path
@@ -2280,20 +2280,35 @@ async def update_breeze_vault_credentials(payload: Dict[str, Any] = Body(...)):
     }
 
 
-@app.get("/api/broker/breeze/callback")
-async def breeze_oauth_callback(apisession: Optional[str] = None):
+@app.api_route("/api/broker/breeze/callback", methods=["GET", "POST"])
+async def breeze_oauth_callback(request: Request, apisession: Optional[str] = None):
     """
     Callback endpoint for ICICI Direct Breeze OAuth login redirect.
-    Extracts the apisession token from the query params and updates KeyVault.
+    Supports both GET query parameters and POST forms/redirects.
+    Extracts the apisession token and updates KeyVault.
     """
-    if not apisession:
+    token = apisession or request.query_params.get("apisession")
+    if not token and request.method == "POST":
+        try:
+            form = await request.form()
+            token = form.get("apisession")
+        except Exception:
+            pass
+        if not token:
+            try:
+                body = await request.json()
+                token = body.get("apisession")
+            except Exception:
+                pass
+
+    if not token:
         return HTMLResponse(
-            "<h3>⚠️ Error: No apisession query parameter received from ICICI Direct.</h3>",
+            "<h3>⚠️ Error: No apisession parameter received from ICICI Direct.</h3>",
             status_code=400
         )
 
     from trading_engine.core.keyvault import set_secret
-    set_secret("BREEZE_SESSION_TOKEN", apisession.strip())
+    set_secret("BREEZE_SESSION_TOKEN", str(token).strip())
     set_secret("ACTIVE_BROKER", "breeze")
 
     try:
