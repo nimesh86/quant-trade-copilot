@@ -15,6 +15,14 @@ Real-Time AI Signals, Option Chain Matrix, and Paper Portfolio Tracker.
 
 import os
 import sys
+
+# Prevent macOS Intel OpenMP threadpool suspension crash (__kmp_suspend_64 SIGSEGV)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import time
 import json
 import asyncio
@@ -30,10 +38,56 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# Ensure trading_engine directory is on sys.path
+# Ensure trading_engine directory and project root are on sys.path
 ENGINE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = ENGINE_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(ENGINE_DIR) not in sys.path:
     sys.path.insert(0, str(ENGINE_DIR))
+WEB_DIR = Path(__file__).resolve().parent
+if str(WEB_DIR) not in sys.path:
+    sys.path.insert(0, str(WEB_DIR))
+
+try:
+    import trading_engine.web.contract_data_manager as _cdm
+except ImportError:
+    import contract_data_manager as _cdm
+
+# Register module aliases in sys.modules so ANY import gets the same singleton instance
+sys.modules["contract_data_manager"] = _cdm
+sys.modules["web.contract_data_manager"] = _cdm
+sys.modules["trading_engine.web.contract_data_manager"] = _cdm
+
+search_contracts        = _cdm.search_contracts
+fetch_today_candles     = _cdm.fetch_today_candles
+fetch_contract_candles  = getattr(_cdm, "fetch_contract_candles", _cdm.fetch_today_candles)
+is_pre_market           = _cdm.is_pre_market
+is_market_open          = _cdm.is_market_open
+get_today_str           = _cdm.get_today_str
+get_live_ltp            = _cdm.get_live_ltp
+update_forming_candle   = _cdm.update_forming_candle
+get_forming_candle      = _cdm.get_forming_candle
+register_contract_client   = _cdm.register_contract_client
+unregister_contract_client = _cdm.unregister_contract_client
+get_available_expiries     = _cdm.get_available_expiries
+get_option_chain_data      = _cdm.get_option_chain_data
+push_to_price_bus          = _cdm.push_to_price_bus
+get_all_subscribed_symbols = _cdm.get_all_subscribed_symbols
+get_contract_clients       = _cdm.get_contract_clients
+get_all_live_prices        = _cdm.get_all_live_prices
+get_contract_quote         = _cdm.get_contract_quote
+
+try:
+    import trading_engine.web.trend_event_manager as _tem
+except ImportError:
+    import trend_event_manager as _tem
+
+sys.modules["trend_event_manager"] = _tem
+sys.modules["web.trend_event_manager"] = _tem
+sys.modules["trading_engine.web.trend_event_manager"] = _tem
+record_trend_event      = _tem.record_trend_event
+get_recent_trend_events = _tem.get_recent_trend_events
 
 from config import EngineConfig
 from adapters.backtest_adapter import BacktestAdapter
@@ -102,26 +156,33 @@ class EngineState:
         self.db_engine = create_engine(self.cfg.db_url)
         
         # Real-time simulated/live market status
-        self.current_spot = 22625.20
-        self.current_atr = 24.50
-        self.current_rsi = 56.40
-        self.current_vwap = 22618.00
+        self.current_spot = 0.0
+        self.current_atr = 15.0
+        self.current_rsi = 50.0
+        self.current_vwap = 0.0
         
-        # AI Predictor Output
+        # AI Predictor Output (Initialized dynamically on first tick or request)
         self.prediction = {
-            "direction": "CALL",
-            "bias": "BULLISH",
-            "confidence_pct": 82.5,
-            "model_1_score": 0.742,
-            "model_2_status": "CONFIRMED_MOMENTUM",
-            "suggested_strike": "NIFTY 22650 CE",
-            "entry_range": "22,620 - 22,630",
-            "entry_premium": 165.0,
-            "target_premium": 186.0,
-            "stop_loss_premium": 152.0,
-            "expected_gain_pct": 12.7,
-            "max_risk_pct": 7.8,
-            "timestamp": datetime.now().isoformat()
+            "active": False,
+            "status": "INITIALIZING",
+            "message": "Initializing live market feed...",
+            "suggested_strike": None,
+            "direction": None,
+            "bias": "INITIALIZING",
+            "confidence_pct": 0,
+            "model_1_score": 0.0,
+            "model_2_status": "IDLE",
+            "entry_range": "--",
+            "entry_premium": 0,
+            "target_premium": 0,
+            "stop_loss_premium": 0,
+            "expected_gain_pct": 0,
+            "max_risk_pct": 0,
+            "timestamp": datetime.now().isoformat(),
+            "spot": 0.0,
+            "atr": 0.0,
+            "rsi": 50.0,
+            "vwap": 0.0
         }
 
         # Simulation Replay Engine State
@@ -154,6 +215,10 @@ class EngineState:
 
         # Restore persistent paper trading portfolio & trade history
         self.load_paper_state()
+
+        # Cloudflare Tunnel Supervisor Pipeline
+        self.tunnel_pipeline = None
+        self.tunnel_task = None
 
     def save_paper_state(self):
         """Persists live paper adapter trades & balance to disk so user results are never lost."""
@@ -263,6 +328,30 @@ def update_dynamic_prediction(spot: float, atr: float, rsi: float = 50.0, vwap: 
         state.prediction = inactive
         return inactive
 
+    # In live mode, preserve true multi-factor model prediction from compute_live_market_prediction
+    if state.mode != "simulation":
+        curr = state.prediction
+        if curr and curr.get("status") in ("NO_SETUP", "MARKET_CLOSED", "INSUFFICIENT_DATA"):
+            curr["spot"] = round(spot, 2)
+            curr["atr"] = round(atr, 2)
+            curr["rsi"] = round(rsi, 2)
+            curr["vwap"] = round(vwap, 2)
+            return curr
+
+        if curr and curr.get("active") and curr.get("suggested_strike"):
+            last_spot = curr.get("spot", spot)
+            delta = 0.55
+            pts_diff = (spot - last_spot) if curr.get("direction") == "CALL" else (last_spot - spot)
+            curr["spot"] = round(spot, 2)
+            curr["entry_range"] = f"{round(spot - 4, 1)} - {round(spot + 4, 1)}"
+            if pts_diff != 0 and curr.get("entry_premium"):
+                new_prem = round(max(5.0, curr["entry_premium"] + (pts_diff * delta)), 1)
+                curr["entry_premium"] = new_prem
+            return curr
+
+        return compute_live_market_prediction()
+
+    # In simulation mode:
     atm_strike = int(round(spot / 50.0) * 50)
     is_bullish = rsi >= 50.0
     direction = "CALL" if is_bullish else "PUT"
@@ -280,6 +369,8 @@ def update_dynamic_prediction(spot: float, atr: float, rsi: float = 50.0, vwap: 
     max_risk = round(((est_prem - stop_prem) / est_prem) * 100, 1) if est_prem > 0 else 8.5
 
     pred = {
+        "active": True,
+        "status": "ACTIVE_SIGNAL",
         "direction": direction,
         "bias": bias,
         "confidence_pct": round(conf, 1),
@@ -1502,6 +1593,7 @@ async def run_live_tick_broadcaster():
     4. Broadcasts real-time TICK_UPDATE packets to connected browser WebSockets.
     """
     print("LiveTickBroadcaster: Started real-time sub-second tick monitoring...", flush=True)
+    last_prediction_refresh = 0.0
 
     while True:
         try:
@@ -1524,6 +1616,10 @@ async def run_live_tick_broadcaster():
                                 tick_price = float(nifty_entry["price"])
                                 tick_time = nifty_entry.get("ts")
                                 is_fresh_tick = True
+                            # ⚡ Push entire cache to in-memory bus — zero disk I/O for contract page
+                            for sym, entry in cache.items():
+                                if entry and entry.get("price"):
+                                    push_to_price_bus(sym, float(entry["price"]), entry.get("ts"))
                     except Exception:
                         pass
 
@@ -1556,6 +1652,20 @@ async def run_live_tick_broadcaster():
                     # Maintain forming candle ONLY during active market hours with fresh ticks
                     if market_open and is_fresh_tick:
                         if state.forming_candle is None or state.forming_candle["time"] != now_min_ts:
+                            if state.forming_candle is not None:
+                                closed_bar = dict(state.forming_candle)
+                                closed_bar["timestamp"] = datetime.fromtimestamp(closed_bar["time"])
+                                closed_bar["atr"] = state.current_atr or 20.0
+                                try:
+                                    state.strategy_detector.evaluate_candle_parallel(closed_bar)
+                                except Exception:
+                                    pass
+                                try:
+                                    compute_live_market_prediction()
+                                    last_prediction_refresh = time.time()
+                                except Exception:
+                                    pass
+
                             state.forming_candle = {
                                 "time": now_min_ts,
                                 "open": tick_price,
@@ -1568,6 +1678,14 @@ async def run_live_tick_broadcaster():
                             state.forming_candle["high"] = max(state.forming_candle["high"], tick_price)
                             state.forming_candle["low"] = min(state.forming_candle["low"], tick_price)
                             state.forming_candle["close"] = tick_price
+
+                        # Periodic refresh of technical prediction every 15 seconds during live market
+                        if time.time() - last_prediction_refresh > 15.0:
+                            try:
+                                compute_live_market_prediction()
+                                last_prediction_refresh = time.time()
+                            except Exception:
+                                pass
                     else:
                         state.forming_candle = None
 
@@ -1641,6 +1759,39 @@ async def run_live_tick_broadcaster():
                     }
                     await broadcast_packet(packet)
 
+                    # ⚡ Immediately push to contract WS clients (zero waiting for contract loop)
+                    if market_open and is_fresh_tick:
+                        try:
+                            c_symbols = get_all_subscribed_symbols()
+                            if c_symbols:
+                                _now_iso = now.isoformat()
+                                for c_sym in c_symbols:
+                                    c_entry = cache.get(c_sym) or cache.get(c_sym.upper())
+                                    if not c_entry or not c_entry.get("price"):
+                                        continue
+                                    c_ltp = float(c_entry["price"])
+                                    c_fc = update_forming_candle(c_sym, c_ltp)
+                                    c_clients = get_contract_clients(c_sym)
+                                    if not c_clients:
+                                        continue
+                                    c_packet = {
+                                        "type": "CONTRACT_TICK",
+                                        "symbol": c_sym,
+                                        "ltp": round(c_ltp, 2),
+                                        "forming_candle": c_fc,
+                                        "timestamp": _now_iso,
+                                    }
+                                    _dead = []
+                                    for _ws in c_clients:
+                                        try:
+                                            await asyncio.wait_for(_ws.send_json(c_packet), timeout=0.1)
+                                        except Exception:
+                                            _dead.append(_ws)
+                                    for _ws in _dead:
+                                        unregister_contract_client(c_sym, _ws)
+                        except Exception:
+                            pass
+
         except Exception:
             pass
 
@@ -1692,8 +1843,13 @@ async def run_collector_supervisor():
                         from broker.zerodha_autologin import ZerodhaAutoLogin
                         from kiteconnect import KiteConnect
 
-                        api_key = os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
-                        token = os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
+                        try:
+                            from trading_engine.core.keyvault import get_secret
+                            api_key = get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
+                            token = get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
+                        except Exception:
+                            api_key = os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
+                            token = os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
 
                         token_valid = False
                         if api_key and token:
@@ -1728,10 +1884,46 @@ async def run_collector_supervisor():
         await asyncio.sleep(60)
 
 
+async def run_tunnel_supervisor():
+    """
+    Spawns Cloudflare Tunnel in background and automatically dispatches public URL to Telegram.
+    Runs self-healing loop: if tunnel changes or restarts, sends new URL to Telegram.
+    """
+    try:
+        import sys
+        engine_dir = str(Path(__file__).resolve().parent.parent)
+        if engine_dir not in sys.path:
+            sys.path.insert(0, engine_dir)
+        from trading_engine.tunnel_pipeline import TunnelPipeline
+        pipeline = TunnelPipeline(target_port=8080)
+        state.tunnel_pipeline = pipeline
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, pipeline.run_forever)
+    except Exception as e:
+        print(f"TunnelSupervisor: Error running tunnel pipeline: {e}", flush=True)
+
+
 @app.on_event("startup")
 async def on_startup():
+    try:
+        compute_live_market_prediction()
+    except Exception as e:
+        print(f"Startup: Error computing initial prediction: {e}", flush=True)
     state.tick_broadcaster_task = asyncio.create_task(run_live_tick_broadcaster())
     state.collector_supervisor_task = asyncio.create_task(run_collector_supervisor())
+    asyncio.create_task(run_contract_tick_broadcaster())
+    state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    if hasattr(state, "tunnel_pipeline") and state.tunnel_pipeline:
+        try:
+            state.tunnel_pipeline.stop()
+        except Exception:
+            pass
+
 
 
 # ── Static UI Mounting ────────────────────────────────────────────────────────
@@ -1742,6 +1934,335 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 async def serve_index():
     return FileResponse(STATIC_DIR / "index.html")
 
+@app.get("/contract")
+@app.get("/contract.html")
+async def serve_contract():
+    return FileResponse(
+        STATIC_DIR / "contract.html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )
+
+
+# ── Contract Analysis Page APIs ───────────────────────────────────────────────
+
+
+
+
+@app.get("/api/contracts/expiries")
+async def contract_expiries(underlying: str = Query("NIFTY")):
+    """Return available future option expiry dates for the given underlying."""
+    expiries = get_available_expiries(underlying=underlying)
+    return {
+        "underlying": underlying.upper(),
+        "total": len(expiries),
+        "expiries": expiries,
+    }
+
+
+@app.get("/api/contracts/option_chain")
+async def contract_option_chain(
+    underlying: str = Query("NIFTY"),
+    expiry: Optional[str] = Query(None)
+):
+    """Return full option chain matrix around ATM strike with live LTPs."""
+    data = get_option_chain_data(underlying=underlying, expiry=expiry, spot_price=state.current_spot)
+    return data
+
+
+@app.get("/api/contracts/search")
+async def contract_search(
+    q: str = Query("", min_length=0),
+    expiry: Optional[str] = Query(None),
+    limit: int = Query(15, ge=1, le=50)
+):
+    """Fuzzy-search contracts from active Kite instruments + symbol_master."""
+    if not q or not q.strip():
+        return {"query": q, "total_matches": 0, "results": []}
+    results = search_contracts(q.strip(), expiry=expiry, limit=limit, db_engine=state.db_engine)
+    return {
+        "query": q,
+        "expiry": expiry,
+        "total_matches": len(results),
+        "results": results,
+    }
+
+
+@app.get("/api/contracts/candles")
+async def contract_candles(
+    symbol: str = Query(..., min_length=1),
+    date: Optional[str] = Query(None),
+):
+    """
+    Return 1-minute candles for the given contract symbol.
+    If market is closed (weekend, holiday, pre-market) or today has 0 candles:
+    Automatically returns the last available trading day's data!
+    """
+    try:
+        res = fetch_contract_candles(symbol, target_date=date, db_engine=state.db_engine)
+        # Enrich with live order flow / depth quote if available
+        quote = get_contract_quote(symbol)
+        res["quote"] = quote
+        return res
+    except Exception as e:
+        print(f"contract_candles error for {symbol}: {e}", flush=True)
+        return {
+            "symbol": symbol,
+            "date": get_today_str(),
+            "is_last_day_data": False,
+            "market_status": "ERROR",
+            "num_candles": 0,
+            "candles": [],
+            "error": str(e),
+        }
+
+
+@app.get("/api/contracts/quote")
+async def contract_quote(symbol: str = Query(...)):
+    """Fetch live bid/offer depth, order flow ratio, volume, and OI."""
+    q = get_contract_quote(symbol)
+    return q or {"symbol": symbol, "error": "Quote not available"}
+
+
+@app.websocket("/ws/contracts")
+async def contract_ws_endpoint(websocket: WebSocket, symbol: str = Query(...)):
+    """
+    Dedicated WebSocket for contract live tick streaming.
+    Broadcasts CONTRACT_TICK packets with LTP, forming candle, and session OHLC.
+    """
+    await websocket.accept()
+    register_contract_client(symbol, websocket)
+    print(f"ContractWS: Client connected for {symbol}", flush=True)
+
+    try:
+        # Send initial forming candle if available
+        fc = get_forming_candle(symbol)
+        if fc:
+            ltp = fc.get("close", 0)
+            await websocket.send_json({
+                "type": "CONTRACT_TICK",
+                "symbol": symbol,
+                "ltp": ltp,
+                "forming_candle": fc,
+                "timestamp": datetime.now().isoformat(),
+            })
+
+        while True:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=60)
+                msg = json.loads(raw)
+                if msg.get("type") == "PING":
+                    await websocket.send_json({"type": "PONG"})
+            except asyncio.TimeoutError:
+                # Send keepalive with latest LTP
+                ltp = get_live_ltp(symbol)
+                fc = get_forming_candle(symbol)
+                if ltp and is_market_open():
+                    fc_updated = update_forming_candle(symbol, ltp) if ltp else fc
+                    await websocket.send_json({
+                        "type": "CONTRACT_TICK",
+                        "symbol": symbol,
+                        "ltp": ltp,
+                        "forming_candle": fc_updated,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+            except WebSocketDisconnect:
+                break
+
+    except Exception as e:
+        print(f"ContractWS error for {symbol}: {e}", flush=True)
+    finally:
+        unregister_contract_client(symbol, websocket)
+        print(f"ContractWS: Client disconnected for {symbol}", flush=True)
+
+
+@app.post("/api/events/trend_signal")
+async def api_post_trend_signal(payload: Dict[str, Any] = Body(...)):
+    """
+    Zero-latency Event Trigger endpoint for trend signals (from SMF Cloud or technical models).
+    1. Persists event to TimescaleDB `trend_events` table.
+    2. Dispatches real-time Telegram alert.
+    3. Broadcasts WebSocket notification to connected UI clients.
+    4. Invokes extensible `on_trend_signal_triggered` hook for automated trading contract selection.
+    """
+    symbol = payload.get("symbol", "NIFTY")
+    direction = payload.get("direction", "BUY").upper()
+    price = float(payload.get("price", 0.0) or state.current_spot or 0.0)
+    strategy = payload.get("strategy", "SMF_CLOUD")
+    timeframe = payload.get("timeframe", "1m")
+    market_regime = payload.get("market_regime")
+    details = payload.get("details", {})
+
+    event = record_trend_event(
+        symbol=symbol,
+        direction=direction,
+        price=price,
+        strategy=strategy,
+        timeframe=timeframe,
+        market_regime=market_regime,
+        details=details,
+        db_engine=state.db_engine,
+        send_telegram=True,
+    )
+
+    try:
+        await broadcast_packet({
+            "type": "TREND_SIGNAL_NOTIFICATION",
+            "event": event
+        })
+    except Exception:
+        pass
+
+    return {"status": "success", "event": event}
+
+
+@app.get("/api/events/trend_signals")
+async def api_get_trend_signals(limit: int = Query(50, ge=1, le=200)):
+    """Return recent trend signal events from TimescaleDB."""
+    events = get_recent_trend_events(limit=limit, db_engine=state.db_engine)
+    return {"total": len(events), "events": events}
+
+
+@app.post("/api/events/order_execution")
+async def api_post_order_execution(payload: Dict[str, Any] = Body(...)):
+    """
+    Zero-latency live order / target execution endpoint.
+    Triggered instantaneously on tick arrival when target or stop condition is met.
+    1. Logs execution with microsecond timestamp.
+    2. If active paper/live position exists, triggers immediate close/partial fill.
+    3. Broadcasts WebSocket execution notification to all connected clients.
+    4. Ready for direct broker API routing (Zerodha / Shoonya / Finvasia / Angel).
+    """
+    symbol = payload.get("symbol", "NIFTY")
+    action = payload.get("action", "TARGET_HIT")
+    target_level = payload.get("target_level", "TARGET")
+    target_price = float(payload.get("target_price", 0.0) or 0.0)
+    exec_price = float(payload.get("execution_price", 0.0) or target_price)
+    ts = payload.get("timestamp") or datetime.now().isoformat()
+    details = payload.get("details", {})
+
+    print(f"⚡ [LIVE TICK EXECUTION] {symbol} {action} ({target_level}) @ ₹{exec_price:.2f} (Target: ₹{target_price:.2f})", flush=True)
+
+    # 1. Close or update active paper adapter position if matched
+    exit_rec = None
+    if state.paper_adapter.active_position is not None:
+        try:
+            exit_rec = state.paper_adapter.close_position(
+                reason=action,
+                exit_price=exec_price,
+                timestamp=datetime.now()
+            )
+            if state.mode != "simulation":
+                state.save_paper_state()
+        except Exception as e:
+            print(f"OrderExecution: Error closing paper position: {e}", flush=True)
+
+    # 2. Record to TimescaleDB as an executed event
+    try:
+        record_trend_event(
+            symbol=symbol,
+            direction="EXIT",
+            price=exec_price,
+            strategy="LIVE_TICK_EXECUTION",
+            timeframe="tick",
+            market_regime="EXIT",
+            details={
+                "action": action,
+                "target_level": target_level,
+                "target_price": target_price,
+                "execution_price": exec_price,
+                "slippage": round(exec_price - target_price, 2) if target_price > 0 else 0.0,
+                **details
+            },
+            db_engine=state.db_engine,
+            send_telegram=True,
+        )
+    except Exception as e:
+        print(f"OrderExecution: DB logging error: {e}", flush=True)
+
+    # 3. Broadcast instant execution packet to WebSockets
+    packet = {
+        "type": "ORDER_EXECUTION_NOTIFICATION",
+        "symbol": symbol,
+        "action": action,
+        "target_level": target_level,
+        "target_price": target_price,
+        "execution_price": exec_price,
+        "timestamp": ts,
+        "exit_record": exit_rec,
+    }
+    try:
+        await broadcast_packet(packet)
+    except Exception:
+        pass
+
+    return {
+        "status": "executed",
+        "action": action,
+        "symbol": symbol,
+        "execution_price": exec_price,
+        "timestamp": ts,
+        "exit_record": exit_rec
+    }
+
+
+
+async def run_contract_tick_broadcaster():
+    """
+    Dedicated high-frequency tick broadcaster for /contract WebSocket clients.
+    Watches in-memory bus and /tmp/td_live_prices.json every 50ms.
+    Pushes CONTRACT_TICK immediately when price changes.
+    """
+    print("ContractTickBroadcaster: Started zero-latency loop (50ms).", flush=True)
+    last_sent_prices: Dict[str, float] = {}
+
+    while True:
+        try:
+            if is_market_open():
+                symbols = get_all_subscribed_symbols()
+                if symbols:
+                    cache = get_all_live_prices()
+                    now_iso = datetime.now().isoformat()
+                    for symbol in symbols:
+                        entry = cache.get(symbol) or cache.get(symbol.upper())
+                        if not entry or not entry.get("price"):
+                            continue
+                        ltp = float(entry["price"])
+                        prev = last_sent_prices.get(symbol)
+                        if prev is not None and abs(prev - ltp) < 1e-4:
+                            continue
+                        last_sent_prices[symbol] = ltp
+
+                        fc = update_forming_candle(symbol, ltp)
+                        clients = get_contract_clients(symbol)
+                        if not clients:
+                            continue
+                        packet = {
+                            "type": "CONTRACT_TICK",
+                            "symbol": symbol,
+                            "ltp": round(ltp, 2),
+                            "forming_candle": fc,
+                            "timestamp": now_iso,
+                        }
+                        dead = []
+                        for ws in clients:
+                            try:
+                                await asyncio.wait_for(ws.send_json(packet), timeout=0.1)
+                            except Exception:
+                                dead.append(ws)
+                        for ws in dead:
+                            unregister_contract_client(symbol, ws)
+        except Exception:
+            pass
+        await asyncio.sleep(0.05)  # 50ms loop = 20 checks/second
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8080, reload=True)
+    uvicorn.run("trading_engine.web.server:app", host="0.0.0.0", port=8080)
+
+
+

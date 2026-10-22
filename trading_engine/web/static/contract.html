@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#070b14" />
+    <title>Contract Analysis — AI Trader</title>
+    <meta name="description" content="Live contract chart and Smart Money Flow Cloud analysis for NIFTY options, futures and equities." />
+    <link rel="stylesheet" href="/static/contract.css?v=20261022_1545" />
+</head>
+<body>
+<div id="page-shell">
+
+    <!-- ── Loading Bar ───────────────────────────────────────────────────── -->
+    <div id="loading-bar"></div>
+
+    <!-- ── Header ────────────────────────────────────────────────────────── -->
+    <header id="header">
+
+        <div class="header-top-row">
+            <!-- Home link -->
+            <a href="/" id="home-link" title="Back to Dashboard">
+                <span class="home-arrow">←</span>
+                <span class="home-text">Dashboard</span>
+            </a>
+
+            <!-- Search Box -->
+            <div id="search-wrapper">
+                <span id="search-icon">⌕</span>
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="Search contract… (/ or ⌘K)"
+                    autocomplete="off"
+                    spellcheck="false"
+                />
+                <div id="search-dropdown"></div>
+            </div>
+
+            <!-- Option Chain Toggle Button -->
+            <button id="btn-toggle-oc" class="oc-toggle-btn" title="Open Floating Option Chain">
+                <span class="oc-btn-icon">⚡</span>
+                <span class="oc-btn-text">Option Chain</span>
+                <span id="oc-btn-badge" class="oc-btn-badge">19 OCT</span>
+            </button>
+
+            <!-- Connection Status -->
+            <div id="conn-pill" class="waiting">
+                <div id="conn-dot"></div>
+                <span id="conn-label">Connecting…</span>
+            </div>
+        </div>
+
+        <div class="header-sub-row">
+            <!-- Selected Contract Badge -->
+            <div id="contract-badge">
+                <span id="badge-symbol">No contract selected</span>
+                <span id="badge-ltp">——</span>
+                <span id="badge-chg"></span>
+                <span id="badge-target" class="badge-target" style="display:none;">🎯 Max: --</span>
+            </div>
+
+            <!-- Timeframe Controls -->
+            <div id="tf-controls" role="group" aria-label="Chart timeframe">
+                <button class="tf-btn active" data-tf="1"  id="tf-1m"  title="1 Minute">1m</button>
+                <button class="tf-btn"        data-tf="3"  id="tf-3m"  title="3 Minutes">3m</button>
+                <button class="tf-btn"        data-tf="5"  id="tf-5m"  title="5 Minutes">5m</button>
+                <button class="tf-btn"        data-tf="15" id="tf-15m" title="15 Minutes">15m</button>
+            </div>
+
+            <!-- SMF Cloud Toggle -->
+            <button id="smf-toggle-btn" title="Toggle Smart Money Flow Cloud">⬡ SMF Cloud</button>
+
+            <!-- SMF Signal Price Toggle -->
+            <button id="smf-price-toggle-btn" title="Toggle Price on Buy/Sell Signal Markers">🏷 Signal Price</button>
+
+            <!-- SMF Max Target Toggle -->
+            <button id="smf-target-toggle-btn" title="Toggle Maximum Target & Profit Lines">🎯 Max Target</button>
+
+            <!-- SMF Dynamic Exit Toggle -->
+            <button id="dynamic-exit-btn" class="dynamic-exit-btn active" title="Toggle SMF Dynamic Exit & Chandelier Trail Engine">🛡️ Dynamic Exit</button>
+
+            <!-- Fit content -->
+            <button id="btn-fit-contract" title="Fit all candles in view">⤢ Fit</button>
+
+            <!-- Bar Replay Toggle -->
+            <button id="btn-replay-toggle" class="replay-toggle-btn" title="Toggle Bar Replay Simulator (Shift+R)">
+                <span class="replay-btn-icon">⏪</span>
+                <span class="replay-btn-text">Replay</span>
+            </button>
+
+            <!-- Expiry Date Filter Dropdown -->
+            <div id="expiry-wrapper" title="Filter by Expiry Date">
+                <span class="expiry-icon">📅</span>
+                <select id="expiry-select">
+                    <option value="">All Expiries</option>
+                </select>
+            </div>
+
+            <!-- Keyboard hint -->
+            <span id="kbd-hint"><kbd>/</kbd> to search</span>
+        </div>
+
+    </header>
+
+    <!-- ── Chart Area ─────────────────────────────────────────────────────── -->
+    <main id="chart-area">
+        <div id="contract-chart-container"></div>
+        <canvas id="contract-smf-canvas"></canvas>
+
+
+
+        <!-- ── Replay Floating Control Dock ──────────────────────────────── -->
+        <div id="replay-bar" class="replay-dock hidden" role="toolbar" aria-label="Chart Replay Controls">
+            <div class="replay-drag-handle">
+                <span class="replay-pulse-dot"></span>
+                <span class="replay-title">REPLAY</span>
+            </div>
+
+            <div class="replay-btn-group">
+                <button id="rp-btn-start" class="rp-ctrl-btn" title="Jump to Start (Home)">⏮</button>
+                <button id="rp-btn-step-back" class="rp-ctrl-btn" title="Step Back 1 Candle (Left Arrow)">◀</button>
+                <button id="rp-btn-play" class="rp-ctrl-btn rp-play-btn" title="Play / Pause Replay (Space)">▶</button>
+                <button id="rp-btn-step-fwd" class="rp-ctrl-btn" title="Step Forward 1 Candle (Right Arrow)">▶|</button>
+                <button id="rp-btn-end" class="rp-ctrl-btn" title="Jump to Latest Candle (End)">⏭</button>
+            </div>
+
+            <div class="replay-timeline">
+                <input type="range" id="rp-scrubber" min="0" max="100" value="0" step="1" title="Drag to jump to specific candle" />
+                <div class="replay-time-display">
+                    <span id="rp-cur-time" class="rp-time-val">09:15</span>
+                    <span class="rp-divider">/</span>
+                    <span id="rp-total-time" class="rp-time-val">15:30</span>
+                    <span id="rp-bar-count" class="rp-pill">0 / 0</span>
+                </div>
+            </div>
+
+            <div class="replay-speed-wrap">
+                <span class="rp-label">Speed:</span>
+                <select id="rp-speed-select" class="rp-select">
+                    <option value="1200">0.5x</option>
+                    <option value="600" selected>1x</option>
+                    <option value="300">2x</option>
+                    <option value="120">5x</option>
+                    <option value="40">10x</option>
+                </select>
+            </div>
+
+            <div class="replay-date-wrap">
+                <input type="date" id="rp-date-picker" class="rp-date-input" title="Historical Session Date" />
+                <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
+            </div>
+
+            <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕ Exit</button>
+        </div>
+
+        <!-- Pre-market / No-contract Overlay -->
+        <div id="chart-overlay" class="visible">
+            <div class="overlay-icon">📈</div>
+            <div class="overlay-title">Search or Pick an Option from the Chain</div>
+            <div class="overlay-sub">
+                Click <strong>⚡ Option Chain</strong> below or search for any contract. Live SMF Cloud chart will appear immediately.
+            </div>
+        </div>
+    </main>
+
+    <!-- ── Option Chain Panel (Below Chart on Mobile, Floating on Desktop) ── -->
+    <section id="option-chain-panel" class="oc-panel collapsed" role="region" aria-label="Option Chain">
+            <div class="oc-header">
+                <div class="oc-title-block">
+                    <span class="oc-title">⚡ Option Chain</span>
+                    <span id="oc-underlying-badge" class="oc-pill">NIFTY</span>
+                    <span id="oc-spot-display" class="oc-spot-text">Spot: <strong id="oc-spot-val">--</strong></span>
+                </div>
+                <div class="oc-controls">
+                    <div class="oc-control-item">
+                        <span class="oc-ctrl-label">Expiry:</span>
+                        <select id="oc-expiry-select" class="oc-select"></select>
+                    </div>
+                    <button id="oc-range-toggle" class="oc-mini-btn" title="Toggle Range (±15 ATM or All Strikes)">±15 Strikes</button>
+                    <button id="oc-refresh-btn" class="oc-mini-btn" title="Refresh Live Prices">⟳</button>
+                    <button id="oc-close-btn" class="oc-close-btn" title="Close Option Chain">✕</button>
+                </div>
+            </div>
+
+            <div class="oc-table-container">
+                <table class="oc-table">
+                    <thead>
+                        <tr class="oc-super-header">
+                            <th colspan="3" class="call-side-hdr">CALLS (CE)</th>
+                            <th class="strike-hdr">STRIKE</th>
+                            <th colspan="3" class="put-side-hdr">PUTS (PE)</th>
+                        </tr>
+                        <tr class="oc-sub-header">
+                            <th class="col-ltp call-ltp-hdr"><span class="desktop-hdr">LTP (₹)</span><span class="mobile-hdr">CALLS (CE)</span></th>
+                            <th class="col-sym">Contract</th>
+                            <th class="col-action">Chart</th>
+                            <th class="col-strike"><span class="desktop-hdr">Strike</span><span class="mobile-hdr">STRIKE</span></th>
+                            <th class="col-action">Chart</th>
+                            <th class="col-sym">Contract</th>
+                            <th class="col-ltp put-ltp-hdr"><span class="desktop-hdr">LTP (₹)</span><span class="mobile-hdr">PUTS (PE)</span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="oc-tbody">
+                        <!-- Populated via contract.js -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="oc-footer">
+                <span class="oc-hint">⚡ Click any Call or Put row to chart instantly with SMF Cloud.</span>
+                <span id="oc-summary-text" class="oc-summary-text">Loading chain…</span>
+            </div>
+    </section>
+
+    <!-- ── SMF Dynamic Exit Footer Dock (Compact 2-Row Dock) ─────────────── -->
+    <div id="dynamic-exit-card" class="dynamic-exit-footer">
+        <!-- Row 1: Engine Controls & Live Position Monitor -->
+        <div class="de-footer-row de-row-live">
+            <div class="de-row-left">
+                <span class="de-pulse-dot"></span>
+                <span class="de-title">SMF DYNAMIC EXIT</span>
+                <select id="de-variant-select" class="de-select" title="Exit Engine Strategy Variant">
+                    <option value="V5" selected>V5 (Dynamic + Re-Entry)</option>
+                    <option value="V5_P1">V5_P1 (+25% Partial @ 1.5R)</option>
+                    <option value="V4">V4 (Adaptive + Climax)</option>
+                    <option value="V3">V3 (THS Adaptive Trail)</option>
+                    <option value="V2">V2 (Fixed Trail k=2.2)</option>
+                    <option value="V1">V1 (Relaxed Floor)</option>
+                    <option value="BASELINE">BASELINE (Fixed 1.6R)</option>
+                </select>
+                <span id="de-status-pill" class="de-pill flat">FLAT</span>
+            </div>
+
+            <div class="de-row-center">
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">ENTRY</span>
+                    <span id="de-live-entry" class="de-metric-val">₹--</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">STOP / FLOOR</span>
+                    <span id="de-live-stop" class="de-metric-val danger">₹--</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">CHANDELIER</span>
+                    <span id="de-live-trail" class="de-metric-val warning">₹--</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">PEAK (MFE)</span>
+                    <span id="de-live-mfe" class="de-metric-val success">+0.0R</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">HEALTH</span>
+                    <span id="de-live-ths" class="de-metric-val">--</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">LIVE P&L</span>
+                    <span id="de-live-pnl" class="de-metric-val highlight">+0.0R</span>
+                </div>
+            </div>
+
+            <div class="de-row-right">
+                <button id="de-btn-toggle-log" class="de-btn-toggle-log" title="View Detailed Trades Log">📋 Trades (<span id="de-trades-count">0</span>)</button>
+                <button id="de-card-close" class="de-footer-close-btn" title="Hide Dynamic Exit Bar">✕</button>
+            </div>
+        </div>
+
+        <!-- Row 2: 1-Day Session Backtest Summary & Trades Ticker -->
+        <div class="de-footer-row de-row-backtest">
+            <div class="de-row-left">
+                <span class="de-section-badge">📊 1-DAY BACKTEST</span>
+            </div>
+
+            <div class="de-row-center">
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">TRADES</span>
+                    <span id="de-sum-trades" class="de-metric-val">0</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">WIN RATE</span>
+                    <span id="de-sum-winrate" class="de-metric-val">--%</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">NET PnL</span>
+                    <span id="de-sum-pnl-r" class="de-metric-val highlight">+0.00R</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">POINTS</span>
+                    <span id="de-sum-pts" class="de-metric-val highlight">+0.0 pts</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">CAPTURE</span>
+                    <span id="de-sum-capture" class="de-metric-val">--%</span>
+                </div>
+                <div class="de-metric-item">
+                    <span class="de-metric-lbl">GIVE-BACK</span>
+                    <span id="de-sum-giveback" class="de-metric-val">--%</span>
+                </div>
+            </div>
+
+            <div class="de-row-right de-trades-ticker-wrap">
+                <div id="de-trades-ticker" class="de-trades-ticker">
+                    <span class="de-ticker-empty">No trades on this session</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Popover detailed trades log (positioned above footer when opened) -->
+        <div id="de-trades-popover" class="de-trades-popover hidden">
+            <div class="de-popover-header">
+                <span>SESSION TRADES EXECUTION LOG</span>
+                <button id="de-popover-close" class="de-btn-mini">✕</button>
+            </div>
+            <div id="de-trades-list" class="de-trades-list">
+                <div class="de-no-trades">No trades on this session</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Bottom Status Bar ──────────────────────────────────────────────── -->
+    <footer id="bottom-bar">
+
+        <div class="stat-group">
+            <div class="stat-item">
+                <div class="stat-label">Day Open</div>
+                <div class="stat-value" id="stat-open">——</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Session High</div>
+                <div class="stat-value" id="stat-high" style="color: var(--green)">——</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Session Low</div>
+                <div class="stat-value" id="stat-low" style="color: var(--pink)">——</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">LTP</div>
+                <div class="stat-value" id="stat-ltp">——</div>
+            </div>
+        </div>
+
+        <div class="stat-group">
+            <div class="stat-item">
+                <div class="stat-label">Candles</div>
+                <div class="stat-value" id="stat-candles">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Symbol</div>
+                <div class="stat-value" id="stat-symbol">——</div>
+            </div>
+        </div>
+
+        <!-- Trend Gauge -->
+        <div id="gauge-wrapper">
+            <span id="gauge-label">SMF Trend</span>
+            <div id="gauge-bar-container">
+                <div id="gauge-fill" style="width: 0%; background: var(--cyan);"></div>
+            </div>
+            <span id="gauge-pct" style="color: var(--text-secondary);">—</span>
+        </div>
+
+        <!-- Market Status -->
+        <div id="market-status-badge" class="pre-market">
+            <div id="conn-dot-bottom" style="width:6px;height:6px;border-radius:50%;background:currentColor;"></div>
+            <span id="market-status-label">Checking…</span>
+        </div>
+
+    </footer>
+
+</div><!-- /page-shell -->
+
+<!-- LightweightCharts library (same copy as main dashboard) -->
+<script src="/static/lightweight-charts.standalone.production.js"></script>
+
+<!-- Contract Analysis Controller -->
+<script src="/static/contract.js?v=20261022_1545"></script>
+
+</body>
+</html>

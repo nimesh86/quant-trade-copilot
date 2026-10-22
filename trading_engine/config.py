@@ -1,12 +1,20 @@
 """
 Trading Engine Global Configuration.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import os
+
+def _default_db_url() -> str:
+    try:
+        from trading_engine.core.keyvault import get_secret
+        return get_secret("DATABASE_URL") or os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/trading")
+    except Exception:
+        return os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/trading")
 
 @dataclass
 class EngineConfig:
     # Database
-    db_url: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
+    db_url: str = field(default_factory=_default_db_url)
     symbol: str = "NIFTY 50"
     futures_symbol: str = "NIFTY-I"
     option_prefix: str = "NIFTY"

@@ -29,12 +29,18 @@ class TelegramNotifier:
         self.reload_config()
 
     def reload_config(self):
-        """Reloads configuration dynamically from .env or environment."""
+        """Reloads configuration dynamically from KeyVault, .env or environment."""
         if ENV_PATH.exists():
             load_dotenv(dotenv_path=ENV_PATH, override=True)
-        self.token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-        self.chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "811560107").strip()
-        self.enabled: bool = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("true", "1", "yes")
+        try:
+            from trading_engine.core.keyvault import get_secret
+            self.token: str = (get_secret("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")).strip()
+            self.chat_id: str = (get_secret("TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")).strip()
+            self.enabled: bool = (get_secret("TELEGRAM_ENABLED") or os.getenv("TELEGRAM_ENABLED", "false")).lower() in ("true", "1", "yes")
+        except Exception:
+            self.token: str = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+            self.chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+            self.enabled: bool = os.getenv("TELEGRAM_ENABLED", "false").lower() in ("true", "1", "yes")
 
     def is_configured(self) -> bool:
         """Returns True if bot token and chat ID are valid and notifications are enabled."""
@@ -81,20 +87,21 @@ class TelegramNotifier:
 
     def send_tunnel_url_alert(self, public_url: str, is_new: bool = True) -> bool:
         """
-        Sends an formatted notification with the new Cloudflare public URL.
+        Sends a formatted notification with the new Cloudflare public URL.
+        Includes direct links to both the Main Dashboard and the Contract Analysis Page.
         """
         now_ist = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S IST")
-        title_prefix = "🚀 <b>AI Trader Live Dashboard Online</b>" if is_new else "🔄 <b>Cloudflare Tunnel URL Updated</b>"
+        title_prefix = "🚀 <b>AI Trader Live Engine Online</b>" if is_new else "🔄 <b>Cloudflare Tunnel URL Updated</b>"
 
         message = (
             f"{title_prefix}\n\n"
-            f"🔗 <b>Public Access URL:</b>\n"
-            f"<a href=\"{public_url}\">{public_url}</a>\n\n"
+            f"🌐 <b>Public Access URLs:</b>\n"
+            f"• 📊 <b>Dashboard:</b> <a href=\"{public_url}\">{public_url}</a>\n"
+            f"• 📈 <b>Contract Analysis:</b> <a href=\"{public_url}/contract\">{public_url}/contract</a>\n\n"
             f"⚡ <b>Active Features:</b>\n"
-            f"• 1-Min Live Candlestick Chart (IST Timezone)\n"
-            f"• Real-Time AI Predictor Gauges\n"
-            f"• Live NIFTY Option Chain Matrix\n"
-            f"• Backdated Market Session Simulator\n"
+            f"• 1-Min Live Candlestick Chart with SMF Cloud\n"
+            f"• Interactive Floating Option Chain (Weekly & Monthly)\n"
+            f"• Real-Time AI Direction & Technical Regimes\n"
             f"• Autonomous Paper Trading with Iceberg Slicing\n\n"
             f"⏰ <b>Generated:</b> <code>{now_ist}</code>\n"
             f"🛡 <b>Network:</b> Cloudflare Tunnel (SSL Encrypted)"

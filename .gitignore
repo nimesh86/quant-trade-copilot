@@ -1,7 +1,30 @@
+# Environment & Credentials (NEVER commit secrets!)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.enc
+
+# Virtual Environments & Caches
 venv/
+.venv/
+env/
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.pkl
 .DS_Store
+
+# Logs & Temporary Files
 *.log
 scratch/
-overnight_trials.csv
+tunnel_state.json
+/tmp/
+
+# Model Weights & Residual Dumps
+trading_engine/ai/kronos_src/
+
+# Backtest CSV Dumps (Keep Git history lightweight)
+*.csv
+!trading_engine/data/*.csv

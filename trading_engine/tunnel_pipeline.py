@@ -93,6 +93,7 @@ class TunnelPipeline:
 
     def __init__(self, target_port: int = 8080):
         self.target_port = target_port
+        self._cleanup_orphaned_tunnels()
         self.binary_path = find_cloudflared_binary()
         self.current_url: Optional[str] = None
         self.notified_url: Optional[str] = None
@@ -100,6 +101,21 @@ class TunnelPipeline:
         self.running = True
         # Watcher thread that automatically alerts Telegram as soon as TELEGRAM_BOT_TOKEN is saved
         threading.Thread(target=self._env_watcher_loop, daemon=True).start()
+
+    def _cleanup_orphaned_tunnels(self):
+        """Kills any previous cloudflared processes bound to this port."""
+        try:
+            res = subprocess.run(["pgrep", "-f", f"cloudflared.*localhost:{self.target_port}"], capture_output=True, text=True)
+            for pid_str in res.stdout.strip().split():
+                if pid_str.isdigit():
+                    pid = int(pid_str)
+                    if pid != os.getpid():
+                        try:
+                            os.kill(pid, signal.SIGTERM)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
     def _env_watcher_loop(self):
         """Watches for TELEGRAM_BOT_TOKEN to be set in .env and delivers pending alerts."""
@@ -134,7 +150,7 @@ class TunnelPipeline:
         logger.info(f"Using cloudflared binary: {self.binary_path}")
 
         while self.running:
-            cmd = [self.binary_path, "tunnel", "--url", f"http://localhost:{self.target_port}"]
+            cmd = [self.binary_path, "tunnel", "--protocol", "http2", "--url", f"http://localhost:{self.target_port}"]
             logger.info(f"Launching tunnel subprocess: {' '.join(cmd)}")
 
             try:
@@ -159,6 +175,15 @@ class TunnelPipeline:
                         if url != found_url:
                             found_url = url
                             self._on_url_detected(url)
+
+                    # Detect expired tunnel session error and force-restart to get a new tunnel
+                    if "Unauthorized: Tunnel not found" in line_clean:
+                        logger.warning("Detected expired quick tunnel session ('Unauthorized: Tunnel not found'). Terminating process to spawn a fresh tunnel...")
+                        try:
+                            self.process.terminate()
+                        except Exception:
+                            pass
+                        break
 
                     # Also print info logs from cloudflared
                     if "INF" in line_clean or "ERR" in line_clean or "WRN" in line_clean:

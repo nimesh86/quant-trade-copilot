@@ -125,8 +125,18 @@ function alignMarkersWithCandles(markers, formattedCandles) {
 
     const aligned = [];
     for (const m of markers) {
-        let mTime = Number(m.time);
-        if (isNaN(mTime)) continue;
+        let mTime = m.time;
+        if (typeof mTime === 'string') {
+            const asNum = Number(mTime);
+            if (!isNaN(asNum) && asNum > 1000000000) {
+                mTime = asNum;
+            } else {
+                const p = new Date(mTime).getTime();
+                mTime = isNaN(p) ? Number(mTime) : Math.floor(p / 1000);
+            }
+        }
+        mTime = Number(mTime);
+        if (isNaN(mTime) || mTime <= 0) continue;
 
         // Skip markers that fall outside candle range
         if (mTime < minTime || mTime > maxTime) {
@@ -177,7 +187,7 @@ function updateVisibleMarkers(timeRange) {
 
     // Determine current visible time bounds from chart
     const range = timeRange || (App.chart && App.chart.timeScale ? App.chart.timeScale().getVisibleRange() : null);
-    if (!range || !range.from || !range.to) {
+    if (!range || typeof range.from !== 'number' || typeof range.to !== 'number') {
         try { App.candleSeries.setMarkers(all); } catch (e) {}
         return;
     }
@@ -186,7 +196,7 @@ function updateVisibleMarkers(timeRange) {
     const visible = all.filter(m => m.time >= range.from - 60 && m.time <= range.to + 60);
     visible.sort((a, b) => a.time - b.time);
     try {
-        App.candleSeries.setMarkers(visible);
+        App.candleSeries.setMarkers(visible.length > 0 ? visible : all);
     } catch (e) {
         console.warn("setMarkers err:", e);
     }
@@ -265,8 +275,8 @@ const SMF = {
     dotCooldown: 12,
     bullColor: '#00c8ff',
     bearColor: '#ff005d',
-    callColor: '#0052e0', // Darker royal blue for high contrast against cyan candles
-    putColor: '#d60029',  // Darker crimson red for high contrast against pink candles
+    buyColor: '#00f2a9',   // Vibrant high-contrast green for Buy
+    sellColor: '#ff005d',  // Vibrant high-contrast neon red/pink for Sell
     showBands: true,
     showCloud: true,
     showDots: true,
@@ -455,20 +465,22 @@ function computeSMF(candles) {
 
         if (SMF.showSwitch) {
             if (isSwitchUp) {
+                const limP = Math.round(Math.min(c.close, Math.max(bMain[i], c.close - 0.3 * (atr[i] || 2))) * 20) / 20;
                 smfMarkers.push({
                     time: c.time,
                     position: 'belowBar',
-                    color: SMF.callColor,
+                    color: SMF.buyColor,
                     shape: 'arrowUp',
-                    text: '𝑪𝒂𝒍𝒍',
+                    text: `Buy (Lim: ₹${limP.toFixed(2)})`,
+                    limitPrice: limP,
                 });
             } else if (isSwitchDown) {
                 smfMarkers.push({
                     time: c.time,
                     position: 'aboveBar',
-                    color: SMF.putColor,
+                    color: SMF.sellColor,
                     shape: 'arrowDown',
-                    text: '𝑷𝒖𝒕',
+                    text: 'Sell',
                 });
             }
         }
@@ -491,7 +503,7 @@ function computeSMF(candles) {
                 smfMarkers.push({
                     time: c.time,
                     position: 'aboveBar',
-                    color: SMF.putColor,
+                    color: SMF.sellColor,
                     shape: 'circle',
                     text: '✦',
                 });
@@ -501,7 +513,7 @@ function computeSMF(candles) {
                 smfMarkers.push({
                     time: c.time,
                     position: 'belowBar',
-                    color: SMF.callColor,
+                    color: SMF.buyColor,
                     shape: 'circle',
                     text: '✦',
                 });
