@@ -16,6 +16,8 @@ SQLAlchemy>=2.0.0
 numpy>=1.26.0
 pandas>=2.2.0
 scikit-learn>=1.4.0
+lightgbm>=4.3.0
+xgboost>=2.0.0
 
 # Broker & External Integrations
 kiteconnect>=5.0.0
