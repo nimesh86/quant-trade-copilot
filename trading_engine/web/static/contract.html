@@ -6,8 +6,7 @@
     <meta name="theme-color" content="#070b14" />
     <title>Contract Analysis — AI Trader</title>
     <meta name="description" content="Live contract chart and Smart Money Flow Cloud analysis for NIFTY options, futures and equities." />
-    <link rel="stylesheet" href="/static/contract.css?v=20261022_1545" />
-    <link rel="stylesheet" href="/static/keyvault_modal.css?v=1.0" />
+    <link rel="stylesheet" href="/static/contract.css?v=20261022_1600" />
 </head>
 <body>
 <div id="page-shell">
@@ -17,98 +16,68 @@
 
     <!-- ── Header ────────────────────────────────────────────────────────── -->
     <header id="header">
+        <div class="header-main-row">
+            <div class="header-nav-group">
+                <!-- 1. Back to Dashboard Button -->
+                <a href="/" id="home-link" class="nav-switch-btn" title="Back to Main Dashboard">
+                    <span class="home-arrow">←</span>
+                    <span class="home-text">Dashboard</span>
+                </a>
 
-        <div class="header-top-row">
-            <!-- Home link -->
-            <a href="/" id="home-link" title="Back to Dashboard">
-                <span class="home-arrow">←</span>
-                <span class="home-text">Dashboard</span>
-            </a>
+                <!-- 2. Small Contract Name & Price Label -->
+                <div id="contract-badge" class="contract-badge-compact" title="Active Contract Info">
+                    <span id="badge-symbol" class="badge-symbol-text">No contract selected</span>
+                    <span id="badge-ltp" class="badge-ltp-text">——</span>
+                    <span id="badge-chg" class="badge-chg-text"></span>
+                    <span id="badge-target" class="badge-target-text" style="display:none;">🎯 --</span>
+                </div>
 
-            <!-- Search Box -->
-            <div id="search-wrapper">
-                <span id="search-icon">⌕</span>
-                <input
-                    type="text"
-                    id="search-input"
-                    placeholder="Search contract… (/ or ⌘K)"
-                    autocomplete="off"
-                    spellcheck="false"
-                />
-                <div id="search-dropdown"></div>
+                <!-- 3. Small Option Chain Button -->
+                <button id="btn-toggle-oc" class="oc-toggle-btn-small" title="Open Option Chain (⚡)">
+                    <span class="oc-btn-icon">⚡</span>
+                    <span class="oc-btn-text">Chain</span>
+                    <span id="oc-btn-badge" class="oc-btn-badge" style="display:none;">19 OCT</span>
+                </button>
+
+                <!-- 4. 1m / 5m Timeframe Toggle Pill (Space Saver) -->
+                <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
+                    <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute Candle">1m</button>
+                    <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute Candle">5m</button>
+                </div>
             </div>
 
-            <!-- Option Chain Toggle Button -->
-            <button id="btn-toggle-oc" class="oc-toggle-btn" title="Open Floating Option Chain">
-                <span class="oc-btn-icon">⚡</span>
-                <span class="oc-btn-text">Option Chain</span>
-                <span id="oc-btn-badge" class="oc-btn-badge">19 OCT</span>
-            </button>
+            <div class="header-tools-group">
+                <!-- 5. Icon-Only Action Buttons with Tooltips -->
+                <div class="icon-toolbar" role="toolbar" aria-label="Chart Indicators & Controls">
+                    <button id="smf-toggle-btn" class="icon-btn" title="Toggle Smart Money Flow Cloud">⬡</button>
+                    <button id="smf-price-toggle-btn" class="icon-btn" title="Toggle Signal Price on Markers">🏷</button>
+                    <button id="smf-target-toggle-btn" class="icon-btn" title="Toggle Maximum Target & Profit Lines">🎯</button>
+                    <button id="dynamic-exit-btn" class="icon-btn dynamic-exit-btn active" title="Toggle SMF Dynamic Exit & Chandelier Trail Engine">🛡️</button>
+                    <button id="btn-fit-contract" class="icon-btn" title="Fit all candles in view">⤢</button>
+                    <button id="btn-replay-toggle" class="icon-btn replay-toggle-btn" title="Toggle Bar Replay Simulator (Shift+R)">⏪</button>
+                </div>
 
-            <!-- Key Vault Button -->
-            <button id="btn-open-vault" class="vault-btn" title="Key Vault Settings" onclick="openVaultModal()">
-                <span class="vault-btn-icon">🔐</span>
-                <span id="vault-btn-text" class="vault-btn-text">Key Vault</span>
-                <span id="vault-status-dot" class="vault-status-dot unconfigured"></span>
-            </button>
+                <!-- 6. Compact Expiry Filter Dropdown -->
+                <div id="expiry-wrapper" class="expiry-compact" title="Filter by Expiry Date">
+                    <span class="expiry-icon">📅</span>
+                    <select id="expiry-select">
+                        <option value="">Expiry</option>
+                    </select>
+                </div>
 
-            <!-- Connection Status -->
-            <div id="conn-pill" class="waiting">
-                <div id="conn-dot"></div>
-                <span id="conn-label">Connecting…</span>
+                <!-- 7. Connection Status Indicator -->
+                <div id="conn-pill" class="waiting" title="Connection status">
+                    <div id="conn-dot"></div>
+                    <span id="conn-label">Connecting…</span>
+                </div>
             </div>
         </div>
 
-        <div class="header-sub-row">
-            <!-- Selected Contract Badge -->
-            <div id="contract-badge">
-                <span id="badge-symbol">No contract selected</span>
-                <span id="badge-ltp">——</span>
-                <span id="badge-chg"></span>
-                <span id="badge-target" class="badge-target" style="display:none;">🎯 Max: --</span>
-            </div>
-
-            <!-- Timeframe Controls -->
-            <div id="tf-controls" role="group" aria-label="Chart timeframe">
-                <button class="tf-btn active" data-tf="1"  id="tf-1m"  title="1 Minute">1m</button>
-                <button class="tf-btn"        data-tf="3"  id="tf-3m"  title="3 Minutes">3m</button>
-                <button class="tf-btn"        data-tf="5"  id="tf-5m"  title="5 Minutes">5m</button>
-                <button class="tf-btn"        data-tf="15" id="tf-15m" title="15 Minutes">15m</button>
-            </div>
-
-            <!-- SMF Cloud Toggle -->
-            <button id="smf-toggle-btn" title="Toggle Smart Money Flow Cloud">⬡ SMF Cloud</button>
-
-            <!-- SMF Signal Price Toggle -->
-            <button id="smf-price-toggle-btn" title="Toggle Price on Buy/Sell Signal Markers">🏷 Signal Price</button>
-
-            <!-- SMF Max Target Toggle -->
-            <button id="smf-target-toggle-btn" title="Toggle Maximum Target & Profit Lines">🎯 Max Target</button>
-
-            <!-- SMF Dynamic Exit Toggle -->
-            <button id="dynamic-exit-btn" class="dynamic-exit-btn active" title="Toggle SMF Dynamic Exit & Chandelier Trail Engine">🛡️ Dynamic Exit</button>
-
-            <!-- Fit content -->
-            <button id="btn-fit-contract" title="Fit all candles in view">⤢ Fit</button>
-
-            <!-- Bar Replay Toggle -->
-            <button id="btn-replay-toggle" class="replay-toggle-btn" title="Toggle Bar Replay Simulator (Shift+R)">
-                <span class="replay-btn-icon">⏪</span>
-                <span class="replay-btn-text">Replay</span>
-            </button>
-
-            <!-- Expiry Date Filter Dropdown -->
-            <div id="expiry-wrapper" title="Filter by Expiry Date">
-                <span class="expiry-icon">📅</span>
-                <select id="expiry-select">
-                    <option value="">All Expiries</option>
-                </select>
-            </div>
-
-            <!-- Keyboard hint -->
-            <span id="kbd-hint"><kbd>/</kbd> to search</span>
+        <!-- Hidden Search elements retained for contract.js compatibility and / shortcut -->
+        <div id="search-wrapper" style="display:none;">
+            <input type="text" id="search-input" placeholder="Search contract… (/ or ⌘K)" />
+            <div id="search-dropdown"></div>
         </div>
-
     </header>
 
     <!-- ── Chart Area ─────────────────────────────────────────────────────── -->
@@ -159,7 +128,7 @@
                 <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
             </div>
 
-            <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕ Exit</button>
+            <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
         </div>
 
         <!-- Pre-market / No-contract Overlay -->
@@ -268,7 +237,7 @@
             </div>
 
             <div class="de-row-right">
-                <button id="de-btn-toggle-log" class="de-btn-toggle-log" title="View Detailed Trades Log">📋 Trades (<span id="de-trades-count">0</span>)</button>
+                <button id="de-btn-toggle-log" class="de-btn-toggle-log" title="View Detailed Trades Log">📋 <span id="de-trades-count">0</span></button>
                 <button id="de-card-close" class="de-footer-close-btn" title="Hide Dynamic Exit Bar">✕</button>
             </div>
         </div>
@@ -377,131 +346,11 @@
 
 </div><!-- /page-shell -->
 
-<!-- ── Multi-Broker KeyVault Modal ────────────────────────────────────── -->
-<div id="vault-modal-backdrop" class="vault-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeVaultModal();">
-    <div class="vault-modal-card">
-        <div class="vault-modal-header">
-            <div class="vault-modal-title">
-                <span class="vault-modal-icon">🔐</span>
-                <div>
-                    <h3>Broker KeyVault</h3>
-                    <p class="vault-modal-sub">Dual-Broker Hardware-Encrypted Storage</p>
-                </div>
-            </div>
-            <button id="btn-close-vault" class="vault-close-btn" title="Close" onclick="closeVaultModal()">✕</button>
-        </div>
-
-        <div class="vault-modal-body">
-            <!-- Active Broker Quick Switcher -->
-            <div class="active-broker-row">
-                <span style="font-weight: 600; color: #cbd5e1;">Active Feed Source:</span>
-                <div class="active-broker-pills">
-                    <button type="button" id="pill-active-kite" class="active-pill-btn selected" onclick="setActiveBroker('kite')">🪁 Zerodha Kite</button>
-                    <button type="button" id="pill-active-breeze" class="active-pill-btn" onclick="setActiveBroker('breeze')">🏦 ICICI Breeze</button>
-                </div>
-            </div>
-
-            <!-- Broker Tab Bar -->
-            <div class="broker-tabs-bar">
-                <button type="button" id="tab-btn-kite" class="broker-tab-btn active" onclick="switchBrokerTab('kite')">
-                    <span>🪁</span> Zerodha Kite
-                </button>
-                <button type="button" id="tab-btn-breeze" class="broker-tab-btn" onclick="switchBrokerTab('breeze')">
-                    <span>🏦</span> ICICI Direct Breeze
-                </button>
-            </div>
-
-            <div class="vault-security-banner">
-                <span class="sec-shield">🛡️</span>
-                <span>Encrypted locally in <code>~/.trading_assistant/vault.enc</code>. Values are write-only and never exposed in plaintext.</span>
-            </div>
-
-            <div id="vault-status-indicator" class="vault-status-indicator">
-                <span class="indicator-dot"></span>
-                <span id="vault-status-text">Checking Broker status…</span>
-            </div>
-
-            <!-- Feedback Alert -->
-            <div id="vault-alert-box" class="vault-alert-box" style="display:none;"></div>
-
-            <!-- ── TAB 1: Zerodha Kite Form ──────────────────────────────────── -->
-            <div id="tab-content-kite" style="display:block;">
-                <form id="vault-kite-form" autocomplete="off" onsubmit="event.preventDefault(); submitKiteVault();">
-                    <div class="vault-form-group">
-                        <label for="vault-api-key">Kite API Key</label>
-                        <div class="vault-input-wrap">
-                            <input type="password" id="vault-api-key" placeholder="Enter Zerodha API key…" required autocomplete="new-password" />
-                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-api-key', this)">👁️</button>
-                        </div>
-                    </div>
-
-                    <div class="vault-form-group">
-                        <label for="vault-access-token">Daily Access Token</label>
-                        <div class="vault-input-wrap">
-                            <input type="password" id="vault-access-token" placeholder="Enter today's active access token…" required autocomplete="new-password" />
-                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-access-token', this)">👁️</button>
-                        </div>
-                        <span class="vault-hint">Tokens refresh daily. Updating here instantly hot-reloads the connection with zero downtime.</span>
-                    </div>
-
-                    <div class="vault-form-actions">
-                        <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
-                        <button type="submit" id="vault-kite-submit-btn" class="vault-submit-btn">
-                            <span>🔒 Save Kite Credentials</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- ── TAB 2: ICICI Direct Breeze Form ──────────────────────────── -->
-            <div id="tab-content-breeze" style="display:none;">
-                <form id="vault-breeze-form" autocomplete="off" onsubmit="event.preventDefault(); submitBreezeVault();">
-                    <div class="vault-form-group">
-                        <label for="vault-breeze-key">Breeze App Key (API Key)</label>
-                        <div class="vault-input-wrap">
-                            <input type="password" id="vault-breeze-key" placeholder="Enter ICICI Breeze API key…" required autocomplete="new-password" />
-                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-key', this)">👁️</button>
-                        </div>
-                    </div>
-
-                    <div class="vault-form-group">
-                        <label for="vault-breeze-secret">Breeze Secret Key</label>
-                        <div class="vault-input-wrap">
-                            <input type="password" id="vault-breeze-secret" placeholder="Enter ICICI Breeze secret key…" required autocomplete="new-password" />
-                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-secret', this)">👁️</button>
-                        </div>
-                    </div>
-
-                    <div class="vault-form-group">
-                        <label for="vault-breeze-token">Daily Session Token</label>
-                        <div class="vault-input-wrap">
-                            <input type="password" id="vault-breeze-token" placeholder="Enter today's Breeze session token…" required autocomplete="new-password" />
-                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-token', this)">👁️</button>
-                        </div>
-                        <span class="vault-hint">Obtain your daily session token by logging into api.icicidirect.com/apiuser/login.</span>
-                    </div>
-
-                    <div class="vault-form-actions">
-                        <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
-                        <button type="submit" id="vault-breeze-submit-btn" class="vault-submit-btn">
-                            <span>🔒 Save Breeze Credentials</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-
-        </div>
-    </div>
-</div>
-
 <!-- LightweightCharts library (same copy as main dashboard) -->
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
-<!-- KeyVault Modal Controller -->
-<script src="/static/keyvault_modal.js?v=1.0"></script>
-
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261022_1545"></script>
+<script src="/static/contract.js?v=20261022_1600"></script>
 
 </body>
 </html>

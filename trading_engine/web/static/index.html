@@ -15,7 +15,7 @@
   <script src="/static/lightweight-charts.standalone.production.js"></script>
 
   <!-- Premium Mobile-First Stylesheet with Cache Busting -->
-  <link rel="stylesheet" href="/static/app.css?v=3.0">
+  <link rel="stylesheet" href="/static/app.css?v=3.1">
   <link rel="stylesheet" href="/static/keyvault_modal.css?v=1.0">
 </head>
 <body>
@@ -36,8 +36,12 @@
       </div>
     </div>
 
-    <!-- Quick Status Badge & KeyVault Trigger -->
-    <div style="display: flex; align-items: center; gap: 8px;">
+    <!-- Quick Status Badge, Nav to Contract & KeyVault Trigger -->
+    <div class="header-actions-group">
+      <a href="/static/contract.html" id="btn-nav-contract" class="vault-header-btn nav-btn" title="Open Contract Analysis View (⚡)">
+        <span>📊</span>
+        <span class="vault-btn-text">Contract</span>
+      </a>
       <button id="btn-open-vault" class="vault-header-btn" title="Key Vault Settings" onclick="openVaultModal()">
         <span>🔐</span>
         <span id="vault-btn-text" class="vault-btn-text">Key Vault</span>
@@ -245,28 +249,29 @@
     <section class="chart-section glass-panel">
       <div class="chart-header">
         <div class="chart-title-area">
-          <h3>NIFTY 50 Index</h3>
-          <div class="timeframe-selector-group" title="Select Chart Timeframe">
-            <button class="tf-btn active" data-tf="1" onclick="setTimeframe(1)">1m</button>
-            <button class="tf-btn" data-tf="3" onclick="setTimeframe(3)">3m</button>
-            <button class="tf-btn" data-tf="5" onclick="setTimeframe(5)">5m</button>
-            <button class="tf-btn" data-tf="15" onclick="setTimeframe(15)">15m</button>
+          <h3>NIFTY 50</h3>
+          <div class="timeframe-selector-group tf-toggle-pill" role="group" aria-label="Select Chart Timeframe">
+            <button class="tf-btn active" data-tf="1" onclick="setTimeframe(1)" title="1 Minute Candle">1m</button>
+            <button class="tf-btn" data-tf="5" onclick="setTimeframe(5)" title="5 Minute Candle">5m</button>
           </div>
           <select id="chart-session-date-select" class="sim-select" style="padding: 2px 8px; font-size: 0.72rem; height: 24px; border-color: rgba(0, 210, 255, 0.35); background: rgba(13, 20, 36, 0.9); color: #00d2ff; border-radius: 4px; cursor: pointer;" onchange="syncDateInputs(this.value)" title="Switch trading session date">
-            <option value="">Session Date...</option>
+            <option value="">Date…</option>
           </select>
         </div>
         <div class="chart-legend">
-          <!-- Smart Money Flow Cloud Toggle Button -->
-          <button id="btn-toggle-smf" class="smf-btn" onclick="toggleSMFCloud()" title="Toggle Smart Money Flow Cloud [BOSWaves] with Adaptive Bands & Cloud">
-            ☁️ SMF Cloud
+          <!-- Smart Money Flow Cloud Toggle Button (Icon Only) -->
+          <button id="btn-toggle-smf" class="smf-btn icon-chart-btn" onclick="toggleSMFCloud()" title="Toggle Smart Money Flow Cloud [BOSWaves]">
+            ☁️
           </button>
 
-          <button id="btn-chart-fit" class="chart-ctrl-btn" onclick="fitChartContent()" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 4px; border: 1px solid rgba(0, 210, 255, 0.4); color: #00d2ff; background: rgba(0, 210, 255, 0.12); cursor: pointer; font-weight: 600;" title="Fit full trading session so all candles & markers are visible">
-            ⤢ Fit Day
+          <!-- Fit Content (Icon Only) -->
+          <button id="btn-chart-fit" class="chart-ctrl-btn icon-chart-btn" onclick="fitChartContent()" title="Fit full session candles in view">
+            ⤢
           </button>
-          <button id="btn-chart-latest" class="chart-ctrl-btn" onclick="scrollToLatestCandle()" style="padding: 4px 10px; font-size: 0.72rem; border-radius: 4px; border: 1px solid rgba(255, 255, 255, 0.2); color: #e2e8f0; background: rgba(255, 255, 255, 0.08); cursor: pointer; font-weight: 600;" title="Scroll directly to the latest bar of the session">
-            ▶ Live Bar
+
+          <!-- Scroll to Latest (Icon Only) -->
+          <button id="btn-chart-latest" class="chart-ctrl-btn icon-chart-btn" onclick="scrollToLatestCandle()" title="Scroll directly to the latest bar">
+            ▶
           </button>
           <div class="legend-item smf-legend-item">
             <span class="legend-color" style="background: #00c8ff;"></span>

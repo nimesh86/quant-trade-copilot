@@ -1115,3 +1115,139 @@ tr.atm-row td.strike-cell {
   box-shadow: 0 0 4px #ffffff;
 }
 
+/* ── Header Actions & Navigation Switcher ──────────────────────────────── */
+.header-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#btn-nav-contract {
+  border-color: rgba(0, 210, 255, 0.35);
+  color: var(--accent-cyan);
+  background: rgba(0, 210, 255, 0.08);
+  text-decoration: none;
+}
+#btn-nav-contract:hover {
+  border-color: var(--accent-cyan);
+  background: rgba(0, 210, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 210, 255, 0.25);
+  color: #ffffff;
+}
+
+/* ── 1m / 5m Toggle Pill ───────────────────────────────────────────────── */
+.tf-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(13, 22, 36, 0.9);
+  border: 1px solid rgba(0, 195, 255, 0.25);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.tf-toggle-pill .tf-btn {
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tf-toggle-pill .tf-btn:hover {
+  color: var(--accent-cyan);
+}
+
+.tf-toggle-pill .tf-btn.active {
+  background: rgba(0, 200, 255, 0.22);
+  color: var(--accent-cyan);
+  font-weight: 800;
+  box-shadow: 0 0 8px rgba(0, 200, 255, 0.35);
+}
+
+/* ── Icon-Only Chart Action Buttons ────────────────────────────────────── */
+.icon-chart-btn {
+  width: 28px;
+  height: 26px;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem !important;
+  border-radius: 5px !important;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+/* ── Mobile Layout Optimization (< 600px & < 440px) ────────────────────── */
+@media (max-width: 600px) {
+  header.app-header {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .brand-section {
+    gap: 8px;
+  }
+  .logo-badge {
+    width: 32px;
+    height: 32px;
+    font-size: 0.95rem;
+  }
+  .brand-meta h1 {
+    font-size: 0.92rem;
+  }
+  .ticker-spot {
+    font-size: 0.72rem;
+  }
+  .header-actions-group {
+    gap: 5px;
+  }
+  .vault-header-btn {
+    padding: 5px 8px;
+    font-size: 11px;
+    gap: 5px;
+  }
+  #statutory-iceberg-badge {
+    display: none; /* Hide on mobile so contract and key vault buttons fit cleanly */
+  }
+  .chart-header {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .chart-title-area {
+    gap: 6px;
+  }
+  .chart-title-area h3 {
+    font-size: 0.85rem;
+  }
+  .chart-legend .legend-item {
+    display: none; /* Hide text legend on mobile to keep icons prominent */
+  }
+}
+
+@media (max-width: 440px) {
+  .vault-header-btn .vault-btn-text {
+    display: none; /* Icon only on compact screens */
+  }
+  .vault-header-btn {
+    padding: 6px 9px;
+  }
+  .brand-meta h1 span:first-child {
+    font-size: 0.88rem;
+  }
+  .ticker-spot span:first-child {
+    display: none; /* Spot price only */
+  }
+  .chart-section {
+    min-height: 480px;
+  }
+  .chart-container-box {
+    min-height: 400px;
+  }
+}
