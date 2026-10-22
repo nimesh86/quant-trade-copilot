@@ -105,17 +105,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Fetch option chain to auto-chart ATM strike
         await fetchOptionChain();
     }
-
-    // On mobile devices, reveal the Option Chain below the chart by default
-    if (window.innerWidth <= 900) {
-        const panel = document.getElementById('option-chain-panel');
-        const toggleBtn = document.getElementById('btn-toggle-oc');
-        if (panel) {
-            panel.classList.remove('collapsed');
-            C.optionChainOpen = true;
-            if (toggleBtn) toggleBtn.classList.add('active');
-        }
-    }
 });
 
 // ── Chart Init ────────────────────────────────────────────────────────────────
@@ -144,8 +133,8 @@ function initChart() {
             textColor: '#6a8fac',
             autoScale: true,
             scaleMargins: {
-                top: 0.12,
-                bottom: 0.12,
+                top: 0.10,
+                bottom: 0.05,
             },
         },
         timeScale: {
@@ -183,6 +172,18 @@ function initChart() {
         borderDownColor: SMF.bearColor,
         wickUpColor: SMF.bullColor,
         wickDownColor: SMF.bearColor,
+        autoscaleInfoProvider: (original) => {
+            const res = original();
+            if (res && res.priceRange) {
+                return {
+                    priceRange: {
+                        minValue: Math.max(0, res.priceRange.minValue),
+                        maxValue: Math.max(1, res.priceRange.maxValue),
+                    },
+                };
+            }
+            return res;
+        },
     });
 
     // SMF Line series (hidden, used for band reference)
@@ -201,11 +202,11 @@ function initChart() {
     // Maximum Target Dual Volatility Bands (Upper & Lower continuous dashed boundary lines)
     C.smfTargetUpperSeries = C.chart.addLineSeries({
         color: 'rgba(255, 209, 102, 0.35)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
-        title: 'Upper Max Target',
+        title: '',
     });
     C.smfTargetLowerSeries = C.chart.addLineSeries({
         color: 'rgba(255, 209, 102, 0.25)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
-        title: 'Lower Max Target',
+        title: '',
         autoscaleInfoProvider: () => null,
     });
 
@@ -216,7 +217,7 @@ function initChart() {
         lineWidth: 2,
         priceLineVisible: false,
         lastValueVisible: false,
-        title: 'Chandelier Trail',
+        title: '',
     });
     C.dynamicLadderSeries = C.chart.addLineSeries({
         color: '#06b6d4', // Cyan dashed
@@ -224,7 +225,7 @@ function initChart() {
         lineStyle: 2, // Dashed
         priceLineVisible: false,
         lastValueVisible: false,
-        title: 'Ladder Floor',
+        title: '',
     });
 
     // Canvas & Chart sync with chart viewport (responsive for mobile & orientation change)
@@ -677,6 +678,15 @@ function selectContract(contract) {
         renderOptionChainTable(C.optionChainData);
     }
 
+    // Auto-close Option Chain drawer on contract select so user gets full chart view
+    const ocPanel = document.getElementById('option-chain-panel');
+    const toggleBtn = document.getElementById('btn-toggle-oc');
+    if (ocPanel && C.optionChainOpen) {
+        C.optionChainOpen = false;
+        if (toggleBtn) toggleBtn.classList.remove('active');
+        ocPanel.classList.add('collapsed');
+    }
+
     hideOverlay();
     showLoading(true);
 
@@ -722,11 +732,7 @@ async function loadContractCandles(symbol) {
         }
 
         // Inform user if showing previous trading day data on weekend / market closed
-        const chgBadge = document.getElementById('badge-chg');
         if (data.is_last_day_data && data.date) {
-            if (chgBadge) {
-                chgBadge.innerHTML = `<span style="color:#6a8fac; font-size:11px; font-weight:normal; margin-left:6px;">📅 Last Day: ${data.date}</span>`;
-            }
             const statusLabel = document.getElementById('market-status-label');
             if (statusLabel) {
                 statusLabel.textContent = `Market Closed (${data.date})`;
@@ -3206,40 +3212,49 @@ function updateTargetPriceLines(sig, currentPrice) {
     const cur = currentPrice || sig.entryPrice;
     const hit = cur >= sig.maxTarget;
 
-    // Update Header Badge with Suggested Limit Price, Order Recommendation, and Targets
+    // Update Header Badge with Suggested Limit Price, Order Recommendation, and Targets (Desktop only)
     if (badge) {
-        badge.style.display = 'inline-flex';
-        const isMkt = sig.recommendedOrder === 'MARKET';
-        const orderPart = isMkt 
-            ? `<span style="color:#00f2a9;font-weight:700;">⚡ ORDER: MKT (Rocket Move)</span> | ` 
-            : (sig.limitPrice ? `📥 <b>Limit:</b> ₹${sig.limitPrice.toFixed(2)} | ` : '');
-
-        if (hit) {
-            badge.innerHTML = `${orderPart}⚡ <b>RUNNER TARGET HIT!</b> (₹${sig.maxTarget.toFixed(2)})`;
-            badge.style.background = 'rgba(255, 209, 102, 0.25)';
-            badge.style.borderColor = '#ffd166';
-            badge.style.color = '#ffd166';
+        if (window.innerWidth <= 768) {
+            badge.style.display = 'none';
         } else {
-            const chopWarning = sig.isMiddayChop ? ` <span style="color:#ff6b6b;font-weight:700;">[⚠️ MIDDAY CHOP]</span>` : '';
-            const beText = sig.beLockTrigger ? `🛡️ <b>BE Lock:</b> ₹${sig.beLockTrigger.toFixed(2)} | ` : '';
-            const t2Text = sig.target2 ? `🚀 <b>T2 (Runner):</b> ₹${sig.target2.toFixed(2)} | ` : '';
-            badge.innerHTML = `${orderPart}🎯 <b>T1 (Scalp 50%):</b> ₹${sig.target1.toFixed(2)} | ${beText}${t2Text}🛑 <b>SL:</b> ₹${sig.sl.toFixed(2)}${chopWarning}`;
-            badge.style.background = sig.isMiddayChop ? 'rgba(255, 107, 107, 0.12)' : (isMkt ? 'rgba(0, 242, 169, 0.15)' : 'rgba(0, 229, 255, 0.12)');
-            badge.style.borderColor = sig.isMiddayChop ? 'rgba(255, 107, 107, 0.4)' : (isMkt ? '#00f2a9' : 'rgba(0, 229, 255, 0.4)');
-            badge.style.color = sig.isMiddayChop ? '#ff8787' : (isMkt ? '#00f2a9' : '#00e5ff');
+            badge.style.display = 'inline-flex';
+            const isMkt = sig.recommendedOrder === 'MARKET';
+            const orderPart = isMkt 
+                ? `<span style="color:#00f2a9;font-weight:700;">⚡ ORDER: MKT (Rocket Move)</span> | ` 
+                : (sig.limitPrice ? `📥 <b>Limit:</b> ₹${sig.limitPrice.toFixed(2)} | ` : '');
+
+            if (hit) {
+                badge.innerHTML = `${orderPart}⚡ <b>RUNNER TARGET HIT!</b> (₹${sig.maxTarget.toFixed(2)})`;
+                badge.style.background = 'rgba(255, 209, 102, 0.25)';
+                badge.style.borderColor = '#ffd166';
+                badge.style.color = '#ffd166';
+            } else {
+                const chopWarning = sig.isMiddayChop ? ` <span style="color:#ff6b6b;font-weight:700;">[⚠️ MIDDAY CHOP]</span>` : '';
+                const beText = sig.beLockTrigger ? `🛡️ <b>BE Lock:</b> ₹${sig.beLockTrigger.toFixed(2)} | ` : '';
+                const t2Text = sig.target2 ? `🚀 <b>T2 (Runner):</b> ₹${sig.target2.toFixed(2)} | ` : '';
+                badge.innerHTML = `${orderPart}🎯 <b>T1 (Scalp 50%):</b> ₹${sig.target1.toFixed(2)} | ${beText}${t2Text}🛑 <b>SL:</b> ₹${sig.sl.toFixed(2)}${chopWarning}`;
+                badge.style.background = sig.isMiddayChop ? 'rgba(255, 107, 107, 0.12)' : (isMkt ? 'rgba(0, 242, 169, 0.15)' : 'rgba(0, 229, 255, 0.12)');
+                badge.style.borderColor = sig.isMiddayChop ? 'rgba(255, 107, 107, 0.4)' : (isMkt ? '#00f2a9' : 'rgba(0, 229, 255, 0.4)');
+                badge.style.color = sig.isMiddayChop ? '#ff8787' : (isMkt ? '#00f2a9' : '#00e5ff');
+            }
         }
     }
+
+    const isMobile = (window.innerWidth <= 768);
 
     // 1. SUGGESTED ENTRY PRICE line (Cyan solid for Limit, Emerald Green for Rocket Market)
     if (sig.limitPrice) {
         const isMkt = sig.recommendedOrder === 'MARKET';
+        const entryTitle = isMobile
+            ? (isMkt ? `MKT ₹${sig.limitPrice.toFixed(1)}` : `BUY ₹${sig.limitPrice.toFixed(1)}`)
+            : (isMkt ? `⚡ MKT ENTRY ₹${sig.limitPrice.toFixed(2)}` : `📥 BUY LIMIT ₹${sig.limitPrice.toFixed(2)}`);
         setOrUpdatePriceLine('limit', {
             price: Number(sig.limitPrice.toFixed(2)),
             color: isMkt ? '#00f2a9' : '#00e5ff',
             lineWidth: 1.5,
             lineStyle: 0,
             axisLabelVisible: true,
-            title: isMkt ? `⚡ MKT ENTRY ₹${sig.limitPrice.toFixed(2)}` : `📥 BUY LIMIT ₹${sig.limitPrice.toFixed(2)}`,
+            title: entryTitle,
         });
     } else {
         setOrUpdatePriceLine('limit', null);
@@ -3253,7 +3268,7 @@ function updateTargetPriceLines(sig, currentPrice) {
             lineWidth: 1,
             lineStyle: 1,
             axisLabelVisible: true,
-            title: `🛡️ BE LOCK ₹${sig.beLockTrigger.toFixed(2)}`,
+            title: isMobile ? `BE ₹${sig.beLockTrigger.toFixed(1)}` : `🛡️ BE LOCK ₹${sig.beLockTrigger.toFixed(2)}`,
         });
     } else {
         setOrUpdatePriceLine('be_lock', null);
@@ -3267,7 +3282,7 @@ function updateTargetPriceLines(sig, currentPrice) {
             lineWidth: 1.5,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: `🎯 T1 SCALP (50%) ₹${sig.target1.toFixed(2)}`,
+            title: isMobile ? `T1 ₹${sig.target1.toFixed(1)}` : `🎯 T1 SCALP (50%) ₹${sig.target1.toFixed(2)}`,
         });
     } else {
         setOrUpdatePriceLine('t1_scalp', null);
@@ -3281,7 +3296,7 @@ function updateTargetPriceLines(sig, currentPrice) {
             lineWidth: 1.5,
             lineStyle: 0,
             axisLabelVisible: true,
-            title: `🚀 T2 RUNNER (50%) ₹${sig.target2.toFixed(2)}`,
+            title: isMobile ? `T2 ₹${sig.target2.toFixed(1)}` : `🚀 T2 RUNNER (50%) ₹${sig.target2.toFixed(2)}`,
         });
     } else {
         setOrUpdatePriceLine('t2_runner', null);
@@ -3295,7 +3310,7 @@ function updateTargetPriceLines(sig, currentPrice) {
             lineWidth: 1,
             lineStyle: 2,
             axisLabelVisible: true,
-            title: `🛑 SL ₹${sig.sl.toFixed(2)}`,
+            title: isMobile ? `SL ₹${sig.sl.toFixed(1)}` : `🛑 SL ₹${sig.sl.toFixed(2)}`,
         });
     } else {
         setOrUpdatePriceLine('sl', null);
