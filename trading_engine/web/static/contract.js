@@ -46,10 +46,19 @@ const C = {
     dynamicExitVariant: 'V5',
     dynamicTrailSeries: null,
     dynamicLadderSeries: null,
-    dynamicExitLastResult: null,
     tradingLots: 1,
+    lotUnits: 65,
     tradingState: null,
     tradingPollTimer: null,
+    limitTool: {
+        active: false,
+        limitPrice: 0,
+        targetPrice: 0,
+        slPrice: 0,
+        dragging: null
+    },
+    limitToolHitBoxes: [],
+    _tradingMouseInitialized: false,
     _canvasRenderPending: false,
     _executedTargets: new Set(),
 };
@@ -908,6 +917,9 @@ function applyFullChart(candles1m, shouldFit = true) {
     applySMFCloud(agg);
     const countEl = document.getElementById('stat-candles');
     if (countEl) countEl.textContent = agg.length;
+    if (candles1m && candles1m.length > 0) {
+        updateMarketBuyButton(candles1m[candles1m.length - 1].close);
+    }
     if (shouldFit && !C.replayMode && C.chart && agg.length > 0) {
         setTimeout(() => {
             if (!C.replayMode && C.chart) {
@@ -1216,8 +1228,9 @@ function handleContractTick(data) {
     // Hide any "No Data Yet" overlay once real live tick arrives
     hideOverlay();
 
-    // Update badge
+    // Update badge & buy button live premium
     document.getElementById('badge-ltp').textContent = `₹${ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+    updateMarketBuyButton(ltp);
     const chgEl = document.getElementById('badge-chg');
     if (C.sessionOpen != null) {
         const chgPct = ((ltp - C.sessionOpen) / C.sessionOpen * 100);
@@ -2959,6 +2972,19 @@ function renderSMFCanvas() {
 
     ctx.clearRect(0, 0, W, H);
 
+    // Accurate boundary where candle plot ends and right price scale starts
+    let priceScaleWidth = 65;
+    try {
+        if (C.chart && typeof C.chart.priceScale === 'function') {
+            const ps = C.chart.priceScale('right');
+            if (ps && typeof ps.width === 'function') {
+                const psw = ps.width();
+                if (psw > 30) priceScaleWidth = psw;
+            }
+        }
+    } catch (e) {}
+    const chartPlotRight = Math.round(W - priceScaleWidth);
+
     // Build pixel points matching chart coordinate system 1:1 (culled to visible viewport)
     const points = [];
     for (let i = 0; i < n; i++) {
@@ -3536,6 +3562,9 @@ function renderSMFCanvas() {
         }
         ctx.restore();
     }
+
+    // ── 4. Interactive TradingView Limit Tool & Active Position Canvas Overlay ───
+    renderTradingCanvasOverlay(ctx, W, H, chartPlotRight);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4233,6 +4262,19 @@ function renderReplayStep() {
 // ── CONTRACT TRADING ENGINE TERMINAL (ON-CHART & RISK CONTROLS) ──────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
+function updateMarketBuyButton(ltp) {
+    const pxEl = document.getElementById('btn-mkt-px');
+    if (!pxEl) return;
+    if (ltp != null && ltp > 0) {
+        pxEl.textContent = `₹${ltp.toFixed(1)}`;
+    } else if (C.rawCandles.length > 0) {
+        const c = C.rawCandles[C.rawCandles.length - 1].close;
+        pxEl.textContent = `₹${c.toFixed(1)}`;
+    } else {
+        pxEl.textContent = `₹--`;
+    }
+}
+
 function getLotSizeForSymbol(sym) {
     const s = (sym || C.symbol || C.underlying || 'NIFTY').toUpperCase();
     if (s.includes('BANKNIFTY')) return 30;
@@ -4243,8 +4285,8 @@ function getLotSizeForSymbol(sym) {
 }
 
 function updateLotDisplay() {
-    const lotSize = getLotSizeForSymbol(C.symbol);
-    const units = C.tradingLots * lotSize;
+    C.lotUnits = getLotSizeForSymbol(C.symbol);
+    const units = C.tradingLots * C.lotUnits;
     const lotsValEl = document.getElementById('trade-lots-val');
     const unitsValEl = document.getElementById('trade-units-val');
     if (lotsValEl) lotsValEl.textContent = C.tradingLots;
@@ -4301,70 +4343,557 @@ function updateTradingUI(state) {
         }
     }
 
-    // 5. Update Quick Trade Action Buttons Price Subtitles
+    // 5. Update Single Clean Market Buy Button with live premium
     const curPx = (C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0);
-    const mktPxEl = document.getElementById('btn-mkt-px');
-    const ltPxEl = document.getElementById('btn-lt-px');
-    if (mktPxEl) mktPxEl.textContent = curPx > 0 ? `₹${curPx.toFixed(1)}` : '₹--';
-    if (ltPxEl) {
-        const suggestedLT = C.activeTargetSignal?.limitPrice;
-        ltPxEl.textContent = suggestedLT ? `LT ₹${suggestedLT.toFixed(1)}` : (curPx > 0 ? `LT ₹${curPx.toFixed(1)}` : 'LT ₹--');
-    }
+    updateMarketBuyButton(curPx);
 
-    // 6. Active Position HUD on Trade Dock
-    const posHud = document.getElementById('trade-pos-hud');
+    // 6. Active Position: Show/Hide Single Market Exit Button in Header with live PnL
     const exitBtn = document.getElementById('btn-quick-exit');
     const posPnlSub = document.getElementById('btn-pos-pnl');
 
     if (state.active_position && state.active_position.symbol === C.symbol) {
         const pos = state.active_position;
-        if (posHud) posHud.classList.remove('hidden');
-        if (exitBtn) {
-            exitBtn.classList.remove('disabled');
-            exitBtn.disabled = false;
-        }
+        if (exitBtn) exitBtn.classList.remove('hidden');
 
         const pnl = pos.unrealized_pnl || 0.0;
-        const pnlPct = pos.unrealized_pnl_pct || 0.0;
         const pts = pos.unrealized_pts || 0.0;
-        const sign = pnl > 0 ? '+' : '';
+        const sign = pnl >= 0 ? '+' : '';
 
         if (posPnlSub) {
             posPnlSub.textContent = `${sign}₹${Math.round(pnl)} (${sign}${pts.toFixed(1)}p)`;
-            posPnlSub.style.color = pnl > 0 ? '#00f2a9' : (pnl < 0 ? '#ff4d6d' : '#cbd5e1');
-        }
-
-        const hudTag = document.getElementById('hud-pos-tag');
-        const hudDetails = document.getElementById('hud-pos-details');
-        const hudPnl = document.getElementById('hud-pos-pnl');
-        const hudTrail = document.getElementById('hud-trail-badge');
-        const hudTarget = document.getElementById('hud-target-badge');
-
-        if (hudTag) hudTag.textContent = pos.side;
-        if (hudDetails) hudDetails.textContent = `${pos.lots} Lot @ ₹${pos.entry_price.toFixed(2)}`;
-        if (hudPnl) {
-            hudPnl.textContent = `${sign}₹${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)`;
-            hudPnl.style.color = pnl > 0 ? '#00f2a9' : (pnl < 0 ? '#ff4d6d' : '#cbd5e1');
-        }
-        if (hudTrail) {
-            const beLock = pos.be_locked ? ' (BE Locked 🛡️)' : '';
-            hudTrail.textContent = `🛑 SL: ₹${(pos.current_sl || 0).toFixed(1)}${beLock}`;
-        }
-        if (hudTarget) {
-            hudTarget.textContent = pos.target1 ? `🎯 T1: ₹${pos.target1.toFixed(1)}` : '🎯 T1: --';
         }
     } else {
-        if (posHud) posHud.classList.add('hidden');
-        if (exitBtn) {
-            exitBtn.classList.add('disabled');
-            exitBtn.disabled = true;
-        }
-        if (posPnlSub) {
-            posPnlSub.textContent = 'FLAT';
-            posPnlSub.style.color = '#64748b';
-        }
+        if (exitBtn) exitBtn.classList.add('hidden');
     }
 }
+
+// ── TradingView-Style Interactive Limit Order & Target/SL Canvas Overlay ───────
+
+function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
+    if (!C.candleSeries || !C.chart) return;
+
+    // Reset hit boxes for mouse drag & click detection
+    C.limitToolHitBoxes = [];
+
+    const units = (C.tradingLots || 1) * (C.lotUnits || 65);
+    const lastCandle = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1] : null;
+    const curCandleX = lastCandle
+        ? Math.max(0, Math.min(chartPlotRight - 30, Math.round(C.chart.timeScale().timeToCoordinate(lastCandle.time) || 0)))
+        : Math.max(0, chartPlotRight - 150);
+
+    // ── 1. TRADINGVIEW-STYLE LIMIT ORDER TOOL (WHEN ACTIVE) ───────────────────
+    if (C.limitTool && C.limitTool.active) {
+        const lim = C.limitTool.limitPrice;
+        const tgt = C.limitTool.targetPrice;
+        const sl = C.limitTool.slPrice;
+
+        const yLim = Math.round(C.candleSeries.priceToCoordinate(lim));
+        const yTgt = Math.round(C.candleSeries.priceToCoordinate(tgt));
+        const ySL = Math.round(C.candleSeries.priceToCoordinate(sl));
+
+        if (yLim != null && yTgt != null && ySL != null) {
+            ctx.save();
+
+            // A. Shaded Profit and Loss Zones (TradingView Long Position style)
+            const zoneX = Math.max(curCandleX, chartPlotRight - 240);
+            const zoneW = chartPlotRight - zoneX - 6;
+
+            // Profit zone (Green tint)
+            const profitTop = Math.min(yLim, yTgt);
+            const profitH = Math.max(1, Math.abs(yTgt - yLim));
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.09)';
+            ctx.fillRect(zoneX, profitTop, zoneW, profitH);
+
+            // Risk zone (Red tint)
+            const riskTop = Math.min(yLim, ySL);
+            const riskH = Math.max(1, Math.abs(ySL - yLim));
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.09)';
+            ctx.fillRect(zoneX, riskTop, zoneW, riskH);
+
+            // B. Target Line & Badge
+            const tgtPts = tgt - lim;
+            const tgtRs = tgtPts * units;
+            const tgtPct = ((tgtPts / lim) * 100).toFixed(1);
+            const tgtLabel = `🎯 TARGET: ₹${tgt.toFixed(1)} (+${tgtPts.toFixed(1)}p | +₹${Math.round(tgtRs).toLocaleString('en-IN')} | +${tgtPct}%) ↕`;
+
+            ctx.beginPath();
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(zoneX, yTgt);
+            ctx.lineTo(chartPlotRight, yTgt);
+            ctx.stroke();
+
+            ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
+            const tgtTextW = Math.ceil(ctx.measureText(tgtLabel).width);
+            const tgtBadgeW = tgtTextW + 16;
+            const tgtBadgeH = 22;
+            const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 6);
+            const tgtBadgeY = Math.round(yTgt - tgtBadgeH / 2);
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 4);
+            else ctx.rect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#10b981';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(tgtLabel, tgtBadgeX + 8, tgtBadgeY + tgtBadgeH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'target_drag',
+                y: yTgt,
+                x: tgtBadgeX,
+                w: tgtBadgeW,
+                h: tgtBadgeH
+            });
+
+            // C. Stop Loss Line & Badge
+            const slPts = lim - sl;
+            const slRs = slPts * units;
+            const slPct = ((slPts / lim) * 100).toFixed(1);
+            const slLabel = `🛑 STOP LOSS: ₹${sl.toFixed(1)} (-${slPts.toFixed(1)}p | -₹${Math.round(slRs).toLocaleString('en-IN')} | -${slPct}%) ↕`;
+
+            ctx.beginPath();
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(zoneX, ySL);
+            ctx.lineTo(chartPlotRight, ySL);
+            ctx.stroke();
+
+            const slTextW = Math.ceil(ctx.measureText(slLabel).width);
+            const slBadgeW = slTextW + 16;
+            const slBadgeH = 22;
+            const slBadgeX = Math.round(chartPlotRight - slBadgeW - 6);
+            const slBadgeY = Math.round(ySL - slBadgeH / 2);
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 4);
+            else ctx.rect(slBadgeX, slBadgeY, slBadgeW, slBadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ef4444';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(slLabel, slBadgeX + 8, slBadgeY + slBadgeH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'sl_drag',
+                y: ySL,
+                x: slBadgeX,
+                w: slBadgeW,
+                h: slBadgeH
+            });
+
+            // D. Limit Order Line & Action Badge
+            ctx.beginPath();
+            ctx.strokeStyle = '#00e5ff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.moveTo(zoneX, yLim);
+            ctx.lineTo(chartPlotRight, yLim);
+            ctx.stroke();
+
+            const limText = `📥 LIMIT: ₹${lim.toFixed(1)} ↕`;
+            const placeText = `✔ BUY LIMIT`;
+            const cancelText = `✕`;
+
+            const limTextW = Math.ceil(ctx.measureText(limText).width);
+            const placeTextW = Math.ceil(ctx.measureText(placeText).width);
+            const cancelTextW = Math.ceil(ctx.measureText(cancelText).width);
+
+            const limBadgeW = limTextW + placeTextW + cancelTextW + 36;
+            const limBadgeH = 26;
+            const limBadgeX = Math.round(chartPlotRight - limBadgeW - 6);
+            const limBadgeY = Math.round(yLim - limBadgeH / 2);
+
+            // Container Badge
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.98)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(limBadgeX, limBadgeY, limBadgeW, limBadgeH, 5);
+            else ctx.rect(limBadgeX, limBadgeY, limBadgeW, limBadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#00e5ff';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+
+            // Label text
+            ctx.fillStyle = '#00e5ff';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(limText, limBadgeX + 8, limBadgeY + limBadgeH / 2);
+
+            // Place Order Button inside badge
+            const btnPlaceX = limBadgeX + limTextW + 14;
+            const btnPlaceW = placeTextW + 12;
+            const btnPlaceH = limBadgeH - 6;
+            const btnPlaceY = limBadgeY + 3;
+
+            ctx.fillStyle = '#00f2a9';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(btnPlaceX, btnPlaceY, btnPlaceW, btnPlaceH, 3);
+            else ctx.rect(btnPlaceX, btnPlaceY, btnPlaceW, btnPlaceH);
+            ctx.fill();
+
+            ctx.fillStyle = '#040914';
+            ctx.font = 'bold 11px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(placeText, btnPlaceX + btnPlaceW / 2, btnPlaceY + btnPlaceH / 2);
+
+            // Cancel Button
+            const btnCancelX = btnPlaceX + btnPlaceW + 6;
+            const btnCancelW = cancelTextW + 10;
+            const btnCancelH = btnPlaceH;
+            const btnCancelY = btnPlaceY;
+
+            ctx.fillStyle = 'rgba(255, 77, 109, 0.2)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(btnCancelX, btnCancelY, btnCancelW, btnCancelH, 3);
+            else ctx.rect(btnCancelX, btnCancelY, btnCancelW, btnCancelH);
+            ctx.fill();
+            ctx.strokeStyle = '#ff4d6d';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ff4d6d';
+            ctx.textAlign = 'center';
+            ctx.fillText(cancelText, btnCancelX + btnCancelW / 2, btnCancelY + btnCancelH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'limit_drag',
+                y: yLim,
+                x: limBadgeX,
+                w: limTextW + 10,
+                h: limBadgeH
+            });
+            C.limitToolHitBoxes.push({
+                type: 'limit_place',
+                x: btnPlaceX,
+                y: btnPlaceY,
+                w: btnPlaceW,
+                h: btnPlaceH
+            });
+            C.limitToolHitBoxes.push({
+                type: 'limit_cancel',
+                x: btnCancelX,
+                y: btnCancelY,
+                w: btnCancelW,
+                h: btnCancelH
+            });
+
+            ctx.restore();
+        }
+    }
+
+    // ── 2. ACTIVE POSITION LIVE LINES (DRAGGABLE SL & TARGET) ────────────────
+    if (C.tradingState && C.tradingState.active_position && C.tradingState.active_position.symbol === C.symbol) {
+        const pos = C.tradingState.active_position;
+        const entryPx = pos.entry_price;
+        const curSl = pos.current_sl;
+        const tgt1 = pos.target1;
+        const pnl = pos.unrealized_pnl || 0.0;
+        const pts = pos.unrealized_pts || 0.0;
+        const sign = pnl >= 0 ? '+' : '';
+
+        const yEntry = Math.round(C.candleSeries.priceToCoordinate(entryPx));
+        const yCurSl = curSl ? Math.round(C.candleSeries.priceToCoordinate(curSl)) : null;
+        const yTgt1 = tgt1 ? Math.round(C.candleSeries.priceToCoordinate(tgt1)) : null;
+
+        ctx.save();
+        ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
+
+        // Entry Line: Bright Emerald Solid
+        if (yEntry != null && yEntry >= 0 && yEntry <= H) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#00f2a9';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.moveTo(curCandleX, yEntry);
+            ctx.lineTo(chartPlotRight, yEntry);
+            ctx.stroke();
+
+            const entryLabel = `⚡ POS: ${pos.lots}L @ ₹${entryPx.toFixed(1)} | ${sign}₹${pnl.toFixed(0)} (${sign}${pts.toFixed(1)}p)${pos.be_locked ? ' [BE 🛡️]' : ''}`;
+            const textW = Math.ceil(ctx.measureText(entryLabel).width);
+            const badgeW = textW + 16;
+            const badgeH = 22;
+            const badgeX = Math.round(chartPlotRight - badgeW - 6);
+            const badgeY = Math.round(yEntry - badgeH / 2);
+
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+            else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fill();
+            ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+
+            ctx.fillStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(entryLabel, badgeX + 8, badgeY + badgeH / 2);
+        }
+
+        // Active SL Line: Draggable
+        if (yCurSl != null && yCurSl >= 0 && yCurSl <= H) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#ff4d6d';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yCurSl);
+            ctx.lineTo(chartPlotRight, yCurSl);
+            ctx.stroke();
+
+            const slLabel = `🛑 POS SL: ₹${curSl.toFixed(1)} ↕`;
+            const slTextW = Math.ceil(ctx.measureText(slLabel).width);
+            const slBadgeW = slTextW + 16;
+            const slBadgeH = 22;
+            const slBadgeX = Math.round(chartPlotRight - slBadgeW - 6);
+            const slBadgeY = Math.round(yCurSl - slBadgeH / 2);
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 4);
+            else ctx.rect(slBadgeX, slBadgeY, slBadgeW, slBadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#ff4d6d';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ff4d6d';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(slLabel, slBadgeX + 8, slBadgeY + slBadgeH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'pos_sl_drag',
+                y: yCurSl,
+                x: slBadgeX,
+                w: slBadgeW,
+                h: slBadgeH
+            });
+        }
+
+        // Active Target Line: Draggable
+        if (yTgt1 != null && yTgt1 >= 0 && yTgt1 <= H) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yTgt1);
+            ctx.lineTo(chartPlotRight, yTgt1);
+            ctx.stroke();
+
+            const tgtLabel = `🎯 POS T1: ₹${tgt1.toFixed(1)} ↕`;
+            const tgtTextW = Math.ceil(ctx.measureText(tgtLabel).width);
+            const tgtBadgeW = tgtTextW + 16;
+            const tgtBadgeH = 22;
+            const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 6);
+            const tgtBadgeY = Math.round(yTgt1 - tgtBadgeH / 2);
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 4);
+            else ctx.rect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffd166';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(tgtLabel, tgtBadgeX + 8, tgtBadgeY + tgtBadgeH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'pos_tgt_drag',
+                y: yTgt1,
+                x: tgtBadgeX,
+                w: tgtBadgeW,
+                h: tgtBadgeH
+            });
+        }
+
+        ctx.restore();
+    }
+}
+
+// ── Execute Limit Order Function ──────────────────────────────────────────────
+
+async function executeTradingViewLimitOrder() {
+    if (!C.symbol) {
+        flashExecutionAlert('⚠️ NO CONTRACT', 'Please select an option contract from the chain first.', 'warning');
+        return;
+    }
+    const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0;
+    const limitPx = C.limitTool.limitPrice;
+    const sl = C.limitTool.slPrice;
+    const t1 = C.limitTool.targetPrice;
+
+    try {
+        const res = await fetch('/api/trade/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: C.symbol,
+                side: 'BUY',
+                order_type: 'LIMIT',
+                lots: C.tradingLots,
+                limit_price: limitPx,
+                current_market_price: curPx,
+                sl: sl,
+                target1: t1,
+                trailing_mode: 'be_lock'
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            flashExecutionAlert('❌ LIMIT FAILED', data.detail || 'Limit order failed.', 'danger');
+        } else {
+            flashExecutionAlert('📥 LIMIT ORDER PLACED', `Limit Buy @ ₹${limitPx.toFixed(1)} (SL ₹${sl.toFixed(1)} | Target ₹${t1.toFixed(1)})`, 'success');
+            C.limitTool.active = false;
+            document.getElementById('btn-draw-limit')?.classList.remove('active');
+            await fetchTradeState();
+        }
+    } catch (e) {
+        flashExecutionAlert('❌ ORDER ERROR', e.message, 'danger');
+    }
+}
+
+// ── Interactive Mouse Dragging & Click Handlers on Chart ──────────────────────
+
+function initTradingCanvasMouseHandlers() {
+    const chartArea = document.getElementById('chart-area');
+    if (!chartArea || C._tradingMouseInitialized) return;
+    C._tradingMouseInitialized = true;
+
+    let dragType = null;
+
+    chartArea.addEventListener('mousemove', (e) => {
+        const rect = chartArea.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (dragType && C.candleSeries) {
+            const price = C.candleSeries.coordinateToPrice(mouseY);
+            if (price != null && price > 0) {
+                const tickPx = Math.round(price * 20) / 20;
+                if (dragType === 'limit_drag') {
+                    const delta = tickPx - C.limitTool.limitPrice;
+                    C.limitTool.limitPrice = tickPx;
+                    C.limitTool.targetPrice = Math.round((C.limitTool.targetPrice + delta) * 20) / 20;
+                    C.limitTool.slPrice = Math.round((C.limitTool.slPrice + delta) * 20) / 20;
+                } else if (dragType === 'target_drag') {
+                    C.limitTool.targetPrice = Math.max(C.limitTool.limitPrice + 0.5, tickPx);
+                } else if (dragType === 'sl_drag') {
+                    C.limitTool.slPrice = Math.min(C.limitTool.limitPrice - 0.5, tickPx);
+                } else if (dragType === 'pos_sl_drag') {
+                    if (C.tradingState?.active_position) {
+                        C.tradingState.active_position.current_sl = tickPx;
+                    }
+                } else if (dragType === 'pos_tgt_drag') {
+                    if (C.tradingState?.active_position) {
+                        C.tradingState.active_position.target1 = tickPx;
+                    }
+                }
+                requestAnimationFrame(renderSMFCanvas);
+            }
+            return;
+        }
+
+        // Hover cursor styling check
+        const hitBoxes = C.limitToolHitBoxes || [];
+        let hit = null;
+        for (const hb of hitBoxes) {
+            if (hb.type.includes('place') || hb.type.includes('cancel')) {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    hit = hb;
+                    break;
+                }
+            } else if (hb.type.includes('drag')) {
+                if (Math.abs(mouseY - hb.y) <= 8 || (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h)) {
+                    hit = hb;
+                    break;
+                }
+            }
+        }
+
+        if (hit) {
+            if (hit.type.includes('place') || hit.type.includes('cancel')) {
+                chartArea.style.cursor = 'pointer';
+            } else {
+                chartArea.style.cursor = 'ns-resize';
+            }
+        } else {
+            chartArea.style.cursor = '';
+        }
+    });
+
+    chartArea.addEventListener('mousedown', (e) => {
+        const rect = chartArea.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const hitBoxes = C.limitToolHitBoxes || [];
+        for (const hb of hitBoxes) {
+            if (hb.type === 'limit_place') {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    e.stopPropagation();
+                    executeTradingViewLimitOrder();
+                    return;
+                }
+            } else if (hb.type === 'limit_cancel') {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    e.stopPropagation();
+                    C.limitTool.active = false;
+                    document.getElementById('btn-draw-limit')?.classList.remove('active');
+                    requestAnimationFrame(renderSMFCanvas);
+                    return;
+                }
+            } else if (hb.type.includes('drag')) {
+                if (Math.abs(mouseY - hb.y) <= 8 || (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h)) {
+                    e.stopPropagation();
+                    dragType = hb.type;
+                    return;
+                }
+            }
+        }
+    });
+
+    window.addEventListener('mouseup', async () => {
+        if (dragType) {
+            if (dragType === 'pos_sl_drag' || dragType === 'pos_tgt_drag') {
+                const pos = C.tradingState?.active_position;
+                if (pos) {
+                    try {
+                        await fetch('/api/trade/modify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                symbol: C.symbol,
+                                sl: pos.current_sl,
+                                target1: pos.target1
+                            })
+                        });
+                        flashExecutionAlert('🛡️ LEVELS UPDATED', `SL: ₹${pos.current_sl.toFixed(1)} | Target: ₹${(pos.target1 || 0).toFixed(1)}`, 'success');
+                    } catch (err) {
+                        console.warn('Modify position levels error:', err);
+                    }
+                }
+            }
+            dragType = null;
+            chartArea.style.cursor = '';
+        }
+    });
+}
+
+// ── Initialization of Terminal Controls ───────────────────────────────────────
 
 function initTradingTerminal() {
     // 1. Lots selector
@@ -4374,12 +4903,14 @@ function initTradingTerminal() {
         btnMinus.addEventListener('click', () => {
             C.tradingLots = Math.max(1, C.tradingLots - 1);
             updateLotDisplay();
+            requestAnimationFrame(renderSMFCanvas);
         });
     }
     if (btnPlus) {
         btnPlus.addEventListener('click', () => {
             C.tradingLots = Math.min(100, C.tradingLots + 1);
             updateLotDisplay();
+            requestAnimationFrame(renderSMFCanvas);
         });
     }
     updateLotDisplay();
@@ -4403,19 +4934,23 @@ function initTradingTerminal() {
         });
     });
 
-    // 3. Quick BUY Market
+    // 3. Single Clean Market BUY Button (1-Click instant execution at live market price)
     const btnBuyMkt = document.getElementById('btn-quick-buy-mkt');
     if (btnBuyMkt) {
         btnBuyMkt.addEventListener('click', async () => {
             if (!C.symbol) {
-                alert('Please select an option contract from the chain first.');
+                flashExecutionAlert('⚠️ NO CONTRACT', 'Please select an option contract from the chain first.', 'warning');
                 return;
             }
             const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0;
+            if (curPx <= 0) {
+                flashExecutionAlert('⚠️ NO PRICE', 'Waiting for live contract price...', 'warning');
+                return;
+            }
             const sig = C.activeTargetSignal;
             const sl = sig?.sl || (curPx > 0 ? curPx * 0.90 : null);
-            const t1 = sig?.target1 || (curPx > 0 ? curPx * 1.05 : null);
-            const t2 = sig?.target2 || (curPx > 0 ? curPx * 1.10 : null);
+            const t1 = sig?.target1 || (curPx > 0 ? curPx * 1.08 : null);
+            const t2 = sig?.target2 || (curPx > 0 ? curPx * 1.15 : null);
 
             try {
                 const res = await fetch('/api/trade/order', {
@@ -4435,61 +4970,45 @@ function initTradingTerminal() {
                 });
                 const data = await res.json();
                 if (!res.ok) {
-                    alert(data.detail || 'Order execution failed.');
+                    flashExecutionAlert('❌ ORDER REJECTED', data.detail || 'Order execution failed.', 'danger');
                 } else {
+                    const fillPx = data.order?.fill_price || curPx;
+                    flashExecutionAlert('⚡ MARKET ORDER FILLED', `Bought ${C.tradingLots} Lot @ ₹${fillPx.toFixed(1)}`, 'success');
                     await fetchTradeState();
                 }
             } catch (e) {
-                alert('Order error: ' + e.message);
+                flashExecutionAlert('❌ ORDER ERROR', e.message, 'danger');
             }
         });
     }
 
-    // 4. Quick BUY Limit
-    const btnBuyLt = document.getElementById('btn-quick-buy-lt');
-    if (btnBuyLt) {
-        btnBuyLt.addEventListener('click', async () => {
-            if (!C.symbol) {
-                alert('Please select an option contract from the chain first.');
-                return;
-            }
-            const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0;
-            const sig = C.activeTargetSignal;
-            const limitPx = sig?.limitPrice || curPx;
-            const sl = sig?.sl || (limitPx > 0 ? limitPx * 0.90 : null);
-            const t1 = sig?.target1 || (limitPx > 0 ? limitPx * 1.05 : null);
-            const t2 = sig?.target2 || (limitPx > 0 ? limitPx * 1.10 : null);
+    // 4. TradingView-Style Interactive Limit Tool Toggle
+    const btnLimitTool = document.getElementById('btn-draw-limit');
+    if (btnLimitTool) {
+        btnLimitTool.addEventListener('click', () => {
+            C.limitTool.active = !C.limitTool.active;
+            btnLimitTool.classList.toggle('active', C.limitTool.active);
 
-            try {
-                const res = await fetch('/api/trade/order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        symbol: C.symbol,
-                        side: 'BUY',
-                        order_type: 'LIMIT',
-                        lots: C.tradingLots,
-                        limit_price: limitPx,
-                        current_market_price: curPx,
-                        sl: sl,
-                        target1: t1,
-                        target2: t2,
-                        trailing_mode: 'be_lock'
-                    })
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    alert(data.detail || 'Limit order failed.');
-                } else {
-                    await fetchTradeState();
-                }
-            } catch (e) {
-                alert('Limit order error: ' + e.message);
+            if (C.limitTool.active) {
+                const curPx = (C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 100.0);
+                const suggestedLT = C.activeTargetSignal?.limitPrice;
+                const basePx = suggestedLT || curPx;
+
+                C.limitTool.limitPrice = Math.round(basePx * 20) / 20;
+                C.limitTool.targetPrice = C.activeTargetSignal?.target1
+                    ? Math.round(C.activeTargetSignal.target1 * 20) / 20
+                    : Math.round((C.limitTool.limitPrice + Math.max(6.0, curPx * 0.08)) * 20) / 20;
+                C.limitTool.slPrice = C.activeTargetSignal?.sl
+                    ? Math.round(C.activeTargetSignal.sl * 20) / 20
+                    : Math.round((C.limitTool.limitPrice - Math.max(4.0, curPx * 0.05)) * 20) / 20;
+
+                flashExecutionAlert('📐 LIMIT TOOL ACTIVE', 'Drag the Limit, Target, and SL lines directly on the chart.', 'highlight');
             }
+            requestAnimationFrame(renderSMFCanvas);
         });
     }
 
-    // 5. Quick Exit 100%
+    // 5. Single Instant Exit 100% Button
     const btnExit = document.getElementById('btn-quick-exit');
     if (btnExit) {
         btnExit.addEventListener('click', async () => {
@@ -4502,17 +5021,20 @@ function initTradingTerminal() {
                 });
                 const data = await res.json();
                 if (!res.ok) {
-                    alert(data.detail || 'Exit failed.');
+                    flashExecutionAlert('❌ EXIT FAILED', data.detail || 'Exit failed.', 'danger');
                 } else {
+                    const pnl = data.closed_trade?.net_realized_pnl || 0.0;
+                    const sign = pnl >= 0 ? '+' : '';
+                    flashExecutionAlert('🏁 POSITION CLOSED', `Closed @ ₹${data.closed_trade?.exit_price?.toFixed(1) || curPx?.toFixed(1)} | PnL: ${sign}₹${pnl.toFixed(2)}`, pnl >= 0 ? 'success' : 'danger');
                     await fetchTradeState();
                 }
             } catch (e) {
-                alert('Exit error: ' + e.message);
+                flashExecutionAlert('❌ EXIT ERROR', e.message, 'danger');
             }
         });
     }
 
-    // 6. Kill Switch
+    // 6. Emergency Kill Switch
     const btnKs = document.getElementById('btn-kill-switch');
     if (btnKs) {
         btnKs.addEventListener('click', async () => {
@@ -4529,16 +5051,8 @@ function initTradingTerminal() {
         });
     }
 
-    // 7. Toggle Minimize Dock
-    const minBtn = document.getElementById('btn-toggle-trade-dock');
-    const dockBody = document.getElementById('trade-dock-body');
-    if (minBtn && dockBody) {
-        minBtn.addEventListener('click', () => {
-            const isMin = dockBody.style.display === 'none';
-            dockBody.style.display = isMin ? 'flex' : 'none';
-            minBtn.textContent = isMin ? '▾' : '▸';
-        });
-    }
+    // 7. Initialize Canvas Mouse Dragging & Click Handlers for Interactive Chart Lines
+    initTradingCanvasMouseHandlers();
 
     // Start background state polling
     fetchTradeState();

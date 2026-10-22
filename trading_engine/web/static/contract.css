@@ -2692,240 +2692,148 @@ kbd {
     box-shadow: none !important;
 }
 
-/* ── Floating Quick Trading Dock ─────────────────────────────────────────── */
-.trade-dock {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    z-index: 12;
-    background: rgba(8, 14, 26, 0.94);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(0, 229, 255, 0.35);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 12px rgba(0, 229, 255, 0.15);
-    width: 270px;
-    user-select: none;
-    transition: all 0.2s ease;
-}
-
-.trade-dock-header {
+/* ── Single-Click Clean Header Execution Actions ─────────────────────────── */
+.header-trade-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 5px 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(15, 23, 42, 0.6);
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
+    gap: 8px;
 }
 
-.trade-dock-title-wrap {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.trade-pulse-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #00f2a9;
-    box-shadow: 0 0 8px #00f2a9;
-    animation: pulse 1.8s infinite;
-}
-
-.trade-dock-title {
-    font-size: 10.5px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-    color: #e2e8f0;
-}
-
-.trade-qty-pill {
+.lot-pill {
     display: inline-flex;
     align-items: center;
     background: rgba(15, 23, 42, 0.9);
     border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 5px;
-    padding: 1px 4px;
-    gap: 3px;
-    font-size: 10.5px;
+    border-radius: 6px;
+    padding: 2px 6px;
+    gap: 4px;
+    height: 28px;
+    font-size: 11px;
 }
 
-.qty-btn {
+.lot-btn {
     background: transparent;
     border: none;
     color: #00e5ff;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 800;
     cursor: pointer;
-    padding: 0 3px;
+    padding: 0 4px;
     line-height: 1;
+    transition: color 0.15s ease;
 }
 
-.qty-btn:hover {
+.lot-btn:hover {
     color: #ffffff;
 }
 
-.qty-num {
+.lot-num {
     font-weight: 800;
     color: #f8fafc;
 }
 
-.qty-sub {
+.lot-sub {
     color: #64748b;
-    font-size: 9px;
+    font-size: 9.5px;
 }
 
-.dock-min-btn {
-    background: transparent;
-    border: none;
-    color: #64748b;
-    cursor: pointer;
-    font-size: 12px;
-    padding: 0 3px;
-}
-
-.dock-min-btn:hover {
-    color: #f1f5f9;
-}
-
-.trade-dock-body {
-    padding: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.trade-btn-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 6px;
-}
-
-.btn-trade-action {
-    display: flex;
-    flex-direction: column;
+.btn-clean-buy {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    padding: 6px 3px;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
-    text-align: center;
-}
-
-.btn-trade-action .action-title {
-    font-size: 10.5px;
-    font-weight: 800;
-    line-height: 1.2;
-}
-
-.btn-trade-action .action-sub {
-    font-size: 9px;
-    font-family: 'JetBrains Mono', monospace;
-    opacity: 0.9;
-    margin-top: 2px;
-}
-
-.btn-buy-mkt {
-    background: linear-gradient(135deg, rgba(0, 242, 169, 0.25), rgba(0, 184, 117, 0.25));
-    border-color: #00f2a9;
-    color: #00f2a9;
-}
-
-.btn-buy-mkt:hover {
+    gap: 6px;
     background: linear-gradient(135deg, #00f2a9, #00b875);
-    color: #040914;
-    box-shadow: 0 0 12px rgba(0, 242, 169, 0.4);
-    transform: translateY(-1px);
-}
-
-.btn-buy-lt {
-    background: linear-gradient(135deg, rgba(0, 229, 255, 0.25), rgba(0, 153, 184, 0.25));
-    border-color: #00e5ff;
-    color: #00e5ff;
-}
-
-.btn-buy-lt:hover {
-    background: linear-gradient(135deg, #00e5ff, #0099b8);
-    color: #040914;
-    box-shadow: 0 0 12px rgba(0, 229, 255, 0.4);
-    transform: translateY(-1px);
-}
-
-.btn-close-pos {
-    background: linear-gradient(135deg, rgba(255, 77, 109, 0.25), rgba(217, 4, 41, 0.25));
-    border-color: #ff4d6d;
-    color: #ff4d6d;
-}
-
-.btn-close-pos:not(.disabled):hover {
-    background: linear-gradient(135deg, #ff4d6d, #d90429);
-    color: #ffffff;
-    box-shadow: 0 0 12px rgba(255, 77, 109, 0.4);
-    transform: translateY(-1px);
-}
-
-.btn-close-pos.disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    border-color: #475569;
-    color: #64748b;
-    background: rgba(30, 41, 59, 0.4);
-}
-
-/* Active Position Floating HUD Strip */
-.trade-pos-hud {
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(0, 242, 169, 0.35);
+    border: 1px solid #00f2a9;
     border-radius: 6px;
-    padding: 6px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 10.5px;
-}
-
-.trade-pos-hud.hidden {
-    display: none;
-}
-
-.pos-info-line {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.hud-pos-tag {
-    background: #00f2a9;
     color: #040914;
     font-weight: 800;
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 9px;
+    font-size: 11px;
+    padding: 0 12px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 0 12px rgba(0, 242, 169, 0.35);
 }
 
-.hud-pos-details {
-    color: #cbd5e1;
-    font-weight: 600;
-    font-size: 10px;
+.btn-clean-buy:hover {
+    background: linear-gradient(135deg, #26ffbd, #00d688);
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(0, 242, 169, 0.6);
 }
 
-.hud-pos-pnl {
-    font-family: 'JetBrains Mono', monospace;
+.btn-clean-buy .buy-lbl {
     font-weight: 800;
-    color: #00f2a9;
+    letter-spacing: 0.5px;
+}
+
+.btn-clean-buy .buy-px {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 1px 6px;
+    border-radius: 4px;
     font-size: 10.5px;
 }
 
-.pos-trail-line {
-    display: flex;
+.btn-clean-limit {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    color: #94a3b8;
-    font-size: 9px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    padding-top: 3px;
+    gap: 5px;
+    background: rgba(0, 229, 255, 0.12);
+    border: 1px solid rgba(0, 229, 255, 0.5);
+    border-radius: 6px;
+    color: #00e5ff;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 0 10px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-clean-limit:hover, .btn-clean-limit.active {
+    background: #00e5ff;
+    color: #040914;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+    transform: translateY(-1px);
+}
+
+.btn-clean-exit {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #ff4d6d, #d90429);
+    border: 1px solid #ff4d6d;
+    border-radius: 6px;
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 11px;
+    padding: 0 12px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 0 12px rgba(255, 77, 109, 0.4);
+}
+
+.btn-clean-exit:hover {
+    background: linear-gradient(135deg, #ff758f, #ef233c);
+    transform: translateY(-1px);
+    box-shadow: 0 0 16px rgba(255, 77, 109, 0.7);
+}
+
+.btn-clean-exit.hidden {
+    display: none !important;
+}
+
+.btn-clean-exit .exit-lbl {
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.btn-clean-exit .exit-pnl {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
 }
