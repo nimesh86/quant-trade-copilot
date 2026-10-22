@@ -116,14 +116,15 @@
                 }
             }
 
-            // Update top-right header button text dynamically
+            // Maintain clean, universal 'Key Vault' label with informative tooltip
             const btnTexts = document.querySelectorAll(".vault-btn-text, #vault-btn-text");
             btnTexts.forEach(el => {
-                el.textContent = active === "breeze" ? "Breeze Vault" : "Kite Vault";
+                el.textContent = "Key Vault";
             });
             const btnOpen = document.getElementById("btn-open-vault");
             if (btnOpen) {
-                btnOpen.title = `Active Broker: ${active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite"} (Click to configure)`;
+                const brokerLabel = active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite";
+                btnOpen.title = `Key Vault (${brokerLabel} Active - Click to configure)`;
             }
         } catch (e) {
             console.warn("Could not check KeyVault broker status:", e);
