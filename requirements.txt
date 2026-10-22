@@ -21,5 +21,6 @@ xgboost>=2.0.0
 
 # Broker & External Integrations
 kiteconnect>=5.0.0
+breeze-connect>=1.0.35
 PyOTP>=2.9.0
 requests>=2.31.0

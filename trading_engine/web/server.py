@@ -2227,6 +2227,43 @@ async def get_kite_vault_status():
     }
 
 
+@app.get("/api/vault/broker-status")
+async def get_broker_vault_status():
+    """
+    Returns unified configuration status for both Zerodha Kite and ICICI Direct Breeze.
+    Credentials values are NEVER returned.
+    """
+    from trading_engine.core.keyvault import get_secret
+    active_broker = (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
+
+    # Kite status
+    k_key = get_secret("KITE_API_KEY")
+    k_tok = get_secret("KITE_ACCESS_TOKEN")
+    kite_configured = bool(k_key and k_tok and len(k_key.strip()) > 3 and len(k_tok.strip()) > 10)
+
+    # Breeze status
+    b_key = get_secret("BREEZE_API_KEY")
+    b_sec = get_secret("BREEZE_API_SECRET")
+    b_tok = get_secret("BREEZE_SESSION_TOKEN")
+    breeze_configured = bool(b_key and b_sec and b_tok and len(b_key.strip()) > 3 and len(b_tok.strip()) > 3)
+
+    return {
+        "status": "ok",
+        "active_broker": active_broker,
+        "kite": {
+            "configured": kite_configured,
+            "api_key_set": bool(k_key and len(k_key.strip()) > 0),
+            "access_token_set": bool(k_tok and len(k_tok.strip()) > 0)
+        },
+        "breeze": {
+            "configured": breeze_configured,
+            "api_key_set": bool(b_key and len(b_key.strip()) > 0),
+            "api_secret_set": bool(b_sec and len(b_sec.strip()) > 0),
+            "session_token_set": bool(b_tok and len(b_tok.strip()) > 0)
+        }
+    }
+
+
 @app.post("/api/vault/kite-credentials")
 async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
     """
@@ -2246,7 +2283,6 @@ async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
     set_secret("KITE_API_KEY", api_key)
     set_secret("KITE_ACCESS_TOKEN", access_token)
 
-    # Invalidate cached client to hot-reload with new credentials
     try:
         _cdm.reset_kite()
         _cdm._get_kite()
@@ -2257,6 +2293,66 @@ async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
         "status": "success",
         "message": "Kite credentials encrypted and saved to KeyVault. Live client reloaded."
     }
+
+
+@app.post("/api/vault/breeze-credentials")
+async def update_breeze_vault_credentials(payload: Dict[str, Any] = Body(...)):
+    """
+    Encrypts and persists ICICI Direct Breeze credentials into the KeyVault.
+    Hot-reloads the Breeze client in memory with zero downtime.
+    """
+    api_key = str(payload.get("api_key", "")).strip()
+    api_secret = str(payload.get("api_secret", "")).strip()
+    session_token = str(payload.get("session_token", "")).strip()
+
+    if not api_key:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Breeze API Key cannot be empty."})
+    if not api_secret:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Breeze API Secret cannot be empty."})
+    if not session_token:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Breeze Session Token cannot be empty."})
+
+    from trading_engine.core.keyvault import set_secret
+    set_secret("BREEZE_API_KEY", api_key)
+    set_secret("BREEZE_API_SECRET", api_secret)
+    set_secret("BREEZE_SESSION_TOKEN", session_token)
+
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        default_breeze_adapter.reset()
+        default_breeze_adapter.connect()
+    except Exception as e:
+        print(f"Server: Error reloading Breeze client: {e}", flush=True)
+
+    return {
+        "status": "success",
+        "message": "ICICI Direct Breeze credentials encrypted and saved to KeyVault. Live client reloaded."
+    }
+
+
+@app.post("/api/vault/active-broker")
+async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
+    """
+    Switches active market broker between 'kite' (Zerodha) and 'breeze' (ICICI Direct).
+    """
+    broker = str(payload.get("broker", "kite")).strip().lower()
+    if broker not in ["kite", "breeze"]:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "Broker must be 'kite' or 'breeze'."})
+
+    from trading_engine.core.keyvault import set_secret
+    set_secret("ACTIVE_BROKER", broker)
+
+    try:
+        _cdm.reset_all_brokers()
+    except Exception as e:
+        print(f"Server: Error resetting broker clients: {e}", flush=True)
+
+    return {
+        "status": "success",
+        "active_broker": broker,
+        "message": f"Active broker switched to {'ICICI Direct Breeze' if broker == 'breeze' else 'Zerodha Kite'}."
+    }
+
 
 
 

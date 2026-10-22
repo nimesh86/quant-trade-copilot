@@ -1,15 +1,18 @@
 /**
- * Kite KeyVault Modal Logic
- * Zero-leakage credential management for Zerodha Kite Connect
+ * Multi-Broker KeyVault Modal Logic
+ * Zero-leakage credential management for Zerodha Kite Connect & ICICI Direct Breeze API
  */
 
 (function () {
-    window.openVaultModal = function () {
+    let currentBrokerTab = "kite";
+
+    window.openVaultModal = function (tab) {
         const modal = document.getElementById("vault-modal-backdrop");
         if (modal) {
             modal.style.display = "flex";
             const alertBox = document.getElementById("vault-alert-box");
             if (alertBox) alertBox.style.display = "none";
+            if (tab) switchBrokerTab(tab);
             checkVaultStatus();
         }
     };
@@ -19,10 +22,49 @@
         if (modal) {
             modal.style.display = "none";
             // Clean inputs to avoid any secret lingering in DOM
-            const keyInp = document.getElementById("vault-api-key");
-            const tokInp = document.getElementById("vault-access-token");
-            if (keyInp) keyInp.value = "";
-            if (tokInp) tokInp.value = "";
+            ["vault-api-key", "vault-access-token", "vault-breeze-key", "vault-breeze-secret", "vault-breeze-token"].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = "";
+            });
+        }
+    };
+
+    window.switchBrokerTab = function (tab) {
+        currentBrokerTab = tab;
+        const kiteTab = document.getElementById("tab-btn-kite");
+        const breezeTab = document.getElementById("tab-btn-breeze");
+        const kiteForm = document.getElementById("tab-content-kite");
+        const breezeForm = document.getElementById("tab-content-breeze");
+
+        if (tab === "kite") {
+            if (kiteTab) kiteTab.className = "broker-tab-btn active";
+            if (breezeTab) breezeTab.className = "broker-tab-btn";
+            if (kiteForm) kiteForm.style.display = "block";
+            if (breezeForm) breezeForm.style.display = "none";
+        } else {
+            if (kiteTab) kiteTab.className = "broker-tab-btn";
+            if (breezeTab) breezeTab.className = "broker-tab-btn active";
+            if (kiteForm) kiteForm.style.display = "none";
+            if (breezeForm) breezeForm.style.display = "block";
+        }
+    };
+
+    window.setActiveBroker = async function (broker) {
+        try {
+            const res = await fetch("/api/vault/active-broker", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ broker: broker })
+            });
+            const data = await res.json();
+            if (res.ok && data.status === "success") {
+                showAlert(`✅ Active broker switched to ${broker === 'breeze' ? 'ICICI Direct Breeze' : 'Zerodha Kite'}.`, "success");
+                checkVaultStatus();
+            } else {
+                showAlert(`❌ Failed to switch broker: ${data.message || 'Unknown error'}`, "error");
+            }
+        } catch (e) {
+            showAlert(`❌ Error switching broker: ${e.message}`, "error");
         }
     };
 
@@ -40,51 +82,48 @@
 
     window.checkVaultStatus = async function () {
         try {
-            const res = await fetch("/api/vault/kite-status");
+            const res = await fetch("/api/vault/broker-status");
             const data = await res.json();
             
             const dot = document.getElementById("vault-status-dot");
             const indicator = document.getElementById("vault-status-indicator");
             const text = document.getElementById("vault-status-text");
 
-            if (data.configured) {
-                if (dot) {
-                    dot.className = "vault-status-dot configured";
-                    dot.title = "Kite Connect Configured & Active";
-                }
-                if (indicator) {
-                    indicator.className = "vault-status-indicator is-active";
-                }
-                if (text) {
-                    text.textContent = "● Kite Connect is Configured & Active in KeyVault";
-                }
-            } else {
-                if (dot) {
-                    dot.className = "vault-status-dot unconfigured";
-                    dot.title = "Kite Connect Not Configured";
-                }
-                if (indicator) {
-                    indicator.className = "vault-status-indicator is-inactive";
-                }
-                if (text) {
-                    const partial = [];
-                    if (!data.api_key_set) partial.push("API Key missing");
-                    if (!data.access_token_set) partial.push("Access Token missing");
-                    text.textContent = `● KeyVault: ${partial.join(", ") || "No Kite credentials stored"}`;
+            const pillKite = document.getElementById("pill-active-kite");
+            const pillBreeze = document.getElementById("pill-active-breeze");
+
+            const active = data.active_broker || "kite";
+            if (pillKite) pillKite.className = `active-pill-btn ${active === "kite" ? "selected" : ""}`;
+            if (pillBreeze) pillBreeze.className = `active-pill-btn ${active === "breeze" ? "selected" : ""}`;
+
+            const isCurrentConfigured = active === "breeze" ? data.breeze?.configured : data.kite?.configured;
+
+            if (dot) {
+                dot.className = `vault-status-dot ${isCurrentConfigured ? "configured" : "unconfigured"}`;
+                dot.title = `Active: ${active.toUpperCase()} (${isCurrentConfigured ? 'Active' : 'Missing Token'})`;
+            }
+
+            if (indicator) {
+                indicator.className = `vault-status-indicator ${isCurrentConfigured ? "is-active" : "is-inactive"}`;
+            }
+
+            if (text) {
+                const brokerLabel = active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite";
+                if (isCurrentConfigured) {
+                    text.textContent = `● Active Broker: ${brokerLabel} (Configured & Live in KeyVault)`;
+                } else {
+                    text.textContent = `● Active Broker: ${brokerLabel} (Requires Daily Token / Credentials)`;
                 }
             }
         } catch (e) {
-            console.warn("Could not check KeyVault status:", e);
+            console.warn("Could not check KeyVault broker status:", e);
         }
     };
 
     window.submitKiteVault = async function () {
         const keyInp = document.getElementById("vault-api-key");
         const tokInp = document.getElementById("vault-access-token");
-        const alertBox = document.getElementById("vault-alert-box");
-        const submitBtn = document.getElementById("vault-submit-btn");
-        const spinner = document.getElementById("vault-btn-spinner");
-        const btnText = document.getElementById("vault-btn-text");
+        const submitBtn = document.getElementById("vault-kite-submit-btn");
 
         const apiKey = keyInp ? keyInp.value.trim() : "";
         const accessToken = tokInp ? tokInp.value.trim() : "";
@@ -95,8 +134,6 @@
         }
 
         if (submitBtn) submitBtn.disabled = true;
-        if (spinner) spinner.style.display = "inline-block";
-        if (btnText) btnText.textContent = "Encrypting…";
 
         try {
             const res = await fetch("/api/vault/kite-credentials", {
@@ -104,12 +141,10 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ api_key: apiKey, access_token: accessToken }),
             });
-
             const result = await res.json();
 
             if (res.ok && result.status === "success") {
-                showAlert("✅ Credentials encrypted & saved to KeyVault! Live market connection hot-reloaded.", "success");
-                // Immediately clear the inputs
+                showAlert("✅ Zerodha Kite credentials encrypted & saved! Connection hot-reloaded.", "success");
                 if (keyInp) keyInp.value = "";
                 if (tokInp) tokInp.value = "";
                 checkVaultStatus();
@@ -117,11 +152,50 @@
                 showAlert(`❌ Failed: ${result.message || "Could not save credentials"}`, "error");
             }
         } catch (e) {
-            showAlert(`❌ Network error while saving to KeyVault: ${e.message}`, "error");
+            showAlert(`❌ Network error while saving Kite credentials: ${e.message}`, "error");
         } finally {
             if (submitBtn) submitBtn.disabled = false;
-            if (spinner) spinner.style.display = "none";
-            if (btnText) btnText.textContent = "🔒 Encrypt & Save to Vault";
+        }
+    };
+
+    window.submitBreezeVault = async function () {
+        const keyInp = document.getElementById("vault-breeze-key");
+        const secInp = document.getElementById("vault-breeze-secret");
+        const tokInp = document.getElementById("vault-breeze-token");
+        const submitBtn = document.getElementById("vault-breeze-submit-btn");
+
+        const apiKey = keyInp ? keyInp.value.trim() : "";
+        const apiSecret = secInp ? secInp.value.trim() : "";
+        const sessionToken = tokInp ? tokInp.value.trim() : "";
+
+        if (!apiKey || !apiSecret || !sessionToken) {
+            showAlert("Please provide Breeze API Key, Secret Key, and Daily Session Token.", "error");
+            return;
+        }
+
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+            const res = await fetch("/api/vault/breeze-credentials", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ api_key: apiKey, api_secret: apiSecret, session_token: sessionToken }),
+            });
+            const result = await res.json();
+
+            if (res.ok && result.status === "success") {
+                showAlert("✅ ICICI Direct Breeze credentials encrypted & saved! Live client reloaded.", "success");
+                if (keyInp) keyInp.value = "";
+                if (secInp) secInp.value = "";
+                if (tokInp) tokInp.value = "";
+                checkVaultStatus();
+            } else {
+                showAlert(`❌ Failed: ${result.message || "Could not save credentials"}`, "error");
+            }
+        } catch (e) {
+            showAlert(`❌ Network error while saving Breeze credentials: ${e.message}`, "error");
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
         }
     };
 

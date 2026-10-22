@@ -377,60 +377,119 @@
 
 </div><!-- /page-shell -->
 
-<!-- ── KeyVault Modal ────────────────────────────────────────────────── -->
+<!-- ── Multi-Broker KeyVault Modal ────────────────────────────────────── -->
 <div id="vault-modal-backdrop" class="vault-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeVaultModal();">
     <div class="vault-modal-card">
         <div class="vault-modal-header">
             <div class="vault-modal-title">
                 <span class="vault-modal-icon">🔐</span>
                 <div>
-                    <h3>Kite Connect KeyVault</h3>
-                    <p class="vault-modal-sub">Direct OS/Hardware-encrypted secret store</p>
+                    <h3>Broker KeyVault</h3>
+                    <p class="vault-modal-sub">Dual-Broker Hardware-Encrypted Storage</p>
                 </div>
             </div>
             <button id="btn-close-vault" class="vault-close-btn" title="Close" onclick="closeVaultModal()">✕</button>
         </div>
 
         <div class="vault-modal-body">
+            <!-- Active Broker Quick Switcher -->
+            <div class="active-broker-row">
+                <span style="font-weight: 600; color: #cbd5e1;">Active Feed Source:</span>
+                <div class="active-broker-pills">
+                    <button type="button" id="pill-active-kite" class="active-pill-btn selected" onclick="setActiveBroker('kite')">🪁 Zerodha Kite</button>
+                    <button type="button" id="pill-active-breeze" class="active-pill-btn" onclick="setActiveBroker('breeze')">🏦 ICICI Breeze</button>
+                </div>
+            </div>
+
+            <!-- Broker Tab Bar -->
+            <div class="broker-tabs-bar">
+                <button type="button" id="tab-btn-kite" class="broker-tab-btn active" onclick="switchBrokerTab('kite')">
+                    <span>🪁</span> Zerodha Kite
+                </button>
+                <button type="button" id="tab-btn-breeze" class="broker-tab-btn" onclick="switchBrokerTab('breeze')">
+                    <span>🏦</span> ICICI Direct Breeze
+                </button>
+            </div>
+
             <div class="vault-security-banner">
                 <span class="sec-shield">🛡️</span>
-                <span>Write-only secure storage in <code>~/.trading_assistant/vault.enc</code>. Values are never displayed back or stored in plaintext files.</span>
+                <span>Encrypted locally in <code>~/.trading_assistant/vault.enc</code>. Values are write-only and never exposed in plaintext.</span>
             </div>
 
             <div id="vault-status-indicator" class="vault-status-indicator">
                 <span class="indicator-dot"></span>
-                <span id="vault-status-text">Checking KeyVault status…</span>
+                <span id="vault-status-text">Checking Broker status…</span>
             </div>
 
             <!-- Feedback Alert -->
             <div id="vault-alert-box" class="vault-alert-box" style="display:none;"></div>
 
-            <form id="vault-credentials-form" autocomplete="off" onsubmit="event.preventDefault(); submitKiteVault();">
-                <div class="vault-form-group">
-                    <label for="vault-api-key">Kite API Key</label>
-                    <div class="vault-input-wrap">
-                        <input type="password" id="vault-api-key" placeholder="Enter Zerodha API key…" required autocomplete="new-password" />
-                        <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-api-key', this)">👁️</button>
+            <!-- ── TAB 1: Zerodha Kite Form ──────────────────────────────────── -->
+            <div id="tab-content-kite" style="display:block;">
+                <form id="vault-kite-form" autocomplete="off" onsubmit="event.preventDefault(); submitKiteVault();">
+                    <div class="vault-form-group">
+                        <label for="vault-api-key">Kite API Key</label>
+                        <div class="vault-input-wrap">
+                            <input type="password" id="vault-api-key" placeholder="Enter Zerodha API key…" required autocomplete="new-password" />
+                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-api-key', this)">👁️</button>
+                        </div>
                     </div>
-                </div>
 
-                <div class="vault-form-group">
-                    <label for="vault-access-token">Daily Access Token</label>
-                    <div class="vault-input-wrap">
-                        <input type="password" id="vault-access-token" placeholder="Enter today's active access token…" required autocomplete="new-password" />
-                        <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-access-token', this)">👁️</button>
+                    <div class="vault-form-group">
+                        <label for="vault-access-token">Daily Access Token</label>
+                        <div class="vault-input-wrap">
+                            <input type="password" id="vault-access-token" placeholder="Enter today's active access token…" required autocomplete="new-password" />
+                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-access-token', this)">👁️</button>
+                        </div>
+                        <span class="vault-hint">Tokens refresh daily. Updating here instantly hot-reloads the connection with zero downtime.</span>
                     </div>
-                    <span class="vault-hint">Tokens refresh daily. Updating here instantly re-initializes live market streaming with zero downtime.</span>
-                </div>
 
-                <div class="vault-form-actions">
-                    <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
-                    <button type="submit" id="vault-submit-btn" class="vault-submit-btn">
-                        <span id="vault-btn-spinner" class="vault-spinner" style="display:none;"></span>
-                        <span id="vault-btn-text">🔒 Encrypt & Save to Vault</span>
-                    </button>
-                </div>
-            </form>
+                    <div class="vault-form-actions">
+                        <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
+                        <button type="submit" id="vault-kite-submit-btn" class="vault-submit-btn">
+                            <span>🔒 Save Kite Credentials</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- ── TAB 2: ICICI Direct Breeze Form ──────────────────────────── -->
+            <div id="tab-content-breeze" style="display:none;">
+                <form id="vault-breeze-form" autocomplete="off" onsubmit="event.preventDefault(); submitBreezeVault();">
+                    <div class="vault-form-group">
+                        <label for="vault-breeze-key">Breeze App Key (API Key)</label>
+                        <div class="vault-input-wrap">
+                            <input type="password" id="vault-breeze-key" placeholder="Enter ICICI Breeze API key…" required autocomplete="new-password" />
+                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-key', this)">👁️</button>
+                        </div>
+                    </div>
+
+                    <div class="vault-form-group">
+                        <label for="vault-breeze-secret">Breeze Secret Key</label>
+                        <div class="vault-input-wrap">
+                            <input type="password" id="vault-breeze-secret" placeholder="Enter ICICI Breeze secret key…" required autocomplete="new-password" />
+                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-secret', this)">👁️</button>
+                        </div>
+                    </div>
+
+                    <div class="vault-form-group">
+                        <label for="vault-breeze-token">Daily Session Token</label>
+                        <div class="vault-input-wrap">
+                            <input type="password" id="vault-breeze-token" placeholder="Enter today's Breeze session token…" required autocomplete="new-password" />
+                            <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-token', this)">👁️</button>
+                        </div>
+                        <span class="vault-hint">Obtain your daily session token by logging into api.icicidirect.com/apiuser/login.</span>
+                    </div>
+
+                    <div class="vault-form-actions">
+                        <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
+                        <button type="submit" id="vault-breeze-submit-btn" class="vault-submit-btn">
+                            <span>🔒 Save Breeze Credentials</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
         </div>
     </div>
 </div>

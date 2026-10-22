@@ -139,6 +139,27 @@ def reset_kite():
     _kite_client = None
 
 
+def get_active_broker() -> str:
+    """Returns currently selected broker ('kite' or 'breeze')."""
+    try:
+        from trading_engine.core.keyvault import get_secret
+        return (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
+    except Exception:
+        return "kite"
+
+
+def reset_all_brokers():
+    """Forces re-initialization of both Kite and Breeze clients."""
+    global _kite_client, _instruments_cache
+    _kite_client = None
+    _instruments_cache = None
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        default_breeze_adapter.reset()
+    except Exception:
+        pass
+
+
 # ── Instrument Token Resolution ───────────────────────────────────────────────
 
 # Cache: trading_symbol -> instrument_token
@@ -782,9 +803,17 @@ def fetch_contract_candles(
         except Exception as e:
             print(f"ContractDataManager: DB candle fetch error for {trading_symbol}: {e}", flush=True)
 
-    # 3. If DB has no candles and active_date is today on a weekday, try Kite
+    # 3. If DB has no candles and active_date is today on a weekday, try active broker (Kite or Breeze)
     if not candles and active_date == today_str and not is_weekend:
-        candles = _fetch_from_kite(trading_symbol, db_engine)
+        broker = get_active_broker()
+        if broker == "breeze":
+            candles = _fetch_from_breeze(trading_symbol)
+            if not candles:
+                candles = _fetch_from_kite(trading_symbol, db_engine)
+        else:
+            candles = _fetch_from_kite(trading_symbol, db_engine)
+            if not candles:
+                candles = _fetch_from_breeze(trading_symbol)
 
     market_status = "OPEN" if is_market_open() else "CLOSED"
     return {
@@ -803,6 +832,40 @@ def fetch_today_candles(trading_symbol: str, db_engine=None) -> List[Dict]:
     """
     res = fetch_contract_candles(trading_symbol, db_engine=db_engine)
     return res.get("candles", [])
+
+
+def _fetch_from_breeze(trading_symbol: str) -> List[Dict]:
+    """Fetch today's 1-minute candles from ICICI Direct Breeze historical API."""
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        today_str = _get_ist_now().strftime("%Y-%m-%d")
+        print(f"ContractDataManager: Fetching Breeze historical for {trading_symbol} on {today_str}", flush=True)
+        raw_candles = default_breeze_adapter.get_historical_candles(
+            symbol=trading_symbol,
+            from_date=today_str,
+            to_date=today_str,
+            interval="1minute"
+        )
+        if not raw_candles:
+            return []
+        candles = []
+        for c in raw_candles:
+            ts = c["time"]
+            dt = datetime.fromtimestamp(ts)
+            candles.append({
+                "time": dt.strftime("%Y-%m-%d %H:%M"),
+                "timestamp": ts,
+                "open": float(c.get("open", 0)),
+                "high": float(c.get("high", 0)),
+                "low": float(c.get("low", 0)),
+                "close": float(c.get("close", 0)),
+                "volume": int(c.get("volume", 0)),
+            })
+        print(f"ContractDataManager: Got {len(candles)} Breeze candles for {trading_symbol}", flush=True)
+        return candles
+    except Exception as e:
+        print(f"ContractDataManager: Breeze historical fetch error for {trading_symbol}: {e}", flush=True)
+        return []
 
 
 def _fetch_from_kite(trading_symbol: str, db_engine=None) -> List[Dict]:
@@ -1020,7 +1083,36 @@ def get_contract_quote(trading_symbol: str) -> Optional[Dict]:
         cached_ts, cached_val = _quote_cache[sym_upper]
         if now - cached_ts < QUOTE_CACHE_TTL:
             return cached_val
-            
+
+    broker = get_active_broker()
+    if broker == "breeze":
+        try:
+            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+            bq = default_breeze_adapter.get_quote(sym_upper)
+            if bq and bq.get("price"):
+                res = {
+                    "symbol": sym_upper,
+                    "ltp": bq["price"],
+                    "buy_qty": 0,
+                    "sell_qty": 0,
+                    "total_flow": 0,
+                    "buy_pct": 50.0,
+                    "sell_pct": 50.0,
+                    "bid_ask_ratio": 1.0,
+                    "high": bq.get("high", bq["price"]),
+                    "low": bq.get("low", bq["price"]),
+                    "open": bq.get("open", bq["price"]),
+                    "close": bq.get("close", bq["price"]),
+                    "volume": bq.get("volume", 0),
+                    "depth": {"buy": [], "sell": []},
+                    "timestamp": datetime.now().isoformat(),
+                    "broker": "breeze"
+                }
+                _quote_cache[sym_upper] = (now, res)
+                return res
+        except Exception as e:
+            print(f"ContractDataManager: Breeze quote fetch error: {e}", flush=True)
+
     kite = _get_kite()
     if not kite:
         return None
