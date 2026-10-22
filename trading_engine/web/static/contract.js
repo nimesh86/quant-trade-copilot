@@ -141,9 +141,9 @@ function initChart() {
             borderColor: 'rgba(0, 195, 255, 0.15)',
             timeVisible: true,
             secondsVisible: false,
-            rightOffset: 16,
-            barSpacing: 7,
-            minBarSpacing: 3,
+            rightOffset: 25,
+            barSpacing: 8,
+            minBarSpacing: 4,
             tickMarkFormatter: (t) => {
                 const d = new Date(t * 1000);
                 const h = d.getHours().toString().padStart(2, '0');
@@ -845,14 +845,11 @@ function applyFullChart(candles1m, shouldFit = true) {
         setTimeout(() => {
             if (!C.replayMode && C.chart) {
                 const total = agg.length;
-                if (total > 80) {
-                    C.chart.timeScale().setVisibleLogicalRange({
-                        from: total - 80,
-                        to: total + 16
-                    });
-                } else {
-                    C.chart.timeScale().fitContent();
-                }
+                const visibleBars = Math.min(total, 85);
+                C.chart.timeScale().setVisibleLogicalRange({
+                    from: Math.max(0, total - visibleBars),
+                    to: total + 25
+                });
             }
         }, 50);
     }
@@ -2984,15 +2981,32 @@ function renderSMFCanvas() {
     if (C.targetsEnabled && C.activeTargetSignal && C.candleSeries) {
         const sig = C.activeTargetSignal;
         const curCandles = candles || C.rawCandles || [];
-        const sigTime = sig.time || (curCandles.length > 0 ? curCandles[Math.max(0, curCandles.length - 20)].time : null);
-        const startX = sigTime ? Math.max(0, Math.min(W - 120, C.chart.timeScale().timeToCoordinate(sigTime) || 0)) : 0;
+        const lastCandle = curCandles.length > 0 ? curCandles[curCandles.length - 1] : null;
+
+        // Accurate boundary where candle plot ends and right price scale starts
+        let priceScaleWidth = 65;
+        try {
+            if (C.chart && typeof C.chart.priceScale === 'function') {
+                const ps = C.chart.priceScale('right');
+                if (ps && typeof ps.width === 'function') {
+                    const psw = ps.width();
+                    if (psw > 30) priceScaleWidth = psw;
+                }
+            }
+        } catch (e) {}
+        const chartPlotRight = Math.round(W - priceScaleWidth);
+
+        // Transition X: The current candle (last candle) coordinate
+        const curCandleX = lastCandle
+            ? Math.max(0, Math.min(chartPlotRight - 30, Math.round(C.chart.timeScale().timeToCoordinate(lastCandle.time) || 0)))
+            : Math.max(0, chartPlotRight - 150);
 
         const isMkt = sig.recommendedOrder === 'MARKET';
         const levels = [
-            { key: 't2', price: sig.target2, label: `🚀 T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.18)', dash: [] },
-            { key: 't1', price: sig.target1, label: `🎯 T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.18)', dash: [5, 3] },
-            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `⚡ MKT ₹${sig.limitPrice?.toFixed(1)}` : `📥 LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: 'rgba(0, 229, 255, 0.18)', dash: [] },
-            { key: 'sl', price: sig.sl, label: `🛑 SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.18)', dash: [5, 3] },
+            { key: 't2', price: sig.target2, label: `🚀 T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.16)', dash: [] },
+            { key: 't1', price: sig.target1, label: `🎯 T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.16)', dash: [5, 3] },
+            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `⚡ MKT ₹${sig.limitPrice?.toFixed(1)}` : `📥 LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: 'rgba(0, 229, 255, 0.16)', dash: [] },
+            { key: 'sl', price: sig.sl, label: `🛑 SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.16)', dash: [5, 3] },
         ];
 
         ctx.save();
@@ -3001,24 +3015,24 @@ function renderSMFCanvas() {
             const y = Math.round(C.candleSeries.priceToCoordinate(lvl.price));
             if (y == null || y < -20 || y > H + 20) continue;
 
-            // A. Past timeframe (Request 2): Faint / subtle dashed line from left edge to signal startX
-            if (startX > 5) {
+            // A. Past timeframe (Request 2): Very light / faint dashed line for all candles up to the current candle
+            if (curCandleX > 5) {
                 ctx.beginPath();
                 ctx.strokeStyle = lvl.lightColor;
                 ctx.lineWidth = 1;
                 ctx.setLineDash([2, 4]);
                 ctx.moveTo(0, y);
-                ctx.lineTo(startX, y);
+                ctx.lineTo(curCandleX, y);
                 ctx.stroke();
             }
 
-            // B. Active timeframe (Request 2): Vibrant solid line from startX to right edge W
+            // B. Active timeframe (Request 2): Darker vibrant solid line from the current candle onwards into the blank area
             ctx.beginPath();
             ctx.strokeStyle = lvl.color;
             ctx.lineWidth = 1.5;
             ctx.setLineDash(lvl.dash);
-            ctx.moveTo(startX, y);
-            ctx.lineTo(W, y);
+            ctx.moveTo(curCandleX, y);
+            ctx.lineTo(chartPlotRight, y);
             ctx.stroke();
 
             // C. Dedicated Right Column Badge in preserved margin before price scale (Request 3)
@@ -3027,7 +3041,8 @@ function renderSMFCanvas() {
             const textW = Math.ceil(ctx.measureText(lvl.label).width);
             const badgeW = textW + 16;
             const badgeH = 20;
-            const badgeX = Math.round(W - badgeW - 8); // Preserved column before Y-axis
+            // Preserved area before Y-axis (leaves 6px margin before chartPlotRight, zero overlap on price scale numbers!)
+            const badgeX = Math.round(chartPlotRight - badgeW - 6);
             const badgeY = Math.round(y - badgeH / 2);
 
             // Badge Background (Request 4e)
