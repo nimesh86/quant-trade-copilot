@@ -259,9 +259,72 @@ function initChart() {
     window.addEventListener('resize', syncCanvas);
     syncCanvas();
 
+    // Sync canvas when time range changes (pan/zoom along X axis)
     C.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
         requestAnimationFrame(renderSMFCanvas);
     });
+    C.chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+        requestAnimationFrame(renderSMFCanvas);
+    });
+    C.chart.subscribeCrosshairMove(() => {
+        requestAnimationFrame(renderSMFCanvas);
+    });
+
+    // Real-time synchronization during Y-axis price scale zoom & pan
+    let isChartInteracting = false;
+    let syncRafId = null;
+
+    const renderSyncFrame = () => {
+        renderSMFCanvas();
+        if (isChartInteracting) {
+            syncRafId = requestAnimationFrame(renderSyncFrame);
+        }
+    };
+
+    const startInteractionSync = () => {
+        if (isChartInteracting) return;
+        isChartInteracting = true;
+        cancelAnimationFrame(syncRafId);
+        syncRafId = requestAnimationFrame(renderSyncFrame);
+    };
+
+    const stopInteractionSync = () => {
+        isChartInteracting = false;
+        cancelAnimationFrame(syncRafId);
+        let trailingFrames = 12;
+        const trail = () => {
+            renderSMFCanvas();
+            if (--trailingFrames > 0) {
+                requestAnimationFrame(trail);
+            }
+        };
+        requestAnimationFrame(trail);
+    };
+
+    // Pointer events on chart area & window (captures dragging the right price scale or chart)
+    chartArea.addEventListener('pointerdown', () => {
+        startInteractionSync();
+        const onPointerUp = () => {
+            window.removeEventListener('pointerup', onPointerUp);
+            window.removeEventListener('pointercancel', onPointerUp);
+            stopInteractionSync();
+        };
+        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointercancel', onPointerUp);
+    });
+
+    // Mouse wheel zoom (both over chart body and over right price scale)
+    let wheelTimer = null;
+    chartArea.addEventListener('wheel', () => {
+        startInteractionSync();
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(stopInteractionSync, 200);
+    }, { passive: true });
+
+    // Touch events for mobile pinch-zoom and drag
+    chartArea.addEventListener('touchstart', startInteractionSync, { passive: true });
+    chartArea.addEventListener('touchend', stopInteractionSync, { passive: true });
+    chartArea.addEventListener('touchcancel', stopInteractionSync, { passive: true });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3003,11 +3066,17 @@ function renderSMFCanvas() {
 
         const isMkt = sig.recommendedOrder === 'MARKET';
         const levels = [
-            { key: 't2', price: sig.target2, label: `🚀 T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.16)', dash: [] },
-            { key: 't1', price: sig.target1, label: `🎯 T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.16)', dash: [5, 3] },
-            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `⚡ MKT ₹${sig.limitPrice?.toFixed(1)}` : `📥 LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: 'rgba(0, 229, 255, 0.16)', dash: [] },
-            { key: 'sl', price: sig.sl, label: `🛑 SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.16)', dash: [5, 3] },
+            { key: 't2', price: sig.target2, label: `🚀 T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.40)', dash: [] },
+            { key: 't1', price: sig.target1, label: `🎯 T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.40)', dash: [5, 3] },
+            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `⚡ MKT ₹${sig.limitPrice?.toFixed(1)}` : `📥 LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: (isMkt ? 'rgba(0, 242, 169, 0.40)' : 'rgba(0, 229, 255, 0.40)'), dash: [] },
+            { key: 'sl', price: sig.sl, label: `🛑 SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.40)', dash: [5, 3] },
         ];
+
+        let sigX = 0;
+        if (sig.time) {
+            const rawSigX = C.chart.timeScale().timeToCoordinate(sig.time);
+            if (rawSigX != null) sigX = Math.max(0, Math.round(rawSigX));
+        }
 
         ctx.save();
         for (const lvl of levels) {
@@ -3015,13 +3084,13 @@ function renderSMFCanvas() {
             const y = Math.round(C.candleSeries.priceToCoordinate(lvl.price));
             if (y == null || y < -20 || y > H + 20) continue;
 
-            // A. Past timeframe (Request 2): Very light / faint dashed line for all candles up to the current candle
-            if (curCandleX > 5) {
+            // A. Past timeframe (Request 2): Clean visible light line from signal candle up to current candle
+            if (curCandleX > sigX) {
                 ctx.beginPath();
                 ctx.strokeStyle = lvl.lightColor;
                 ctx.lineWidth = 1;
-                ctx.setLineDash([2, 4]);
-                ctx.moveTo(0, y);
+                ctx.setLineDash([4, 4]);
+                ctx.moveTo(sigX, y);
                 ctx.lineTo(curCandleX, y);
                 ctx.stroke();
             }
@@ -3067,105 +3136,108 @@ function renderSMFCanvas() {
         ctx.restore();
     }
 
-    // ── 2. Visual Projections & Top Summary Pill (Request 4a) ─────────────────
-    if (smf.smfMarkers && smf.smfMarkers.length > 0) {
-        const activeBuyMarkers = smf.smfMarkers.filter(m => (m.signalType === 'BUY' || m.signalType === 'CONT_BUY') && m.limitPrice && m.targetPrice);
-        const m = activeBuyMarkers.length > 0 ? activeBuyMarkers[activeBuyMarkers.length - 1] : null;
+    // ── 2. Visual Projections & Bottom Summary Pill (⚡ MKT, 🎯 T1, 🚀 T2) (Request 4) ───────────
+    if (C.targetsEnabled && C.activeTargetSignal) {
+        const sig = C.activeTargetSignal;
+        const isMkt = sig.recommendedOrder === 'MARKET';
+        const limText = isMkt ? `⚡ MKT ₹${sig.limitPrice.toFixed(1)}` : `📥 LT ₹${sig.limitPrice.toFixed(1)}`;
+        const tgtText = `🎯 T1 ₹${sig.target1.toFixed(1)}`;
+        const t2Text = sig.target2 ? `🚀 T2 ₹${sig.target2.toFixed(1)}` : '';
+        const chopText = sig.isMiddayChop ? `⚠️ CHOP` : '';
 
-        if (m) {
-            const x = C.chart.timeScale().timeToCoordinate(m.time);
-            if (x != null && x >= 15 && x <= W - 15) {
-                const isCont = m.signalType === 'CONT_BUY';
-                const primaryColor = isCont ? '#00e5ff' : '#00f2a9';
-                const targetColor = '#ffd166';
-                const lineX = Math.round(x);
+        ctx.save();
+        ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const limW = Math.ceil(ctx.measureText(limText).width);
+        const tgtW = Math.ceil(ctx.measureText(tgtText).width);
+        const t2W = t2Text ? Math.ceil(ctx.measureText(t2Text).width) + 10 : 0;
+        const chopW = chopText ? Math.ceil(ctx.measureText(chopText).width) + 10 : 0;
+        const pillW = limW + tgtW + t2W + chopW + 24;
+        const pillH = 22;
 
-                ctx.save();
-                // Thin vertical laser guideline from top to bottom through the signal bar
-                ctx.beginPath();
-                ctx.strokeStyle = isCont ? 'rgba(0, 229, 255, 0.35)' : 'rgba(0, 242, 169, 0.35)';
-                ctx.lineWidth = 1;
-                ctx.setLineDash([4, 4]);
-                ctx.moveTo(lineX, 0);
-                ctx.lineTo(lineX, H);
-                ctx.stroke();
+        // Position at the bottom of the chart above time scale
+        const pillY = Math.round(H - pillH - 6);
+        const midY = Math.round(pillY + pillH / 2);
 
-                ctx.setLineDash([]);
-                ctx.fillStyle = primaryColor;
-                ctx.beginPath();
-                ctx.arc(lineX, 4, 2, 0, Math.PI * 2);
-                ctx.arc(lineX, H - 4, 2, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Compact Signal Summary Pill kept cleanly ABOVE price range (Request 4a: pillY = 10)
-                const isMkt = (m.extension || 0) >= 0.85;
-                const limText = isMkt ? `⚡ MKT ₹${m.limitPrice.toFixed(1)}` : `📥 LT ₹${m.limitPrice.toFixed(1)}`;
-                const tgtText = `🎯 T1 ₹${m.targetPrice.toFixed(1)}`;
-                const t2Text = m.target2 ? `🚀 T2 ₹${m.target2.toFixed(1)}` : '';
-                const chopText = m.isMiddayChop ? `⚠️ CHOP` : '';
-
-                ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-                const limW = Math.ceil(ctx.measureText(limText).width);
-                const tgtW = Math.ceil(ctx.measureText(tgtText).width);
-                const t2W = t2Text ? Math.ceil(ctx.measureText(t2Text).width) + 10 : 0;
-                const chopW = chopText ? Math.ceil(ctx.measureText(chopText).width) + 10 : 0;
-                const pillW = limW + tgtW + t2W + chopW + 24;
-                const pillH = 22;
-                const pillX = Math.round(Math.max(8, Math.min(W - pillW - 8, x - pillW / 2)));
-                const pillY = 10; // Top of chart, above price range!
-                const midY = Math.round(pillY + pillH / 2);
-
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(pillX, pillY, pillW, pillH, 4);
-                } else {
-                    ctx.rect(pillX, pillY, pillW, pillH);
-                }
-                ctx.fillStyle = 'rgba(8, 13, 25, 0.92)';
-                ctx.fill();
-                ctx.strokeStyle = m.isMiddayChop ? 'rgba(255, 107, 107, 0.7)' : (isCont ? 'rgba(0, 229, 255, 0.7)' : 'rgba(0, 242, 169, 0.7)');
-                ctx.lineWidth = 1;
-                ctx.stroke();
-
-                ctx.textBaseline = 'middle';
-                ctx.textAlign = 'left';
-
-                let curCursorX = pillX + 7;
-                ctx.fillStyle = primaryColor;
-                ctx.fillText(limText, curCursorX, midY);
-                curCursorX += limW + 5;
-
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-                ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-                curCursorX += 6;
-
-                ctx.fillStyle = targetColor;
-                ctx.fillText(tgtText, curCursorX, midY);
-                curCursorX += tgtW + 5;
-
-                if (t2Text) {
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-                    ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-                    curCursorX += 6;
-                    ctx.fillStyle = '#ffbe0b';
-                    ctx.fillText(t2Text, curCursorX, midY);
-                    curCursorX += t2W - 5;
-                }
-
-                if (chopText) {
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-                    ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-                    curCursorX += 6;
-                    ctx.fillStyle = '#ff6b6b';
-                    ctx.fillText(chopText, curCursorX, midY);
-                }
-
-                ctx.restore();
+        let sigX = null;
+        if (sig.time) {
+            const rawX = C.chart.timeScale().timeToCoordinate(sig.time);
+            if (rawX != null && rawX >= 10 && rawX <= chartPlotRight - 10) {
+                sigX = Math.round(rawX);
             }
         }
+
+        // Thin vertical laser guideline through signal bar if on screen
+        if (sigX != null) {
+            ctx.beginPath();
+            ctx.strokeStyle = isMkt ? 'rgba(0, 242, 169, 0.35)' : 'rgba(0, 229, 255, 0.35)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(sigX, 0);
+            ctx.lineTo(sigX, pillY);
+            ctx.stroke();
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = isMkt ? '#00f2a9' : '#00e5ff';
+            ctx.beginPath();
+            ctx.arc(sigX, 4, 2, 0, Math.PI * 2);
+            ctx.arc(sigX, pillY - 2, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Center under signal candle if on screen, otherwise dock nicely at bottom before price scale
+        const pillX = sigX != null
+            ? Math.round(Math.max(8, Math.min(chartPlotRight - pillW - 8, sigX - pillW / 2)))
+            : Math.round(Math.max(8, Math.min(chartPlotRight - pillW - 8, (chartPlotRight - pillW) / 2)));
+
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(pillX, pillY, pillW, pillH, 4);
+        } else {
+            ctx.rect(pillX, pillY, pillW, pillH);
+        }
+        ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
+        ctx.fill();
+        ctx.strokeStyle = sig.isMiddayChop ? 'rgba(255, 107, 107, 0.7)' : (isMkt ? 'rgba(0, 242, 169, 0.7)' : 'rgba(0, 229, 255, 0.7)');
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+
+        let curCursorX = pillX + 7;
+        ctx.fillStyle = isMkt ? '#00f2a9' : '#00e5ff';
+        ctx.fillText(limText, curCursorX, midY);
+        curCursorX += limW + 5;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+        ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
+        curCursorX += 6;
+
+        ctx.fillStyle = '#ffd166';
+        ctx.fillText(tgtText, curCursorX, midY);
+        curCursorX += tgtW + 5;
+
+        if (t2Text) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
+            curCursorX += 6;
+            ctx.fillStyle = '#ffbe0b';
+            ctx.fillText(t2Text, curCursorX, midY);
+            curCursorX += t2W - 5;
+        }
+
+        if (chopText) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
+            curCursorX += 6;
+            ctx.fillStyle = '#ff6b6b';
+            ctx.fillText(chopText, curCursorX, midY);
+        }
+
+        ctx.restore();
     }
 
-    // ── 3. Indicator Value Badges with Background Colors & Smart Spacing (Requests 4b, 4c, 4d, 4e)
+    // ── 3. Indicator Value Badges with Background Colors & Smart Spacing (Requests 3 & 4)
     if (C.allRawSignalMarkers && C.allRawSignalMarkers.length > 0) {
         ctx.save();
         ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -3190,7 +3262,7 @@ function renderSMFCanvas() {
             let label = sm.text || '';
             let color = sm.color || '#00f2a9';
 
-            // Clean up and shorten label (Request 4c)
+            // Clean up and shorten label
             if (label.includes('RE-ENTRY') || label.includes('RE-PB') || label.includes('RE-BO')) {
                 const reType = label.includes('BREAKOUT') || label.includes('RE-BO') ? 'BO' : 'PB';
                 const pMatch = label.match(/₹[\d.]+/);
@@ -3215,15 +3287,18 @@ function renderSMFCanvas() {
             const badgeX = Math.round(x - badgeW / 2);
 
             if (!isExit) {
-                // ── 4b: Pull down BUY, CONT, RE-ENTRY below smartly so not mixed with candles
-                let badgeY = Math.round(yLow + 16);
+                // ── 3: Keep BUY, CONT, RE-ENTRY far away from candle (below)
+                const baseBelowOffset = 38;
+                let badgeY = Math.round(yLow + baseBelowOffset);
 
                 // Check collision with recent below-bar badges
                 for (const prev of drawnBelow) {
-                    if (Math.abs(prev.x - x) < (badgeW + prev.w) / 2 + 4) {
-                        badgeY = Math.max(badgeY, prev.y + badgeH + 6);
+                    if (Math.abs(prev.x - x) < (badgeW + prev.w) / 2 + 6) {
+                        badgeY = Math.max(badgeY, prev.y + badgeH + 8);
                     }
                 }
+                // Clamp so it does not collide with bottom time scale or summary pill
+                badgeY = Math.min(badgeY, H - badgeH - 32);
                 drawnBelow.push({ x, y: badgeY, w: badgeW });
 
                 // Connector line from candle low to badge
@@ -3231,12 +3306,18 @@ function renderSMFCanvas() {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 1;
                 ctx.setLineDash([2, 2]);
-                ctx.moveTo(Math.round(x), Math.round(yLow + 3));
+                ctx.moveTo(Math.round(x), Math.round(yLow + 4));
                 ctx.lineTo(Math.round(x), Math.round(badgeY));
                 ctx.stroke();
                 ctx.setLineDash([]);
 
-                // 4e: Background color for readability
+                // Small dot on candle low wick
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(Math.round(x), Math.round(yLow + 3), 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Background
                 ctx.beginPath();
                 if (typeof ctx.roundRect === 'function') {
                     ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
@@ -3255,15 +3336,18 @@ function renderSMFCanvas() {
                 ctx.fillText(label, Math.round(x), Math.round(badgeY + badgeH / 2));
 
             } else {
-                // ── 4d: EXIT in Yellow and Red moved well ABOVE candles
-                let badgeY = Math.round(yHigh - badgeH - 16);
+                // ── 3: Keep EXIT far away from candle (above)
+                const baseAboveOffset = 38;
+                let badgeY = Math.round(yHigh - badgeH - baseAboveOffset);
 
                 // Check collision with recent above-bar badges
                 for (const prev of drawnAbove) {
-                    if (Math.abs(prev.x - x) < (badgeW + prev.w) / 2 + 4) {
-                        badgeY = Math.min(badgeY, prev.y - badgeH - 6);
+                    if (Math.abs(prev.x - x) < (badgeW + prev.w) / 2 + 6) {
+                        badgeY = Math.min(badgeY, prev.y - badgeH - 8);
                     }
                 }
+                // Clamp so it does not go off the top edge
+                badgeY = Math.max(badgeY, 8);
                 drawnAbove.push({ x, y: badgeY, w: badgeW });
 
                 // Connector line from candle high to badge
@@ -3271,12 +3355,18 @@ function renderSMFCanvas() {
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 1;
                 ctx.setLineDash([2, 2]);
-                ctx.moveTo(Math.round(x), Math.round(yHigh - 3));
+                ctx.moveTo(Math.round(x), Math.round(yHigh - 4));
                 ctx.lineTo(Math.round(x), Math.round(badgeY + badgeH));
                 ctx.stroke();
                 ctx.setLineDash([]);
 
-                // 4e: Background color for readability
+                // Small dot on candle high wick
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(Math.round(x), Math.round(yHigh - 3), 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Background
                 ctx.beginPath();
                 if (typeof ctx.roundRect === 'function') {
                     ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
@@ -3392,18 +3482,22 @@ function setOrUpdatePriceLine(key, options) {
 }
 
 function clearTargetPriceLines() {
+    C.activeTargetSignal = null;
     const keys = ['limit', 'be_lock', 't1_scalp', 't2_runner', 'sl'];
     for (const k of keys) {
         setOrUpdatePriceLine(k, null);
     }
+    requestAnimationFrame(renderSMFCanvas);
 }
 
 function clearAllPriceLines() {
+    C.activeTargetSignal = null;
     if (!C.priceLineMap || !C.candleSeries) return;
     for (const [key, line] of C.priceLineMap.entries()) {
         try { C.candleSeries.removePriceLine(line); } catch (e) {}
     }
     C.priceLineMap.clear();
+    requestAnimationFrame(renderSMFCanvas);
 }
 
 function updateTargetPriceLines(sig, currentPrice) {
@@ -3414,7 +3508,19 @@ function updateTargetPriceLines(sig, currentPrice) {
         return;
     }
 
-    if (sig.direction !== 'BUY') {
+    const cur = currentPrice || sig.entryPrice;
+    const isDownRegime = C.smfLastResult && C.smfLastResult.latestRegime === -1;
+    const isSlHit = sig.sl && cur < sig.sl;
+    const isFlat = C.dynamicExitLastResult && C.dynamicExitLastResult.positionState === 'FLAT';
+
+    let hasExitedAfterSig = false;
+    if (C.allRawSignalMarkers && C.allRawSignalMarkers.length > 0) {
+        hasExitedAfterSig = C.allRawSignalMarkers.some(m => 
+            m.time > sig.time && (m.signalType === 'EXIT' || m.signalType === 'DE_EXIT' || m.position === 'aboveBar')
+        );
+    }
+
+    if (sig.direction !== 'BUY' || isDownRegime || isSlHit || isFlat || hasExitedAfterSig) {
         if (badge) {
             badge.style.display = 'inline-flex';
             badge.innerHTML = `🛡️ <b>POSITION CLOSED</b> (Cash / Flat)`;
@@ -3426,7 +3532,6 @@ function updateTargetPriceLines(sig, currentPrice) {
         return;
     }
 
-    const cur = currentPrice || sig.entryPrice;
     const hit = cur >= sig.maxTarget;
 
     // Update Header Badge with Suggested Limit Price, Order Recommendation, and Targets (Desktop only)
