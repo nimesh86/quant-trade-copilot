@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#070b14" />
     <title>Contract Analysis — AI Trader</title>
     <meta name="description" content="Live contract chart and Smart Money Flow Cloud analysis for NIFTY options, futures and equities." />
-    <link rel="stylesheet" href="/static/contract.css?v=20261022_1630" />
+    <link rel="stylesheet" href="/static/contract.css?v=20261023_0050" />
 </head>
 <body>
 <div id="page-shell">
@@ -73,6 +73,33 @@
             </div>
         </div>
 
+        <!-- ── Trading Header Strip (Day PnL, Capital, Mode, Kill Switch) ───── -->
+        <div class="header-trade-row">
+            <div class="trade-mode-group">
+                <span class="trade-mode-label">⚡ TRADING:</span>
+                <div class="trade-mode-selector" role="radiogroup" aria-label="Trading Mode">
+                    <button class="mode-btn active" data-mode="paper" id="mode-paper-btn" title="Paper Trading Simulator">📄 Paper</button>
+                    <button class="mode-btn" data-mode="live" id="mode-live-btn" title="Live Broker Execution">🔴 Live</button>
+                    <button class="mode-btn" data-mode="replay" id="mode-replay-btn" title="Historical Replay Simulator">⏪ Replay</button>
+                </div>
+            </div>
+
+            <div class="trade-stats-group">
+                <div id="stat-day-pnl" class="stat-pill pnl-neutral" title="Today's Aggregate Realized + Unrealized PnL">
+                    <span class="stat-label">Day PnL:</span>
+                    <span id="val-day-pnl" class="stat-val">₹0.00</span>
+                </div>
+                <div id="stat-capital" class="stat-pill" title="Available Margin & Trading Capital">
+                    <span class="stat-label">Bal:</span>
+                    <span id="val-capital" class="stat-val">₹1,00,000</span>
+                </div>
+                <button id="btn-kill-switch" class="btn-kill-switch" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
+                    <span class="kill-icon">🛑</span>
+                    <span class="kill-text">KILL SWITCH</span>
+                </button>
+            </div>
+        </div>
+
         <!-- Hidden Search elements retained for contract.js compatibility and / shortcut -->
         <div id="search-wrapper" style="display:none;">
             <input type="text" id="search-input" placeholder="Search contract… (/ or ⌘K)" />
@@ -84,6 +111,52 @@
     <main id="chart-area">
         <div id="contract-chart-container"></div>
         <canvas id="contract-smf-canvas"></canvas>
+
+        <!-- ── Quick Trading Floating Action Dock ──────────────────────────── -->
+        <div id="trade-dock" class="trade-dock" role="region" aria-label="Quick Order Dock">
+            <div class="trade-dock-header">
+                <div class="trade-dock-title-wrap">
+                    <span class="trade-pulse-dot"></span>
+                    <span class="trade-dock-title">1-CLICK TRADE</span>
+                </div>
+                <div class="trade-qty-pill">
+                    <button id="btn-qty-minus" class="qty-btn" title="Decrease Lot">-</button>
+                    <span id="trade-lots-val" class="qty-num">1</span>
+                    <span class="qty-sub">Lot (<span id="trade-units-val">65</span>)</span>
+                    <button id="btn-qty-plus" class="qty-btn" title="Increase Lot">+</button>
+                </div>
+                <button id="btn-toggle-trade-dock" class="dock-min-btn" title="Minimize / Expand Trade Dock">▾</button>
+            </div>
+            <div id="trade-dock-body" class="trade-dock-body">
+                <div class="trade-btn-grid">
+                    <button id="btn-quick-buy-mkt" class="btn-trade-action btn-buy-mkt" title="1-Click Instant Market Buy">
+                        <span class="action-title">BUY MKT</span>
+                        <span id="btn-mkt-px" class="action-sub">₹--</span>
+                    </button>
+                    <button id="btn-quick-buy-lt" class="btn-trade-action btn-buy-lt" title="1-Click Suggested Limit Buy">
+                        <span class="action-title">BUY LIMIT</span>
+                        <span id="btn-lt-px" class="action-sub">LT ₹--</span>
+                    </button>
+                    <button id="btn-quick-exit" class="btn-trade-action btn-close-pos disabled" disabled title="1-Click Instant Market Exit">
+                        <span class="action-title">CLOSE 100%</span>
+                        <span id="btn-pos-pnl" class="action-sub">FLAT</span>
+                    </button>
+                </div>
+
+                <!-- Active Position Floating HUD Strip on Dock -->
+                <div id="trade-pos-hud" class="trade-pos-hud hidden">
+                    <div class="pos-info-line">
+                        <span id="hud-pos-tag" class="hud-pos-tag">BUY</span>
+                        <span id="hud-pos-details" class="hud-pos-details">1 Lot @ ₹--</span>
+                        <span id="hud-pos-pnl" class="hud-pos-pnl">+₹0.00 (+0.0%)</span>
+                    </div>
+                    <div class="pos-trail-line">
+                        <span id="hud-trail-badge" class="hud-trail-badge">🛡️ Trailing SL: ₹--</span>
+                        <span id="hud-target-badge" class="hud-target-badge">🎯 T1: ₹--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
 
 
 
@@ -350,7 +423,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261023_0032"></script>
+<script src="/static/contract.js?v=20261023_0050"></script>
 
 </body>
 </html>

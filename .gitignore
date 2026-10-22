@@ -20,6 +20,7 @@ __pycache__/
 *.log
 scratch/
 tunnel_state.json
+data/*.json
 /tmp/
 
 # Model Weights & Residual Dumps

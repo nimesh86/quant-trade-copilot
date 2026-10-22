@@ -47,6 +47,9 @@ const C = {
     dynamicTrailSeries: null,
     dynamicLadderSeries: null,
     dynamicExitLastResult: null,
+    tradingLots: 1,
+    tradingState: null,
+    tradingPollTimer: null,
     _canvasRenderPending: false,
     _executedTargets: new Set(),
 };
@@ -93,6 +96,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initFitButton();
     initReplayController();
     initDynamicExitController();
+    initTradingTerminal();
     checkMarketStatus();
     setInterval(checkMarketStatus, 30_000);
 
@@ -3040,6 +3044,151 @@ function renderSMFCanvas() {
     ctx.stroke();
     ctx.restore();
 
+    // ── 0. Active Trading Position & Trailing SL HUD (On-Chart Live PnL) ────────
+    if (C.tradingState && C.tradingState.active_position && C.candleSeries) {
+        const pos = C.tradingState.active_position;
+        if (pos.symbol === C.symbol) {
+            let priceScaleWidth = 65;
+            try {
+                if (C.chart && typeof C.chart.priceScale === 'function') {
+                    const ps = C.chart.priceScale('right');
+                    if (ps && typeof ps.width === 'function') {
+                        const psw = ps.width();
+                        if (psw > 30) priceScaleWidth = psw;
+                    }
+                }
+            } catch (e) {}
+            const chartPlotRight = Math.round(W - priceScaleWidth);
+
+            const entryY = Math.round(C.candleSeries.priceToCoordinate(pos.entry_price));
+            const slY = pos.current_sl ? Math.round(C.candleSeries.priceToCoordinate(pos.current_sl)) : null;
+            const t1Y = pos.target1 ? Math.round(C.candleSeries.priceToCoordinate(pos.target1)) : null;
+
+            ctx.save();
+
+            // A. Position Entry Line & Floating Live PnL Badge
+            if (entryY != null && entryY >= 0 && entryY <= H) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#00f2a9';
+                ctx.lineWidth = 1.8;
+                ctx.setLineDash([6, 4]);
+                ctx.moveTo(0, entryY);
+                ctx.lineTo(chartPlotRight, entryY);
+                ctx.stroke();
+
+                // Live On-Chart Unrealized PnL Badge
+                const pnl = pos.unrealized_pnl || 0.0;
+                const pnlPct = pos.unrealized_pnl_pct || 0.0;
+                const pts = pos.unrealized_pts || 0.0;
+                const sign = pnl > 0 ? '+' : '';
+                const trailTag = pos.be_locked ? ' [BE LOCK 🛡️]' : '';
+                const pnlText = `⚡ POS: ${sign}₹${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%) | ${sign}${pts.toFixed(1)}p${trailTag}`;
+
+                ctx.font = 'bold 11px Inter, sans-serif';
+                const pnlTextW = Math.ceil(ctx.measureText(pnlText).width);
+                const pnlBadgeW = pnlTextW + 16;
+                const pnlBadgeH = 22;
+                const pnlBadgeX = Math.round(Math.max(10, (chartPlotRight - pnlBadgeW) / 2));
+                const pnlBadgeY = Math.round(entryY - pnlBadgeH / 2);
+
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(pnlBadgeX, pnlBadgeY, pnlBadgeW, pnlBadgeH, 4);
+                } else {
+                    ctx.rect(pnlBadgeX, pnlBadgeY, pnlBadgeW, pnlBadgeH);
+                }
+                ctx.fillStyle = pnl >= 0 ? 'rgba(0, 36, 20, 0.94)' : 'rgba(40, 6, 12, 0.94)';
+                ctx.fill();
+                ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.fillStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
+                ctx.textBaseline = 'middle';
+                ctx.textAlign = 'left';
+                ctx.fillText(pnlText, pnlBadgeX + 8, pnlBadgeY + pnlBadgeH / 2);
+
+                // Right Column POS Tag before price scale
+                const posLabel = `⚡ POS ₹${pos.entry_price.toFixed(1)}`;
+                const posW = Math.ceil(ctx.measureText(posLabel).width) + 14;
+                const posBadgeX = Math.round(chartPlotRight - posW - 6);
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(posBadgeX, entryY - 10, posW, 20, 4);
+                } else {
+                    ctx.rect(posBadgeX, entryY - 10, posW, 20);
+                }
+                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
+                ctx.fill();
+                ctx.strokeStyle = '#00f2a9';
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.fillStyle = '#00f2a9';
+                ctx.fillText(posLabel, posBadgeX + 7, entryY);
+            }
+
+            // B. Active Trailing Stop Loss Line
+            if (slY != null && slY >= 0 && slY <= H) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#ff4d6d';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.moveTo(0, slY);
+                ctx.lineTo(chartPlotRight, slY);
+                ctx.stroke();
+
+                const slLabel = `🛑 POS SL ₹${pos.current_sl.toFixed(1)}`;
+                ctx.font = 'bold 11px Inter, sans-serif';
+                const slW = Math.ceil(ctx.measureText(slLabel).width) + 14;
+                const slBadgeX = Math.round(chartPlotRight - slW - 6);
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(slBadgeX, slY - 10, slW, 20, 4);
+                } else {
+                    ctx.rect(slBadgeX, slY - 10, slW, 20);
+                }
+                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
+                ctx.fill();
+                ctx.strokeStyle = '#ff4d6d';
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.fillStyle = '#ff4d6d';
+                ctx.fillText(slLabel, slBadgeX + 7, slY);
+            }
+
+            // C. Active Target Line
+            if (t1Y != null && t1Y >= 0 && t1Y <= H) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#ffd166';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 3]);
+                ctx.moveTo(0, t1Y);
+                ctx.lineTo(chartPlotRight, t1Y);
+                ctx.stroke();
+
+                const t1Label = `🎯 POS T1 ₹${pos.target1.toFixed(1)}`;
+                ctx.font = 'bold 11px Inter, sans-serif';
+                const t1W = Math.ceil(ctx.measureText(t1Label).width) + 14;
+                const t1BadgeX = Math.round(chartPlotRight - t1W - 6);
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(t1BadgeX, t1Y - 10, t1W, 20, 4);
+                } else {
+                    ctx.rect(t1BadgeX, t1Y - 10, t1W, 20);
+                }
+                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
+                ctx.fill();
+                ctx.strokeStyle = '#ffd166';
+                ctx.lineWidth = 1.2;
+                ctx.stroke();
+                ctx.fillStyle = '#ffd166';
+                ctx.fillText(t1Label, t1BadgeX + 7, t1Y);
+            }
+
+            ctx.restore();
+        }
+    }
+
     // ── 1. Partial Horizontal Target & SL Lines with Right Column Badges (Requests 2 & 3)
     if (C.targetsEnabled && C.activeTargetSignal && C.candleSeries) {
         const sig = C.activeTargetSignal;
@@ -4080,5 +4229,319 @@ function renderReplayStep() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ── CONTRACT TRADING ENGINE TERMINAL (ON-CHART & RISK CONTROLS) ──────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
+function getLotSizeForSymbol(sym) {
+    const s = (sym || C.symbol || C.underlying || 'NIFTY').toUpperCase();
+    if (s.includes('BANKNIFTY')) return 30;
+    if (s.includes('SENSEX') || s.includes('BANKEX')) return 20;
+    if (s.includes('FINNIFTY')) return 65;
+    if (s.includes('MIDCPNIFTY')) return 120;
+    return 65; // NIFTY
+}
 
+function updateLotDisplay() {
+    const lotSize = getLotSizeForSymbol(C.symbol);
+    const units = C.tradingLots * lotSize;
+    const lotsValEl = document.getElementById('trade-lots-val');
+    const unitsValEl = document.getElementById('trade-units-val');
+    if (lotsValEl) lotsValEl.textContent = C.tradingLots;
+    if (unitsValEl) unitsValEl.textContent = units;
+}
+
+async function fetchTradeState() {
+    try {
+        const res = await fetch('/api/trade/state');
+        if (!res.ok) return;
+        const state = await res.json();
+        C.tradingState = state;
+        updateTradingUI(state);
+        requestAnimationFrame(renderSMFCanvas);
+    } catch (e) {
+        console.warn('fetchTradeState error:', e);
+    }
+}
+
+function updateTradingUI(state) {
+    if (!state) return;
+
+    // 1. Day PnL Pill in Top Header
+    const dayPnlEl = document.getElementById('val-day-pnl');
+    const dayPnlPill = document.getElementById('stat-day-pnl');
+    if (dayPnlEl && dayPnlPill) {
+        const pnl = state.total_day_pnl || 0.0;
+        const sign = pnl > 0 ? '+' : '';
+        dayPnlEl.textContent = `${sign}₹${pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        dayPnlPill.className = `stat-pill ${pnl > 0 ? 'pnl-positive' : (pnl < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+    }
+
+    // 2. Capital Balance in Top Header
+    const capEl = document.getElementById('val-capital');
+    if (capEl) {
+        capEl.textContent = `₹${(state.capital || 100000).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    }
+
+    // 3. Mode Buttons in Top Header
+    const currentMode = state.mode || 'paper';
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === currentMode);
+    });
+
+    // 4. Kill Switch Button
+    const ksBtn = document.getElementById('btn-kill-switch');
+    if (ksBtn) {
+        if (state.is_kill_switch_active) {
+            ksBtn.classList.add('locked');
+            ksBtn.innerHTML = `<span class="kill-icon">🔒</span> <span class="kill-text">LOCKED (Click to Unlock)</span>`;
+        } else {
+            ksBtn.classList.remove('locked');
+            ksBtn.innerHTML = `<span class="kill-icon">🛑</span> <span class="kill-text">KILL SWITCH</span>`;
+        }
+    }
+
+    // 5. Update Quick Trade Action Buttons Price Subtitles
+    const curPx = (C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0);
+    const mktPxEl = document.getElementById('btn-mkt-px');
+    const ltPxEl = document.getElementById('btn-lt-px');
+    if (mktPxEl) mktPxEl.textContent = curPx > 0 ? `₹${curPx.toFixed(1)}` : '₹--';
+    if (ltPxEl) {
+        const suggestedLT = C.activeTargetSignal?.limitPrice;
+        ltPxEl.textContent = suggestedLT ? `LT ₹${suggestedLT.toFixed(1)}` : (curPx > 0 ? `LT ₹${curPx.toFixed(1)}` : 'LT ₹--');
+    }
+
+    // 6. Active Position HUD on Trade Dock
+    const posHud = document.getElementById('trade-pos-hud');
+    const exitBtn = document.getElementById('btn-quick-exit');
+    const posPnlSub = document.getElementById('btn-pos-pnl');
+
+    if (state.active_position && state.active_position.symbol === C.symbol) {
+        const pos = state.active_position;
+        if (posHud) posHud.classList.remove('hidden');
+        if (exitBtn) {
+            exitBtn.classList.remove('disabled');
+            exitBtn.disabled = false;
+        }
+
+        const pnl = pos.unrealized_pnl || 0.0;
+        const pnlPct = pos.unrealized_pnl_pct || 0.0;
+        const pts = pos.unrealized_pts || 0.0;
+        const sign = pnl > 0 ? '+' : '';
+
+        if (posPnlSub) {
+            posPnlSub.textContent = `${sign}₹${Math.round(pnl)} (${sign}${pts.toFixed(1)}p)`;
+            posPnlSub.style.color = pnl > 0 ? '#00f2a9' : (pnl < 0 ? '#ff4d6d' : '#cbd5e1');
+        }
+
+        const hudTag = document.getElementById('hud-pos-tag');
+        const hudDetails = document.getElementById('hud-pos-details');
+        const hudPnl = document.getElementById('hud-pos-pnl');
+        const hudTrail = document.getElementById('hud-trail-badge');
+        const hudTarget = document.getElementById('hud-target-badge');
+
+        if (hudTag) hudTag.textContent = pos.side;
+        if (hudDetails) hudDetails.textContent = `${pos.lots} Lot @ ₹${pos.entry_price.toFixed(2)}`;
+        if (hudPnl) {
+            hudPnl.textContent = `${sign}₹${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%)`;
+            hudPnl.style.color = pnl > 0 ? '#00f2a9' : (pnl < 0 ? '#ff4d6d' : '#cbd5e1');
+        }
+        if (hudTrail) {
+            const beLock = pos.be_locked ? ' (BE Locked 🛡️)' : '';
+            hudTrail.textContent = `🛑 SL: ₹${(pos.current_sl || 0).toFixed(1)}${beLock}`;
+        }
+        if (hudTarget) {
+            hudTarget.textContent = pos.target1 ? `🎯 T1: ₹${pos.target1.toFixed(1)}` : '🎯 T1: --';
+        }
+    } else {
+        if (posHud) posHud.classList.add('hidden');
+        if (exitBtn) {
+            exitBtn.classList.add('disabled');
+            exitBtn.disabled = true;
+        }
+        if (posPnlSub) {
+            posPnlSub.textContent = 'FLAT';
+            posPnlSub.style.color = '#64748b';
+        }
+    }
+}
+
+function initTradingTerminal() {
+    // 1. Lots selector
+    const btnMinus = document.getElementById('btn-qty-minus');
+    const btnPlus = document.getElementById('btn-qty-plus');
+    if (btnMinus) {
+        btnMinus.addEventListener('click', () => {
+            C.tradingLots = Math.max(1, C.tradingLots - 1);
+            updateLotDisplay();
+        });
+    }
+    if (btnPlus) {
+        btnPlus.addEventListener('click', () => {
+            C.tradingLots = Math.min(100, C.tradingLots + 1);
+            updateLotDisplay();
+        });
+    }
+    updateLotDisplay();
+
+    // 2. Mode buttons
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const mode = btn.dataset.mode;
+            try {
+                const res = await fetch('/api/trade/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                if (res.ok) {
+                    await fetchTradeState();
+                }
+            } catch (e) {
+                console.warn('Set mode error:', e);
+            }
+        });
+    });
+
+    // 3. Quick BUY Market
+    const btnBuyMkt = document.getElementById('btn-quick-buy-mkt');
+    if (btnBuyMkt) {
+        btnBuyMkt.addEventListener('click', async () => {
+            if (!C.symbol) {
+                alert('Please select an option contract from the chain first.');
+                return;
+            }
+            const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0;
+            const sig = C.activeTargetSignal;
+            const sl = sig?.sl || (curPx > 0 ? curPx * 0.90 : null);
+            const t1 = sig?.target1 || (curPx > 0 ? curPx * 1.05 : null);
+            const t2 = sig?.target2 || (curPx > 0 ? curPx * 1.10 : null);
+
+            try {
+                const res = await fetch('/api/trade/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbol: C.symbol,
+                        side: 'BUY',
+                        order_type: 'MARKET',
+                        lots: C.tradingLots,
+                        current_market_price: curPx,
+                        sl: sl,
+                        target1: t1,
+                        target2: t2,
+                        trailing_mode: 'be_lock'
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.detail || 'Order execution failed.');
+                } else {
+                    await fetchTradeState();
+                }
+            } catch (e) {
+                alert('Order error: ' + e.message);
+            }
+        });
+    }
+
+    // 4. Quick BUY Limit
+    const btnBuyLt = document.getElementById('btn-quick-buy-lt');
+    if (btnBuyLt) {
+        btnBuyLt.addEventListener('click', async () => {
+            if (!C.symbol) {
+                alert('Please select an option contract from the chain first.');
+                return;
+            }
+            const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0;
+            const sig = C.activeTargetSignal;
+            const limitPx = sig?.limitPrice || curPx;
+            const sl = sig?.sl || (limitPx > 0 ? limitPx * 0.90 : null);
+            const t1 = sig?.target1 || (limitPx > 0 ? limitPx * 1.05 : null);
+            const t2 = sig?.target2 || (limitPx > 0 ? limitPx * 1.10 : null);
+
+            try {
+                const res = await fetch('/api/trade/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbol: C.symbol,
+                        side: 'BUY',
+                        order_type: 'LIMIT',
+                        lots: C.tradingLots,
+                        limit_price: limitPx,
+                        current_market_price: curPx,
+                        sl: sl,
+                        target1: t1,
+                        target2: t2,
+                        trailing_mode: 'be_lock'
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.detail || 'Limit order failed.');
+                } else {
+                    await fetchTradeState();
+                }
+            } catch (e) {
+                alert('Limit order error: ' + e.message);
+            }
+        });
+    }
+
+    // 5. Quick Exit 100%
+    const btnExit = document.getElementById('btn-quick-exit');
+    if (btnExit) {
+        btnExit.addEventListener('click', async () => {
+            const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : null;
+            try {
+                const res = await fetch('/api/trade/exit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'MANUAL_QUICK_EXIT', exit_price: curPx })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    alert(data.detail || 'Exit failed.');
+                } else {
+                    await fetchTradeState();
+                }
+            } catch (e) {
+                alert('Exit error: ' + e.message);
+            }
+        });
+    }
+
+    // 6. Kill Switch
+    const btnKs = document.getElementById('btn-kill-switch');
+    if (btnKs) {
+        btnKs.addEventListener('click', async () => {
+            const isLocked = C.tradingState?.is_kill_switch_active;
+            const endpoint = isLocked ? '/api/trade/kill_switch/unlock' : '/api/trade/kill_switch';
+            try {
+                const res = await fetch(endpoint, { method: 'POST' });
+                if (res.ok) {
+                    await fetchTradeState();
+                }
+            } catch (e) {
+                console.warn('Kill switch error:', e);
+            }
+        });
+    }
+
+    // 7. Toggle Minimize Dock
+    const minBtn = document.getElementById('btn-toggle-trade-dock');
+    const dockBody = document.getElementById('trade-dock-body');
+    if (minBtn && dockBody) {
+        minBtn.addEventListener('click', () => {
+            const isMin = dockBody.style.display === 'none';
+            dockBody.style.display = isMin ? 'flex' : 'none';
+            minBtn.textContent = isMin ? '▾' : '▸';
+        });
+    }
+
+    // Start background state polling
+    fetchTradeState();
+    if (C.tradingPollTimer) clearInterval(C.tradingPollTimer);
+    C.tradingPollTimer = setInterval(fetchTradeState, 1500);
+}

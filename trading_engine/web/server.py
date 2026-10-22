@@ -93,6 +93,11 @@ from config import EngineConfig
 from adapters.backtest_adapter import BacktestAdapter
 from adapters.paper_adapter import PaperAdapter
 
+try:
+    from execution.contract_engine import contract_engine
+except ImportError:
+    from trading_engine.execution.contract_engine import contract_engine
+
 app = FastAPI(title="AI Trader Autonomous Engine", version="2.5.0")
 
 app.add_middleware(
@@ -1082,6 +1087,118 @@ async def execute_strategy_order(payload: Dict[str, Any] = Body(...)):
         state.save_paper_state()
     await broadcast_state()
     return {"status": "success", "action": "STRATEGY_ORDER_PLACED", "position": pos}
+
+
+# ── Contract Screen Trading Terminal Endpoints ──────────────────────────────
+
+@app.get("/api/trade/state")
+async def get_contract_trade_state():
+    """Returns current active position, day PnL, capital balance, and kill switch status."""
+    return contract_engine.get_state()
+
+
+@app.post("/api/trade/order")
+async def place_contract_order(payload: Dict[str, Any] = Body(...)):
+    """
+    Places 1-click Market or Limit order on contract.
+    Payload: { symbol, side, order_type, lots, limit_price, sl, target1, target2, trailing_mode, current_market_price }
+    """
+    symbol = payload.get("symbol", "")
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Contract symbol is required.")
+    
+    side = payload.get("side", "BUY")
+    order_type = payload.get("order_type", "MARKET")
+    lots = int(payload.get("lots", 1))
+    limit_price = payload.get("limit_price")
+    sl = payload.get("sl")
+    target1 = payload.get("target1")
+    target2 = payload.get("target2")
+    trailing_mode = payload.get("trailing_mode", "be_lock")
+    current_market_price = payload.get("current_market_price")
+
+    res = contract_engine.place_order(
+        symbol=symbol,
+        side=side,
+        order_type=order_type,
+        lots=lots,
+        limit_price=limit_price,
+        sl=sl,
+        target1=target1,
+        target2=target2,
+        trailing_mode=trailing_mode,
+        current_market_price=current_market_price
+    )
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Order failed."))
+    return res
+
+
+@app.post("/api/trade/exit")
+async def exit_contract_position(payload: Dict[str, Any] = Body(default={})):
+    """1-click Market Exit for the active position."""
+    reason = payload.get("reason", "MANUAL_EXIT")
+    exit_price = payload.get("exit_price")
+    res = contract_engine.close_position(reason=reason, exit_price=exit_price)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Exit failed."))
+    return res
+
+
+@app.post("/api/trade/modify")
+async def modify_contract_levels(payload: Dict[str, Any] = Body(...)):
+    """Modifies SL, Target, Limit price, or Trailing mode on the fly (e.g. from chart drag)."""
+    res = contract_engine.modify_active_levels(
+        sl=payload.get("sl"),
+        target1=payload.get("target1"),
+        target2=payload.get("target2"),
+        limit_price=payload.get("limit_price"),
+        trailing_mode=payload.get("trailing_mode")
+    )
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Modification failed."))
+    return res
+
+
+@app.post("/api/trade/kill_switch")
+async def trigger_contract_kill_switch():
+    """Emergency Kill Switch: Flattens all positions, cancels orders, locks trading."""
+    return contract_engine.trigger_kill_switch()
+
+
+@app.post("/api/trade/kill_switch/unlock")
+async def unlock_contract_kill_switch():
+    """Unlocks the Kill Switch so normal trading can resume."""
+    return contract_engine.unlock_kill_switch()
+
+
+@app.post("/api/trade/mode")
+async def set_contract_trade_mode(payload: Dict[str, Any] = Body(...)):
+    """Switches trading mode ('paper', 'live', 'replay')."""
+    mode = payload.get("mode", "paper")
+    res = contract_engine.set_mode(mode)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message"))
+    return res
+
+
+@app.post("/api/trade/reset")
+async def reset_contract_account(payload: Dict[str, Any] = Body(default={})):
+    """Resets paper account balance to initial capital and clears logs."""
+    capital = payload.get("capital", 100000.0)
+    return contract_engine.reset_account(capital)
+
+
+@app.post("/api/trade/tick")
+async def update_contract_tick(payload: Dict[str, Any] = Body(...)):
+    """Tick update hook to evaluate live fills, unrealized PnL, and trailing exits."""
+    symbol = payload.get("symbol", "")
+    price = float(payload.get("price", 0.0))
+    atr = float(payload.get("atr", 2.5))
+    if symbol and price > 0:
+        fill_or_exit = contract_engine.update_price_tick(symbol, price, atr)
+        return {"status": "success", "event": fill_or_exit, "state": contract_engine.get_state()}
+    return {"status": "ignored"}
 
 
 # ── Simulation Replay Endpoints ──────────────────────────────────────────────
