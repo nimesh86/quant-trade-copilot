@@ -115,6 +115,16 @@
                     text.textContent = `● Active Broker: ${brokerLabel} (Requires Daily Token / Credentials)`;
                 }
             }
+
+            // Update top-right header button text dynamically
+            const btnTexts = document.querySelectorAll(".vault-btn-text, #vault-btn-text");
+            btnTexts.forEach(el => {
+                el.textContent = active === "breeze" ? "Breeze Vault" : "Kite Vault";
+            });
+            const btnOpen = document.getElementById("btn-open-vault");
+            if (btnOpen) {
+                btnOpen.title = `Active Broker: ${active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite"} (Click to configure)`;
+            }
         } catch (e) {
             console.warn("Could not check KeyVault broker status:", e);
         }
