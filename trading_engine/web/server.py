@@ -1799,87 +1799,37 @@ async def run_live_tick_broadcaster():
 
 
 async def run_collector_supervisor():
-    """Continuously monitors Kite session & tick collector during market hours (08:50 - 15:35 IST).
-    If Zerodha token is expired or collect_ticks is dead:
-    1. Validates or refreshes Kite token via ZerodhaAutoLogin.
-    2. Auto-launches collect_ticks.py so data ingestion never fails on a new day.
+    """Continuously monitors and supervises the 24/7 Market & Option Chain collector daemon.
+    Automatically starts trading_engine.collectors.market_collector if not running.
     """
-    print("CollectorSupervisor: Started background session & collector monitor...", flush=True)
-    ai_trader_dir = Path("/Users/admin/Documents/Nimesh/Projects/ai-trade/AI-trader")
-    venv_python = ai_trader_dir / ".venv" / "bin" / "python"
-    collect_script = ai_trader_dir / "scripts" / "collect_ticks.py"
+    print("CollectorSupervisor: Started background market & option chain collector monitor...", flush=True)
+    project_root = Path(__file__).resolve().parent.parent.parent
 
     while True:
         try:
-            try:
-                from zoneinfo import ZoneInfo
-                tz = ZoneInfo("Asia/Kolkata")
-            except Exception:
-                from datetime import timezone, timedelta
-                tz = timezone(timedelta(hours=5, minutes=30))
-            now = datetime.now(tz)
+            import subprocess
+            # Check if market_collector daemon is running
+            res = subprocess.run(["pgrep", "-f", "trading_engine.collectors.market_collector"], capture_output=True, text=True)
+            collector_running = bool(res.stdout.strip())
 
-            # Active market collection window: Mon-Fri 08:50 AM to 15:35 PM IST
-            is_weekday = now.weekday() < 5
-            is_collection_hours = (
-                is_weekday and (
-                    (now.hour == 8 and now.minute >= 50) or
-                    (9 <= now.hour <= 14) or
-                    (now.hour == 15 and now.minute <= 35)
-                )
-            )
+            if not collector_running:
+                # Check if managed by systemd or needs manual launch
+                res_systemd = subprocess.run(["systemctl", "is-active", "quant-collector"], capture_output=True, text=True)
+                systemd_active = (res_systemd.stdout.strip() == "active")
 
-            if is_collection_hours:
-                import subprocess
-                res = subprocess.run(["pgrep", "-f", "collect_ticks.py"], capture_output=True, text=True)
-                collector_running = bool(res.stdout.strip())
+                if not systemd_active:
+                    print("CollectorSupervisor: market_collector daemon is not running. Launching background worker...", flush=True)
+                    subprocess.Popen(
+                        [sys.executable, "-m", "trading_engine.collectors.market_collector"],
+                        cwd=str(project_root),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
+                    print("CollectorSupervisor: market_collector successfully launched!", flush=True)
 
-                if not collector_running:
-                    print("CollectorSupervisor: collect_ticks.py is not running during market hours! Validating Kite session...", flush=True)
-                    try:
-                        import sys
-                        if str(ai_trader_dir) not in sys.path:
-                            sys.path.insert(0, str(ai_trader_dir))
-                        from broker.zerodha_autologin import ZerodhaAutoLogin
-                        from kiteconnect import KiteConnect
-
-                        try:
-                            from trading_engine.core.keyvault import get_secret
-                            api_key = get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
-                            token = get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
-                        except Exception:
-                            api_key = os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
-                            token = os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
-
-                        token_valid = False
-                        if api_key and token:
-                            try:
-                                kite = KiteConnect(api_key=api_key)
-                                kite.set_access_token(token)
-                                kite.profile()
-                                token_valid = True
-                            except Exception:
-                                token_valid = False
-
-                        if not token_valid:
-                            print("CollectorSupervisor: Token invalid or expired. Performing autonomous TOTP Zerodha login...", flush=True)
-                            login_res = ZerodhaAutoLogin().execute_login()
-                            print(f"CollectorSupervisor: Login status: {login_res.get('status')}", flush=True)
-
-                        print(f"CollectorSupervisor: Launching {collect_script}...", flush=True)
-                        subprocess.Popen(
-                            [str(venv_python), str(collect_script)],
-                            cwd=str(ai_trader_dir),
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True
-                        )
-                        print("CollectorSupervisor: collect_ticks.py successfully launched!", flush=True)
-                    except Exception as err:
-                        print(f"CollectorSupervisor: Error auto-recovering collector: {err}", flush=True)
-
-        except Exception:
-            pass
+        except Exception as err:
+            print(f"CollectorSupervisor error: {err}", flush=True)
 
         await asyncio.sleep(60)
 
