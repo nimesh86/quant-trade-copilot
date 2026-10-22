@@ -32,7 +32,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 from trading_engine.core.keyvault import get_secret
-from trading_engine.adapters.symbol_translator import canonical_to_breeze_derivative, parse_canonical_symbol
+from trading_engine.adapters.symbol_translator import to_breeze_params, to_canonical_symbol, parse_canonical_symbol
 
 # Setup logger
 logging.basicConfig(
