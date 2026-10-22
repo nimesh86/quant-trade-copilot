@@ -1231,6 +1231,11 @@ function handleContractTick(data) {
     // Update badge & buy button live premium
     document.getElementById('badge-ltp').textContent = `₹${ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
     updateMarketBuyButton(ltp);
+
+    if (C.tradingState && C.tradingState.active_position && C.tradingState.active_position.symbol === C.symbol) {
+        updateTradingUI(C.tradingState);
+        requestAnimationFrame(renderSMFCanvas);
+    }
     const chgEl = document.getElementById('badge-chg');
     if (C.sessionOpen != null) {
         const chgPct = ((ltp - C.sessionOpen) / C.sessionOpen * 100);
@@ -4355,12 +4360,30 @@ function updateTradingUI(state) {
         const pos = state.active_position;
         if (exitBtn) exitBtn.classList.remove('hidden');
 
+        // Dynamically compute live PnL if curPx > 0
+        if (curPx > 0 && pos.entry_price > 0) {
+            const pts = curPx - pos.entry_price;
+            pos.current_price = curPx;
+            pos.unrealized_pts = Math.round(pts * 100) / 100;
+            pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
+            pos.unrealized_pnl_pct = Math.round((pts / pos.entry_price) * 1000) / 10;
+        }
+
         const pnl = pos.unrealized_pnl || 0.0;
         const pts = pos.unrealized_pts || 0.0;
         const sign = pnl >= 0 ? '+' : '';
 
         if (posPnlSub) {
             posPnlSub.textContent = `${sign}₹${Math.round(pnl)} (${sign}${pts.toFixed(1)}p)`;
+            posPnlSub.style.color = pnl >= 0 ? '#ffffff' : '#ffccd5';
+        }
+
+        // Also update Day PnL Pill to reflect active position's unrealized PnL!
+        const totalPnl = (state.realized_day_pnl || 0.0) + pnl;
+        if (dayPnlEl && dayPnlPill) {
+            const dSign = totalPnl >= 0 ? '+' : '';
+            dayPnlEl.textContent = `${dSign}₹${totalPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            dayPnlPill.className = `stat-pill ${totalPnl > 0 ? 'pnl-positive' : (totalPnl < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
         }
     } else {
         if (exitBtn) exitBtn.classList.add('hidden');

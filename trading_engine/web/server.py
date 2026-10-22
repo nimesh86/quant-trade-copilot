@@ -1092,8 +1092,14 @@ async def execute_strategy_order(payload: Dict[str, Any] = Body(...)):
 # ── Contract Screen Trading Terminal Endpoints ──────────────────────────────
 
 @app.get("/api/trade/state")
-async def get_contract_trade_state():
+async def get_contract_trade_state(symbol: Optional[str] = None):
     """Returns current active position, day PnL, capital balance, and kill switch status."""
+    if contract_engine.active_position:
+        sym = symbol or contract_engine.active_position["symbol"]
+        cache = get_all_live_prices()
+        entry = cache.get(sym) or cache.get(sym.upper())
+        if entry and entry.get("price"):
+            contract_engine.update_price_tick(sym, float(entry["price"]))
     return contract_engine.get_state()
 
 
@@ -1142,6 +1148,14 @@ async def exit_contract_position(payload: Dict[str, Any] = Body(default={})):
     res = contract_engine.close_position(reason=reason, exit_price=exit_price)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message", "Exit failed."))
+    return res
+
+
+@app.post("/api/trade/cancel")
+async def cancel_contract_pending_orders(payload: Dict[str, Any] = Body(default={})):
+    """Cancels pending limit orders."""
+    order_id = payload.get("order_id")
+    res = contract_engine.cancel_pending_order(order_id=order_id)
     return res
 
 
@@ -2519,6 +2533,7 @@ async def run_contract_tick_broadcaster():
                         if prev is not None and abs(prev - ltp) < 1e-4:
                             continue
                         last_sent_prices[symbol] = ltp
+                        contract_engine.update_price_tick(symbol, ltp)
 
                         fc = update_forming_candle(symbol, ltp)
                         clients = get_contract_clients(symbol)
