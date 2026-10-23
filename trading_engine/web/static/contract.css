@@ -2576,47 +2576,30 @@ kbd {
 .trade-mode-group {
     display: flex;
     align-items: center;
-    gap: 8px;
 }
 
-.trade-mode-label {
-    color: #64748b;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-}
-
-.trade-mode-selector {
-    display: inline-flex;
-    background: rgba(15, 23, 42, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+.trade-mode-select {
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(0, 229, 255, 0.4);
     border-radius: 6px;
-    padding: 2px;
-    gap: 2px;
-}
-
-.mode-btn {
-    background: transparent;
-    border: none;
-    color: #94a3b8;
-    padding: 3px 8px;
-    border-radius: 4px;
-    font-size: 10.5px;
-    font-weight: 600;
+    color: #00e5ff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 8px;
+    height: 28px;
     cursor: pointer;
+    outline: none;
     transition: all 0.15s ease;
 }
 
-.mode-btn:hover {
-    color: #f1f5f9;
-    background: rgba(255, 255, 255, 0.05);
+.trade-mode-select:hover, .trade-mode-select:focus {
+    border-color: #00e5ff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.35);
 }
 
-.mode-btn.active {
-    background: #00e5ff;
-    color: #040914;
-    font-weight: 700;
-    box-shadow: 0 0 8px rgba(0, 229, 255, 0.35);
+.trade-mode-select option {
+    background: #0b1329;
+    color: #f1f5f9;
 }
 
 .trade-stats-group {
@@ -2740,18 +2723,17 @@ kbd {
 .btn-clean-buy {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    padding: 0;
     background: linear-gradient(135deg, #00f2a9, #00b875);
     border: 1px solid #00f2a9;
     border-radius: 6px;
     color: #040914;
-    font-weight: 800;
-    font-size: 11px;
-    padding: 0 12px;
-    height: 28px;
     cursor: pointer;
     transition: all 0.15s ease;
-    box-shadow: 0 0 12px rgba(0, 242, 169, 0.35);
+    box-shadow: 0 0 10px rgba(0, 242, 169, 0.35);
 }
 
 .btn-clean-buy:hover {
@@ -2760,32 +2742,21 @@ kbd {
     box-shadow: 0 0 16px rgba(0, 242, 169, 0.6);
 }
 
-.btn-clean-buy .buy-lbl {
-    font-weight: 800;
-    letter-spacing: 0.5px;
-}
-
-.btn-clean-buy .buy-px {
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-    background: rgba(0, 0, 0, 0.25);
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10.5px;
+.btn-clean-buy .cart-icon {
+    stroke: #040914;
 }
 
 .btn-clean-limit {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    padding: 0;
     background: rgba(0, 229, 255, 0.12);
     border: 1px solid rgba(0, 229, 255, 0.5);
     border-radius: 6px;
     color: #00e5ff;
-    font-weight: 700;
-    font-size: 11px;
-    padding: 0 10px;
-    height: 28px;
     cursor: pointer;
     transition: all 0.15s ease;
 }

@@ -255,6 +255,7 @@ class TestTradingEngineE2E(unittest.TestCase):
         self.assertIn("val-day-pnl", html, "Day PnL badge missing in HTML!")
         self.assertIn("btn-kill-switch", html, "Kill switch button missing in HTML!")
         self.assertIn("active-pos-hud", html, "Active position HUD (POS, SL, T1, T2) missing in HTML!")
+        self.assertIn("trade-mode-select", html, "Trade mode dropdown select missing in HTML!")
         self.assertNotIn("trade-dock", html, "Obsolete floating trade-dock should not be present in HTML!")
 
         # 2. JS check

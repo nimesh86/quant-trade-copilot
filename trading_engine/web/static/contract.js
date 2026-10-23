@@ -4297,11 +4297,12 @@ function updateTradingUI(state) {
         capEl.textContent = `₹${(state.capital || 100000).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
     }
 
-    // 3. Mode Buttons in Top Header
+    // 3. Mode Selection in Top Header
     const currentMode = state.mode || 'paper';
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.mode === currentMode);
-    });
+    const modeSelect = document.getElementById('trade-mode-select');
+    if (modeSelect && modeSelect.value !== currentMode) {
+        modeSelect.value = currentMode;
+    }
 
     // 4. Kill Switch Button
     const ksBtn = document.getElementById('btn-kill-switch');
@@ -4399,169 +4400,151 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
         if (yLim != null && yTgt != null && ySL != null) {
             ctx.save();
 
-            // A. Shaded Profit and Loss Zones (TradingView Long Position style)
-            const zoneX = Math.max(curCandleX, chartPlotRight - 240);
-            const zoneW = chartPlotRight - zoneX - 6;
+            // Order Box Geometry: TradingView Long Position Box
+            const boxW = Math.min(260, Math.max(180, chartPlotRight - 60));
+            const boxX = Math.max(10, Math.min(chartPlotRight - boxW - 8, curCandleX - 25));
 
-            // Profit zone (Green tint)
+            // A. Target (Profit) Green Zone
             const profitTop = Math.min(yLim, yTgt);
-            const profitH = Math.max(1, Math.abs(yTgt - yLim));
-            ctx.fillStyle = 'rgba(16, 185, 129, 0.09)';
-            ctx.fillRect(zoneX, profitTop, zoneW, profitH);
+            const profitH = Math.max(3, Math.abs(yTgt - yLim));
 
-            // Risk zone (Red tint)
+            ctx.beginPath();
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+            ctx.fillRect(boxX, profitTop, boxW, profitH);
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.75)';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(boxX, profitTop, boxW, profitH);
+
+            // B. Stop Loss (Risk) Red Zone
             const riskTop = Math.min(yLim, ySL);
-            const riskH = Math.max(1, Math.abs(ySL - yLim));
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.09)';
-            ctx.fillRect(zoneX, riskTop, zoneW, riskH);
-
-            // B. Target Line & Badge
-            const tgtPts = tgt - lim;
-            const tgtRs = tgtPts * units;
-            const tgtPct = ((tgtPts / lim) * 100).toFixed(1);
-            const tgtLabel = `🎯 TARGET: ₹${tgt.toFixed(1)} (+${tgtPts.toFixed(1)}p | +₹${Math.round(tgtRs).toLocaleString('en-IN')} | +${tgtPct}%) ↕`;
+            const riskH = Math.max(3, Math.abs(ySL - yLim));
 
             ctx.beginPath();
-            ctx.strokeStyle = '#10b981';
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+            ctx.fillRect(boxX, riskTop, boxW, riskH);
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
             ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(zoneX, yTgt);
-            ctx.lineTo(chartPlotRight, yTgt);
-            ctx.stroke();
+            ctx.strokeRect(boxX, riskTop, boxW, riskH);
 
-            ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
-            const tgtTextW = Math.ceil(ctx.measureText(tgtLabel).width);
-            const tgtBadgeW = tgtTextW + 16;
-            const tgtBadgeH = 22;
-            const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 6);
-            const tgtBadgeY = Math.round(yTgt - tgtBadgeH / 2);
-
-            ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 4);
-            else ctx.rect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH);
-            ctx.fill();
-            ctx.strokeStyle = '#10b981';
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-
-            ctx.fillStyle = '#10b981';
-            ctx.textBaseline = 'middle';
-            ctx.textAlign = 'left';
-            ctx.fillText(tgtLabel, tgtBadgeX + 8, tgtBadgeY + tgtBadgeH / 2);
-
-            C.limitToolHitBoxes.push({
-                type: 'target_drag',
-                y: yTgt,
-                x: tgtBadgeX,
-                w: tgtBadgeW,
-                h: tgtBadgeH
-            });
-
-            // C. Stop Loss Line & Badge
-            const slPts = lim - sl;
-            const slRs = slPts * units;
-            const slPct = ((slPts / lim) * 100).toFixed(1);
-            const slLabel = `🛑 STOP LOSS: ₹${sl.toFixed(1)} (-${slPts.toFixed(1)}p | -₹${Math.round(slRs).toLocaleString('en-IN')} | -${slPct}%) ↕`;
-
-            ctx.beginPath();
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(zoneX, ySL);
-            ctx.lineTo(chartPlotRight, ySL);
-            ctx.stroke();
-
-            const slTextW = Math.ceil(ctx.measureText(slLabel).width);
-            const slBadgeW = slTextW + 16;
-            const slBadgeH = 22;
-            const slBadgeX = Math.round(chartPlotRight - slBadgeW - 6);
-            const slBadgeY = Math.round(ySL - slBadgeH / 2);
-
-            ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 4);
-            else ctx.rect(slBadgeX, slBadgeY, slBadgeW, slBadgeH);
-            ctx.fill();
-            ctx.strokeStyle = '#ef4444';
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-
-            ctx.fillStyle = '#ef4444';
-            ctx.textBaseline = 'middle';
-            ctx.textAlign = 'left';
-            ctx.fillText(slLabel, slBadgeX + 8, slBadgeY + slBadgeH / 2);
-
-            C.limitToolHitBoxes.push({
-                type: 'sl_drag',
-                y: ySL,
-                x: slBadgeX,
-                w: slBadgeW,
-                h: slBadgeH
-            });
-
-            // D. Limit Order Line & Action Badge
+            // C. Middle Entry Divider Line
             ctx.beginPath();
             ctx.strokeStyle = '#00e5ff';
             ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.moveTo(zoneX, yLim);
-            ctx.lineTo(chartPlotRight, yLim);
+            ctx.moveTo(boxX, yLim);
+            ctx.lineTo(boxX + boxW, yLim);
             ctx.stroke();
 
-            const limText = `📥 LIMIT: ₹${lim.toFixed(1)} ↕`;
+            // Center Grab Handles ⚪
+            // Target Grab Handle ⚪
+            ctx.beginPath();
+            ctx.arc(boxX + boxW / 2, yTgt, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#10b981';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Entry Grab Handle ⚪
+            ctx.beginPath();
+            ctx.arc(boxX + boxW / 2, yLim, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#00e5ff';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // SL Grab Handle ⚪
+            ctx.beginPath();
+            ctx.arc(boxX + boxW / 2, ySL, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ef4444';
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Metrics calculations
+            const tgtPts = tgt - lim;
+            const tgtRs = tgtPts * units;
+            const slPts = lim - sl;
+            const slRs = slPts * units;
+            const rr = slPts > 0 ? (tgtPts / slPts).toFixed(2) : '--';
+
+            // Text inside Green Box (Target)
+            ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
+            ctx.fillStyle = '#10b981';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            const tgtYText = (yLim - yTgt > 26) ? (yTgt + 12) : (yTgt - 10);
+            ctx.fillText(`🎯 TARGET ₹${tgt.toFixed(1)} (+${tgtPts.toFixed(1)}p | +₹${Math.round(tgtRs).toLocaleString('en-IN')})`, boxX + 8, tgtYText);
+
+            // Text inside Red Box (SL)
+            ctx.fillStyle = '#ef4444';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            const slYText = (ySL - yLim > 26) ? (ySL - 12) : (ySL + 10);
+            ctx.fillText(`🛑 STOP LOSS ₹${sl.toFixed(1)} (-${slPts.toFixed(1)}p | -₹${Math.round(slRs).toLocaleString('en-IN')})`, boxX + 8, slYText);
+
+            // Floating Central Control Badge (Limit, R:R, BUY LIMIT, Cancel)
+            const limText = `📥 ₹${lim.toFixed(1)}`;
+            const rrText = `R:R 1:${rr}`;
             const placeText = `✔ BUY LIMIT`;
             const cancelText = `✕`;
 
             const limTextW = Math.ceil(ctx.measureText(limText).width);
+            const rrTextW = Math.ceil(ctx.measureText(rrText).width);
             const placeTextW = Math.ceil(ctx.measureText(placeText).width);
             const cancelTextW = Math.ceil(ctx.measureText(cancelText).width);
 
-            const limBadgeW = limTextW + placeTextW + cancelTextW + 36;
-            const limBadgeH = 26;
-            const limBadgeX = Math.round(chartPlotRight - limBadgeW - 6);
-            const limBadgeY = Math.round(yLim - limBadgeH / 2);
+            const badgeW = limTextW + rrTextW + placeTextW + cancelTextW + 40;
+            const badgeH = 26;
+            const badgeX = Math.round(boxX + (boxW - badgeW) / 2);
+            const badgeY = Math.round(yLim - badgeH / 2);
 
-            // Container Badge
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.98)';
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(limBadgeX, limBadgeY, limBadgeW, limBadgeH, 5);
-            else ctx.rect(limBadgeX, limBadgeY, limBadgeW, limBadgeH);
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 5);
+            else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#00e5ff';
-            ctx.lineWidth = 1.4;
+            ctx.lineWidth = 1.3;
             ctx.stroke();
 
-            // Label text
+            // Text: Limit & RR
             ctx.fillStyle = '#00e5ff';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(limText, limBadgeX + 8, limBadgeY + limBadgeH / 2);
+            ctx.fillText(limText, badgeX + 7, yLim);
 
-            // Place Order Button inside badge
-            const btnPlaceX = limBadgeX + limTextW + 14;
-            const btnPlaceW = placeTextW + 12;
-            const btnPlaceH = limBadgeH - 6;
-            const btnPlaceY = limBadgeY + 3;
+            ctx.fillStyle = '#ffd166';
+            ctx.fillText(rrText, badgeX + limTextW + 15, yLim);
 
-            ctx.fillStyle = '#00f2a9';
+            // Button: BUY LIMIT
+            const btnPlaceX = badgeX + limTextW + rrTextW + 23;
+            const btnPlaceW = placeTextW + 10;
+            const btnPlaceH = badgeH - 6;
+            const btnPlaceY = badgeY + 3;
+
+            ctx.beginPath();
             if (typeof ctx.roundRect === 'function') ctx.roundRect(btnPlaceX, btnPlaceY, btnPlaceW, btnPlaceH, 3);
             else ctx.rect(btnPlaceX, btnPlaceY, btnPlaceW, btnPlaceH);
+            ctx.fillStyle = '#00f2a9';
             ctx.fill();
 
             ctx.fillStyle = '#040914';
             ctx.font = 'bold 11px Inter, sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(placeText, btnPlaceX + btnPlaceW / 2, btnPlaceY + btnPlaceH / 2);
+            ctx.fillText(placeText, btnPlaceX + btnPlaceW / 2, yLim);
 
-            // Cancel Button
+            // Button: Cancel
             const btnCancelX = btnPlaceX + btnPlaceW + 6;
-            const btnCancelW = cancelTextW + 10;
+            const btnCancelW = cancelTextW + 8;
             const btnCancelH = btnPlaceH;
             const btnCancelY = btnPlaceY;
 
-            ctx.fillStyle = 'rgba(255, 77, 109, 0.2)';
+            ctx.beginPath();
             if (typeof ctx.roundRect === 'function') ctx.roundRect(btnCancelX, btnCancelY, btnCancelW, btnCancelH, 3);
             else ctx.rect(btnCancelX, btnCancelY, btnCancelW, btnCancelH);
+            ctx.fillStyle = 'rgba(255, 77, 109, 0.25)';
             ctx.fill();
             ctx.strokeStyle = '#ff4d6d';
             ctx.lineWidth = 1;
@@ -4569,15 +4552,37 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
             ctx.fillStyle = '#ff4d6d';
             ctx.textAlign = 'center';
-            ctx.fillText(cancelText, btnCancelX + btnCancelW / 2, btnCancelY + btnCancelH / 2);
+            ctx.fillText(cancelText, btnCancelX + btnCancelW / 2, yLim);
 
+            // Register Hitboxes:
+            // 1. Target Drag (entire green box surface OR top handle)
+            C.limitToolHitBoxes.push({
+                type: 'target_drag',
+                x: boxX,
+                y: profitTop,
+                w: boxW,
+                h: profitH,
+                lineY: yTgt
+            });
+            // 2. SL Drag (entire red box surface OR bottom handle)
+            C.limitToolHitBoxes.push({
+                type: 'sl_drag',
+                x: boxX,
+                y: riskTop,
+                w: boxW,
+                h: riskH,
+                lineY: ySL
+            });
+            // 3. Limit Entry Drag (middle line / handle)
             C.limitToolHitBoxes.push({
                 type: 'limit_drag',
-                y: yLim,
-                x: limBadgeX,
-                w: limTextW + 10,
-                h: limBadgeH
+                x: boxX,
+                y: yLim - 8,
+                w: boxW,
+                h: 16,
+                lineY: yLim
             });
+            // 4. Place button
             C.limitToolHitBoxes.push({
                 type: 'limit_place',
                 x: btnPlaceX,
@@ -4585,6 +4590,7 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
                 w: btnPlaceW,
                 h: btnPlaceH
             });
+            // 5. Cancel button
             C.limitToolHitBoxes.push({
                 type: 'limit_cancel',
                 x: btnCancelX,
@@ -4620,23 +4626,15 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
         const sign = pnl >= 0 ? '+' : '';
 
         const yEntry = Math.round(C.candleSeries.priceToCoordinate(entryPx));
-        const yCurSl = curSl ? Math.round(C.candleSeries.priceToCoordinate(curSl)) : null;
-        const yTgt1 = tgt1 ? Math.round(C.candleSeries.priceToCoordinate(tgt1)) : null;
-        const yTgt2 = tgt2 ? Math.round(C.candleSeries.priceToCoordinate(tgt2)) : null;
+        const yCurSl = (curSl != null && curSl > 0) ? Math.round(C.candleSeries.priceToCoordinate(curSl)) : null;
+        const yTgt1 = (tgt1 != null && tgt1 > 0) ? Math.round(C.candleSeries.priceToCoordinate(tgt1)) : null;
+        const yTgt2 = (tgt2 != null && tgt2 > 0) ? Math.round(C.candleSeries.priceToCoordinate(tgt2)) : null;
 
         ctx.save();
         ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
 
-        // Entry Line: Bright Emerald Solid
+        // Entry Line: Bright Emerald Solid (Stops before badge - no strike through!)
         if (yEntry != null && yEntry >= 0 && yEntry <= H) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#00f2a9';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.moveTo(curCandleX, yEntry);
-            ctx.lineTo(chartPlotRight, yEntry);
-            ctx.stroke();
-
             const entryLabel = `⚡ POS: ${pos.lots}L @ ₹${entryPx.toFixed(1)} | ${sign}₹${pnl.toFixed(0)} (${sign}${pts.toFixed(1)}p)${pos.be_locked ? ' [BE 🛡️]' : ''}`;
             const textW = Math.ceil(ctx.measureText(entryLabel).width);
             const badgeW = textW + 16;
@@ -4644,30 +4642,34 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             const badgeX = Math.round(chartPlotRight - badgeW - 6);
             const badgeY = Math.round(yEntry - badgeH / 2);
 
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
-            else ctx.rect(badgeX, badgeY, badgeW, badgeH);
-            ctx.fill();
+            // 1. Horizontal line terminates at badgeX - 3 (NEVER enters the badge)
+            ctx.beginPath();
             ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
-            ctx.lineWidth = 1.4;
+            ctx.lineWidth = 1.6;
+            ctx.setLineDash([]);
+            ctx.moveTo(curCandleX, yEntry);
+            ctx.lineTo(badgeX - 3, yEntry);
             ctx.stroke();
 
+            // 2. Clean, opaque badge container
+            ctx.beginPath();
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+            else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+            ctx.fillStyle = '#080e1a';
+            ctx.fill();
+            ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
+            ctx.lineWidth = 1.3;
+            ctx.stroke();
+
+            // 3. Crisp text centered inside badge
             ctx.fillStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(entryLabel, badgeX + 8, badgeY + badgeH / 2);
+            ctx.fillText(entryLabel, badgeX + 8, yEntry);
         }
 
-        // Active SL Line: Draggable
+        // Active SL Line: Draggable (Stops before badge - no strike through!)
         if (yCurSl != null && yCurSl >= 0 && yCurSl <= H) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#ff4d6d';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(curCandleX, yCurSl);
-            ctx.lineTo(chartPlotRight, yCurSl);
-            ctx.stroke();
-
             const slLabel = `🛑 POS SL: ₹${curSl.toFixed(1)} ↕`;
             const slTextW = Math.ceil(ctx.measureText(slLabel).width);
             const slBadgeW = slTextW + 16;
@@ -4675,10 +4677,19 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             const slBadgeX = Math.round(chartPlotRight - slBadgeW - 6);
             const slBadgeY = Math.round(yCurSl - slBadgeH / 2);
 
+            ctx.beginPath();
+            ctx.strokeStyle = '#ff4d6d';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yCurSl);
+            ctx.lineTo(slBadgeX - 3, yCurSl);
+            ctx.stroke();
+
             ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            ctx.beginPath();
             if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 4);
             else ctx.rect(slBadgeX, slBadgeY, slBadgeW, slBadgeH);
+            ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ff4d6d';
             ctx.lineWidth = 1.2;
@@ -4687,27 +4698,20 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             ctx.fillStyle = '#ff4d6d';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(slLabel, slBadgeX + 8, slBadgeY + slBadgeH / 2);
+            ctx.fillText(slLabel, slBadgeX + 8, yCurSl);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_sl_drag',
                 y: yCurSl,
+                lineY: yCurSl,
                 x: slBadgeX,
                 w: slBadgeW,
                 h: slBadgeH
             });
         }
 
-        // Active Target 1 Line: Draggable
+        // Active Target 1 Line: Draggable (Stops before badge - no strike through!)
         if (yTgt1 != null && yTgt1 >= 0 && yTgt1 <= H) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#ffd166';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(curCandleX, yTgt1);
-            ctx.lineTo(chartPlotRight, yTgt1);
-            ctx.stroke();
-
             const tgtLabel = `🎯 POS T1: ₹${tgt1.toFixed(1)} ↕`;
             const tgtTextW = Math.ceil(ctx.measureText(tgtLabel).width);
             const tgtBadgeW = tgtTextW + 16;
@@ -4715,10 +4719,19 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 6);
             const tgtBadgeY = Math.round(yTgt1 - tgtBadgeH / 2);
 
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yTgt1);
+            ctx.lineTo(tgtBadgeX - 3, yTgt1);
+            ctx.stroke();
+
             ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            ctx.beginPath();
             if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 4);
             else ctx.rect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH);
+            ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ffd166';
             ctx.lineWidth = 1.2;
@@ -4727,27 +4740,20 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             ctx.fillStyle = '#ffd166';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(tgtLabel, tgtBadgeX + 8, tgtBadgeY + tgtBadgeH / 2);
+            ctx.fillText(tgtLabel, tgtBadgeX + 8, yTgt1);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_tgt_drag',
                 y: yTgt1,
+                lineY: yTgt1,
                 x: tgtBadgeX,
                 w: tgtBadgeW,
                 h: tgtBadgeH
             });
         }
 
-        // Active Target 2 Line: Draggable
+        // Active Target 2 Line: Draggable (Stops before badge - no strike through!)
         if (yTgt2 != null && yTgt2 >= 0 && yTgt2 <= H) {
-            ctx.beginPath();
-            ctx.strokeStyle = '#ffbe0b';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
-            ctx.moveTo(curCandleX, yTgt2);
-            ctx.lineTo(chartPlotRight, yTgt2);
-            ctx.stroke();
-
             const tgt2Label = `🚀 POS T2: ₹${tgt2.toFixed(1)} ↕`;
             const tgt2TextW = Math.ceil(ctx.measureText(tgt2Label).width);
             const tgt2BadgeW = tgt2TextW + 16;
@@ -4755,10 +4761,19 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             const tgt2BadgeX = Math.round(chartPlotRight - tgt2BadgeW - 6);
             const tgt2BadgeY = Math.round(yTgt2 - tgt2BadgeH / 2);
 
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffbe0b';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yTgt2);
+            ctx.lineTo(tgt2BadgeX - 3, yTgt2);
+            ctx.stroke();
+
             ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            ctx.beginPath();
             if (typeof ctx.roundRect === 'function') ctx.roundRect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH, 4);
             else ctx.rect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH);
+            ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ffbe0b';
             ctx.lineWidth = 1.2;
@@ -4767,11 +4782,12 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             ctx.fillStyle = '#ffbe0b';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(tgt2Label, tgt2BadgeX + 8, tgt2BadgeY + tgt2BadgeH / 2);
+            ctx.fillText(tgt2Label, tgt2BadgeX + 8, yTgt2);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_tgt2_drag',
                 y: yTgt2,
+                lineY: yTgt2,
                 x: tgt2BadgeX,
                 w: tgt2BadgeW,
                 h: tgt2BadgeH
@@ -4879,7 +4895,9 @@ function initTradingCanvasMouseHandlers() {
                     break;
                 }
             } else if (hb.type.includes('drag')) {
-                if (Math.abs(mouseY - hb.y) <= 8 || (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h)) {
+                const isLineNear = hb.lineY != null ? Math.abs(mouseY - hb.lineY) <= 8 : Math.abs(mouseY - hb.y) <= 8;
+                const isInsideRect = (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h);
+                if (isLineNear || isInsideRect) {
                     hit = hb;
                     break;
                 }
@@ -4919,11 +4937,27 @@ function initTradingCanvasMouseHandlers() {
                     return;
                 }
             } else if (hb.type.includes('drag')) {
-                if (Math.abs(mouseY - hb.y) <= 8 || (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h)) {
+                const isLineNear = hb.lineY != null ? Math.abs(mouseY - hb.lineY) <= 8 : Math.abs(mouseY - hb.y) <= 8;
+                const isInsideRect = (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h);
+                if (isLineNear || isInsideRect) {
                     e.stopPropagation();
                     dragType = hb.type;
                     return;
                 }
+            }
+        }
+
+        // If Limit Tool is active and user clicks on empty chart space, reposition the box there!
+        if (C.limitTool && C.limitTool.active && C.candleSeries) {
+            const price = C.candleSeries.coordinateToPrice(mouseY);
+            if (price != null && price > 0) {
+                const newLim = Math.round(price * 20) / 20;
+                const dTarget = Math.max(4.0, (C.limitTool.targetPrice || newLim + 6) - (C.limitTool.limitPrice || newLim));
+                const dSL = Math.max(3.0, (C.limitTool.limitPrice || newLim) - (C.limitTool.slPrice || newLim - 4));
+                C.limitTool.limitPrice = newLim;
+                C.limitTool.targetPrice = Math.round((newLim + dTarget) * 20) / 20;
+                C.limitTool.slPrice = Math.round((newLim - dSL) * 20) / 20;
+                requestAnimationFrame(renderSMFCanvas);
             }
         }
     });
@@ -4978,10 +5012,11 @@ function initTradingTerminal() {
     }
     updateLotDisplay();
 
-    // 2. Mode buttons
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const mode = btn.dataset.mode;
+    // 2. Mode select dropdown
+    const modeSelect = document.getElementById('trade-mode-select');
+    if (modeSelect) {
+        modeSelect.addEventListener('change', async (e) => {
+            const mode = e.target.value;
             try {
                 const res = await fetch('/api/trade/mode', {
                     method: 'POST',
@@ -4991,11 +5026,11 @@ function initTradingTerminal() {
                 if (res.ok) {
                     await fetchTradeState();
                 }
-            } catch (e) {
-                console.warn('Set mode error:', e);
+            } catch (err) {
+                console.warn('Set mode error:', err);
             }
         });
-    });
+    }
 
     // 3. Single Clean Market BUY Button (1-Click instant execution at live market price)
     const btnBuyMkt = document.getElementById('btn-quick-buy-mkt');

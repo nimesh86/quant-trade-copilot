@@ -76,12 +76,11 @@
         <!-- ── Trading Header Strip (Day PnL, Capital, Mode, Single-Click Trade, Kill Switch) ───── -->
         <div class="header-trade-row">
             <div class="trade-mode-group">
-                <span class="trade-mode-label">⚡ TRADING:</span>
-                <div class="trade-mode-selector" role="radiogroup" aria-label="Trading Mode">
-                    <button class="mode-btn active" data-mode="paper" id="mode-paper-btn" title="Paper Trading Simulator">📄 Paper</button>
-                    <button class="mode-btn" data-mode="live" id="mode-live-btn" title="Live Broker Execution">🔴 Live</button>
-                    <button class="mode-btn" data-mode="replay" id="mode-replay-btn" title="Historical Replay Simulator">⏪ Replay</button>
-                </div>
+                <select id="trade-mode-select" class="trade-mode-select" title="Trading Execution Mode">
+                    <option value="paper" selected>📄 Paper</option>
+                    <option value="live">🔴 Live</option>
+                    <option value="replay">⏪ Replay</option>
+                </select>
             </div>
 
             <!-- Single-Click Execution Center: Ultra clean, no chart clutter -->
@@ -89,20 +88,28 @@
                 <div class="lot-pill" title="Order Lot Size">
                     <button id="btn-qty-minus" class="lot-btn" title="Decrease Lots">-</button>
                     <span id="trade-lots-val" class="lot-num">1</span>
-                    <span class="lot-sub">Lot (<span id="trade-units-val">65</span>)</span>
                     <button id="btn-qty-plus" class="lot-btn" title="Increase Lots">+</button>
+                    <span id="trade-units-val" style="display:none">65</span>
                 </div>
 
-                <!-- Single Clean Market Buy Button: Shows live premium directly on button -->
-                <button id="btn-quick-buy-mkt" class="btn-clean-buy" title="1-Click Instant Market Buy at Current Market Price">
-                    <span class="buy-lbl">BUY MKT</span>
-                    <span id="btn-mkt-px" class="buy-px">₹--</span>
+                <!-- Single Clean Market Buy Button: Cart Icon, compact, no live price -->
+                <button id="btn-quick-buy-mkt" class="btn-clean-buy" title="1-Click Market Buy (Instant Execution)">
+                    <svg class="cart-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                    <span id="btn-mkt-px" style="display:none"></span>
                 </button>
 
-                <!-- TradingView-Style Interactive Limit Tool Button -->
-                <button id="btn-draw-limit" class="btn-clean-limit" title="Place & Drag Limit Order on Chart (TradingView style)">
-                    <span class="limit-icon">📐</span>
-                    <span class="limit-lbl">Limit Tool</span>
+                <!-- TradingView-Style Interactive Limit / Order Box Tool Button (Icon only) -->
+                <button id="btn-draw-limit" class="btn-clean-limit" title="Draw Order Box (TradingView Limit, Target & SL Tool)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
+                        <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
+                        <polyline points="4 15 10 9 14 13 20 7"></polyline>
+                        <polyline points="15 7 20 7 20 12"></polyline>
+                    </svg>
                 </button>
 
                 <!-- Active Position HUD: POS, SL, T1, T2 directly in toolbar -->
@@ -425,7 +432,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261023_0910"></script>
+<script src="/static/contract.js?v=20261023_0935"></script>
 
 </body>
 </html>
