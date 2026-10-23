@@ -50,6 +50,8 @@ const C = {
     lotUnits: 65,
     tradingState: null,
     tradingPollTimer: null,
+    selectedSessionDate: 'today',
+    availableSessionDates: [],
     limitTool: {
         active: false,
         limitPrice: 0,
@@ -95,6 +97,7 @@ const SMF = {
 document.addEventListener('DOMContentLoaded', async () => {
     initChart();
     initSearch();
+    await initSessionDateSelector();
     await initExpirySelector();
     initOptionChain();
     initKeyboardShortcuts();
@@ -466,8 +469,95 @@ function closeSearch() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ── EXPIRY DATES & OPTION CHAIN CONTROLLER ───────────────────────────────────
+// ── SESSION DATE (DAY) & EXPIRY DATES CONTROLLER ─────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
+
+async function initSessionDateSelector() {
+    const sel = document.getElementById('session-date-select');
+    if (!sel) return;
+
+    try {
+        const res = await fetch('/api/simulation/dates');
+        const data = await res.json();
+        const dates = data.dates || [];
+        const todayStr = data.today || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        C.availableSessionDates = dates;
+
+        sel.innerHTML = '';
+
+        // 1. Today (Live Feed) option
+        const todayOpt = document.createElement('option');
+        todayOpt.value = 'today';
+        todayOpt.textContent = `${todayStr} (Today · Live)`;
+        sel.appendChild(todayOpt);
+
+        // 2. Historical dates for Replay
+        dates.forEach((d) => {
+            if (d === todayStr) return;
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = `${d} (Replay)`;
+            sel.appendChild(opt);
+        });
+
+        sel.value = 'today';
+        C.selectedSessionDate = 'today';
+
+        sel.addEventListener('change', async (e) => {
+            const chosen = e.target.value;
+            C.selectedSessionDate = chosen;
+
+            if (chosen === 'today') {
+                // Exit replay and switch to today's live feed
+                if (Replay.active) {
+                    exitReplay();
+                }
+                const modeSelect = document.getElementById('trade-mode-select');
+                if (modeSelect && modeSelect.value === 'replay') {
+                    modeSelect.value = 'paper';
+                    try {
+                        await fetch('/api/trade/mode', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mode: 'paper' })
+                        });
+                    } catch (err) {}
+                }
+                showLoading(true);
+                disconnectContractWS();
+                if (C.symbol) {
+                    await loadContractCandles(C.symbol, 'today');
+                    connectContractWS(C.symbol);
+                }
+                showLoading(false);
+            } else {
+                // Historical Replay session
+                disconnectContractWS();
+                showLoading(true);
+                if (C.symbol) {
+                    await loadContractCandles(C.symbol, chosen);
+                    const modeSelect = document.getElementById('trade-mode-select');
+                    if (modeSelect) {
+                        modeSelect.value = 'replay';
+                        try {
+                            await fetch('/api/trade/mode', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ mode: 'replay' })
+                            });
+                        } catch (err) {}
+                    }
+                    if (!Replay.active && C.rawCandles && C.rawCandles.length > 0) {
+                        startReplay();
+                    }
+                }
+                showLoading(false);
+            }
+        });
+    } catch (err) {
+        console.warn('initSessionDateSelector error:', err);
+    }
+}
 
 async function initExpirySelector() {
     const headerSel = document.getElementById('expiry-select');
@@ -786,11 +876,15 @@ function selectContract(contract) {
     // Reset chart
     clearChart();
 
-    // Fetch today's candles (catch-up)
-    loadContractCandles(symbol).then(() => {
+    const isToday = !C.selectedSessionDate || C.selectedSessionDate === 'today';
+    loadContractCandles(symbol, C.selectedSessionDate || 'today').then(() => {
         showLoading(false);
-        // Then connect WebSocket for live stream
-        connectContractWS(symbol);
+        // Then connect WebSocket for live stream if viewing today
+        if (isToday) {
+            connectContractWS(symbol);
+        } else if (C.rawCandles && C.rawCandles.length > 0) {
+            startReplay();
+        }
     });
 }
 
@@ -798,17 +892,19 @@ function selectContract(contract) {
 // ── CANDLE LOADING ────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function loadContractCandles(symbol) {
+async function loadContractCandles(symbol, optDate) {
     try {
-        const res = await fetch(`/api/contracts/candles?symbol=${encodeURIComponent(symbol)}`);
+        const targetDate = optDate || C.selectedSessionDate || 'today';
+        const dateParam = (targetDate && targetDate !== 'today') ? `&date=${encodeURIComponent(targetDate)}` : (targetDate === 'today' ? '&date=today' : '');
+        const res = await fetch(`/api/contracts/candles?symbol=${encodeURIComponent(symbol)}${dateParam}`);
         const data = await res.json();
 
         const candles = data.candles || [];
         if (!candles.length) {
-            if (data.market_status === 'PRE_MARKET') {
-                showOverlay('⏰', 'Market Opens at 09:15 AM IST', 'Chart will auto-populate once the market opens. Live streaming will begin automatically.');
+            if (data.market_status === 'PRE_MARKET' || targetDate === 'today') {
+                showOverlay('⏰', 'Today\'s Session: Live Feed Ready', 'Waiting for live ticks from the broker feed. Chart will auto-populate as live bars stream in.');
             } else {
-                showOverlay('📉', 'No Data Available', `No trading candles found for ${symbol}.`);
+                showOverlay('📉', 'No Data Available', `No trading candles found for ${symbol} on ${data.date || targetDate}.`);
             }
             return;
         }
@@ -822,15 +918,31 @@ async function loadContractCandles(symbol) {
         }
 
         // Inform user if showing previous trading day data on weekend / market closed
-        if (data.is_last_day_data && data.date) {
-            const statusLabel = document.getElementById('market-status-label');
-            if (statusLabel) {
-                statusLabel.textContent = `Market Closed (${data.date})`;
+        const statusLabel = document.getElementById('market-status-label');
+        if (statusLabel) {
+            if (data.is_last_day_data && data.date) {
+                statusLabel.textContent = `Historical (${data.date})`;
+            } else if (targetDate === 'today') {
+                statusLabel.textContent = `Live Session (${data.date || 'Today'})`;
             }
         }
 
         updateSessionStats(formatted);
         applyFullChart(formatted);
+
+        // Sync session-date-select if it has loaded
+        const dateSel = document.getElementById('session-date-select');
+        if (dateSel && data.date) {
+            if (targetDate === 'today') {
+                dateSel.value = 'today';
+            } else if ([...dateSel.options].some(o => o.value === data.date)) {
+                dateSel.value = data.date;
+            }
+        }
+        const rpDatePicker = document.getElementById('rp-date-picker');
+        if (rpDatePicker && data.date) {
+            rpDatePicker.value = data.date;
+        }
 
         // Start periodic quote polling (5s) for live Bid/Offer depth with error backoff
         if (C.quotePollInterval) clearInterval(C.quotePollInterval);
@@ -3867,6 +3979,9 @@ function initReplayController() {
                 const data = await res.json();
                 const candles = data.candles || [];
                 if (candles.length > 0) {
+                    C.selectedSessionDate = chosenDate;
+                    const sessionSel = document.getElementById('session-date-select');
+                    if (sessionSel) sessionSel.value = chosenDate;
                     C.rawCandles = formatCandles(candles);
                     Replay.fullCandles = [...C.rawCandles];
                     jumpToStart();
@@ -3977,6 +4092,16 @@ function exitReplay() {
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.remove('active');
     if (dock) dock.classList.add('hidden');
+
+    const modeSelect = document.getElementById('trade-mode-select');
+    if (modeSelect && modeSelect.value === 'replay') {
+        modeSelect.value = 'paper';
+        fetch('/api/trade/mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'paper' })
+        }).catch(() => {});
+    }
 
     // Restore full dataset
     if (Replay.fullCandles.length > 0) {
@@ -5026,6 +5151,22 @@ function initTradingTerminal() {
     if (modeSelect) {
         modeSelect.addEventListener('change', async (e) => {
             const mode = e.target.value;
+            if (mode === 'replay') {
+                if (!Replay.active && C.rawCandles && C.rawCandles.length > 0) {
+                    startReplay();
+                }
+            } else {
+                if (Replay.active) {
+                    exitReplay();
+                }
+                if (C.selectedSessionDate && C.selectedSessionDate !== 'today') {
+                    const sessionSel = document.getElementById('session-date-select');
+                    if (sessionSel) {
+                        sessionSel.value = 'today';
+                        sessionSel.dispatchEvent(new Event('change'));
+                    }
+                }
+            }
             try {
                 const res = await fetch('/api/trade/mode', {
                     method: 'POST',

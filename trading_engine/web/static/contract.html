@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#070b14" />
     <title>Contract Analysis — AI Trader</title>
     <meta name="description" content="Live contract chart and Smart Money Flow Cloud analysis for NIFTY options, futures and equities." />
-    <link rel="stylesheet" href="/static/contract.css?v=20261023_0050" />
+    <link rel="stylesheet" href="/static/contract.css?v=20261023_1030" />
 </head>
 <body>
 <div id="page-shell">
@@ -57,15 +57,23 @@
                     <button id="btn-replay-toggle" class="icon-btn replay-toggle-btn" title="Toggle Bar Replay Simulator (Shift+R)">⏪</button>
                 </div>
 
-                <!-- 6. Compact Expiry Filter Dropdown -->
-                <div id="expiry-wrapper" class="expiry-compact" title="Filter by Expiry Date">
-                    <span class="expiry-icon">📅</span>
-                    <select id="expiry-select">
+                <!-- 6. Session Day Dropdown (Today Live Feed vs Historical Replay) -->
+                <div id="session-date-wrapper" class="session-date-compact" title="Trading Session Day (Today · Live / Historical Replay)">
+                    <span class="session-date-icon">📅</span>
+                    <select id="session-date-select" title="Switch Trading Session Day">
+                        <option value="today">Today (Live)</option>
+                    </select>
+                </div>
+
+                <!-- 7. Compact Expiry Filter Dropdown -->
+                <div id="expiry-wrapper" class="expiry-compact" title="Option Contract Expiry Date">
+                    <span class="expiry-icon">⏳</span>
+                    <select id="expiry-select" title="Contract Expiry Date">
                         <option value="">Expiry</option>
                     </select>
                 </div>
 
-                <!-- 7. Connection Status Indicator -->
+                <!-- 8. Connection Status Indicator -->
                 <div id="conn-pill" class="waiting" title="Connection status">
                     <div id="conn-dot"></div>
                     <span id="conn-label">Connecting…</span>
@@ -429,7 +437,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261023_0955"></script>
+<script src="/static/contract.js?v=20261023_1030"></script>
 
 </body>
 </html>

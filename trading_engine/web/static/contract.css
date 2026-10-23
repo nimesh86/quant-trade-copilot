@@ -791,6 +791,45 @@ kbd {
     color: var(--text-secondary);
 }
 
+/* ── Session Day Selector in Header ────────────────────────────────────────── */
+#session-date-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: rgba(168, 85, 247, 0.08);
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    border-radius: 8px;
+    height: 36px;
+    padding: 0 8px;
+    flex-shrink: 0;
+    gap: 6px;
+    transition: border-color 0.2s, background 0.2s;
+}
+#session-date-wrapper:hover, #session-date-wrapper:focus-within {
+    border-color: #c084fc;
+    background: rgba(168, 85, 247, 0.15);
+}
+.session-date-icon {
+    font-size: 13px;
+    color: #c084fc;
+    pointer-events: none;
+}
+#session-date-select {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e9d5ff;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding-right: 4px;
+}
+#session-date-select option {
+    background: #0d1624;
+    color: #e8f4ff;
+}
+
 /* ── Expiry Date Filter in Header ────────────────────────────────────────────── */
 #expiry-wrapper {
     position: relative;
@@ -1284,7 +1323,7 @@ kbd {
         height: 32px;
     }
 
-    #tf-controls, #smf-toggle-btn, #btn-fit-contract, #expiry-wrapper {
+    #tf-controls, #smf-toggle-btn, #btn-fit-contract, #session-date-wrapper, #expiry-wrapper {
         order: initial;
         height: 32px;
         padding: 0 10px;
@@ -1370,11 +1409,17 @@ kbd {
     .header-tools-group {
         display: flex !important;
         align-items: center !important;
-        justify-content: space-between !important;
+        justify-content: flex-start !important;
         width: 100% !important;
         gap: 5px !important;
         padding-top: 4px !important;
         border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+    }
+    .header-tools-group::-webkit-scrollbar {
+        display: none !important;
     }
 
     #home-link {
@@ -1444,14 +1489,19 @@ kbd {
         flex-shrink: 0 !important;
     }
 
-    .expiry-compact {
+    .session-date-compact, .expiry-compact {
         height: 30px !important;
         padding: 0 6px !important;
         flex-shrink: 0 !important;
     }
+    .session-date-compact select {
+        font-size: 10.5px !important;
+        max-width: 95px !important;
+        height: 26px !important;
+    }
     .expiry-compact select {
         font-size: 10.5px !important;
-        max-width: 85px !important;
+        max-width: 80px !important;
         height: 26px !important;
     }
 
@@ -2025,14 +2075,27 @@ kbd {
 @media (max-width: 768px) {
     .replay-dock {
         top: 8px;
-        gap: 8px;
-        padding: 6px 10px;
+        gap: 6px;
+        padding: 5px 8px;
     }
     .replay-date-wrap {
-        display: none;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+    }
+    .rp-date-input {
+        max-width: 85px;
+        font-size: 10px;
+        height: 24px;
+        padding: 0 4px;
+    }
+    .rp-mini-btn {
+        height: 24px;
+        padding: 0 5px;
+        font-size: 10px;
     }
     .replay-timeline {
-        min-width: 110px;
+        min-width: 100px;
     }
 }
 

@@ -909,7 +909,13 @@ def fetch_contract_candles(
         except Exception:
             pass
 
-    active_date = target_date if (target_date and target_date != "today") else None
+    explicit_date_requested = bool(target_date)
+    if target_date == "today":
+        active_date = today_str
+    elif target_date:
+        active_date = target_date
+    else:
+        active_date = None
     is_last_day = False
 
     # If target_date is not specified and it's a weekday, check if today has candles in DB
@@ -917,18 +923,20 @@ def fetch_contract_candles(
         try:
             from sqlalchemy import text
             with db_engine.connect() as conn:
-                q_cnt = text("""
-                    SELECT count(*) FROM minute_candles
-                    WHERE symbol = :sym AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today
-                """)
-                cnt = conn.execute(q_cnt, {"sym": trading_symbol, "today": today_str}).scalar()
-                if cnt and cnt > 0:
-                    active_date = today_str
+                for tbl in ["minute_candles", "option_minute_candles"]:
+                    q_cnt = text(f"""
+                        SELECT count(*) FROM {tbl}
+                        WHERE symbol = :sym AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today
+                    """)
+                    cnt = conn.execute(q_cnt, {"sym": trading_symbol, "today": today_str}).scalar()
+                    if cnt and cnt > 0:
+                        active_date = today_str
+                        break
         except Exception as e:
             print(f"ContractDataManager: error checking today's candles: {e}", flush=True)
 
-    # If active_date is still None (weekend, holiday, or today has 0 candles), fallback to latest trading day
-    if not active_date and db_engine is not None:
+    # Only fall back to latest trading day if NO explicit date was requested
+    if not explicit_date_requested and not active_date and db_engine is not None:
         try:
             from sqlalchemy import text
             with db_engine.connect() as conn:
