@@ -254,6 +254,7 @@ class TestTradingEngineE2E(unittest.TestCase):
         self.assertIn("btn-quick-exit", html, "Market Exit button ID missing in HTML!")
         self.assertIn("val-day-pnl", html, "Day PnL badge missing in HTML!")
         self.assertIn("btn-kill-switch", html, "Kill switch button missing in HTML!")
+        self.assertIn("active-pos-hud", html, "Active position HUD (POS, SL, T1, T2) missing in HTML!")
         self.assertNotIn("trade-dock", html, "Obsolete floating trade-dock should not be present in HTML!")
 
         # 2. JS check
@@ -264,6 +265,8 @@ class TestTradingEngineE2E(unittest.TestCase):
         self.assertIn("renderTradingCanvasOverlay", js)
         self.assertIn("executeTradingViewLimitOrder", js)
         self.assertIn("initTradingCanvasMouseHandlers", js)
+        self.assertIn("POS T2", js, "POS T2 rendering missing in contract.js!")
+        self.assertIn("evaluateReplayCandleTrading", js, "Replay live PnL and trade evaluator missing in contract.js!")
         self.assertIn("/api/trade/order", js)
         self.assertIn("/api/trade/exit", js)
         self.assertIn("/api/trade/modify", js)
@@ -275,6 +278,7 @@ class TestTradingEngineE2E(unittest.TestCase):
         self.assertIn(".btn-clean-buy", css)
         self.assertIn(".btn-clean-limit", css)
         self.assertIn(".btn-clean-exit", css)
+        self.assertIn(".active-pos-hud", css)
         print("  [✓] Test 09 Passed: Frontend HTML, CSS, and JS assets verified clean and bound.")
 
 if __name__ == "__main__":

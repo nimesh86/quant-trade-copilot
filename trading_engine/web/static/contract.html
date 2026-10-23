@@ -105,6 +105,26 @@
                     <span class="limit-lbl">Limit Tool</span>
                 </button>
 
+                <!-- Active Position HUD: POS, SL, T1, T2 directly in toolbar -->
+                <div id="active-pos-hud" class="active-pos-hud hidden" title="Active Position Overview">
+                    <div class="pos-hud-pill pill-pos" title="Position Entry Rate">
+                        <span class="hud-tag">POS</span>
+                        <span id="hud-val-pos" class="hud-num">₹--</span>
+                    </div>
+                    <div class="pos-hud-pill pill-sl" title="Current Stop Loss (Drag line on chart)">
+                        <span class="hud-tag">SL</span>
+                        <span id="hud-val-sl" class="hud-num">₹--</span>
+                    </div>
+                    <div class="pos-hud-pill pill-t1" title="Target 1 (Drag line on chart)">
+                        <span class="hud-tag">T1</span>
+                        <span id="hud-val-t1" class="hud-num">₹--</span>
+                    </div>
+                    <div class="pos-hud-pill pill-t2" title="Target 2 (Drag line on chart)">
+                        <span class="hud-tag">T2</span>
+                        <span id="hud-val-t2" class="hud-num">₹--</span>
+                    </div>
+                </div>
+
                 <!-- Single Clean Market Exit Button: Visible only when in position -->
                 <button id="btn-quick-exit" class="btn-clean-exit hidden" title="1-Click Instant Market Exit">
                     <span class="exit-lbl">EXIT MKT</span>
@@ -405,7 +425,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261023_0135"></script>
+<script src="/static/contract.js?v=20261023_0855"></script>
 
 </body>
 </html>

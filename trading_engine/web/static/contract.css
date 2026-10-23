@@ -2837,3 +2837,85 @@ kbd {
     border-radius: 4px;
     font-size: 10.5px;
 }
+
+/* ── Active Position Overview HUD in Toolbar (POS, SL, T1, T2) ── */
+.active-pos-hud {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.active-pos-hud.hidden {
+    display: none !important;
+}
+
+.pos-hud-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    background: rgba(13, 20, 36, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.pos-hud-pill .hud-tag {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    line-height: 1.1;
+}
+
+.pos-hud-pill .hud-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 11px;
+}
+
+.pos-hud-pill.pill-pos .hud-tag {
+    background: rgba(0, 242, 169, 0.2);
+    color: #00f2a9;
+}
+.pos-hud-pill.pill-pos {
+    border-color: rgba(0, 242, 169, 0.4);
+    color: #00f2a9;
+}
+
+.pos-hud-pill.pill-sl .hud-tag {
+    background: rgba(255, 77, 109, 0.2);
+    color: #ff4d6d;
+}
+.pos-hud-pill.pill-sl {
+    border-color: rgba(255, 77, 109, 0.4);
+    color: #ff4d6d;
+}
+
+.pos-hud-pill.pill-t1 .hud-tag {
+    background: rgba(255, 209, 102, 0.2);
+    color: #ffd166;
+}
+.pos-hud-pill.pill-t1 {
+    border-color: rgba(255, 209, 102, 0.4);
+    color: #ffd166;
+}
+
+.pos-hud-pill.pill-t2 .hud-tag {
+    background: rgba(255, 190, 11, 0.2);
+    color: #ffbe0b;
+}
+.pos-hud-pill.pill-t2 {
+    border-color: rgba(255, 190, 11, 0.4);
+    color: #ffbe0b;
+}
+
+@media (max-width: 900px) {
+    .active-pos-hud {
+        display: none !important;
+    }
+}

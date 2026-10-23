@@ -3075,151 +3075,6 @@ function renderSMFCanvas() {
     ctx.stroke();
     ctx.restore();
 
-    // ── 0. Active Trading Position & Trailing SL HUD (On-Chart Live PnL) ────────
-    if (C.tradingState && C.tradingState.active_position && C.candleSeries) {
-        const pos = C.tradingState.active_position;
-        if (pos.symbol === C.symbol) {
-            let priceScaleWidth = 65;
-            try {
-                if (C.chart && typeof C.chart.priceScale === 'function') {
-                    const ps = C.chart.priceScale('right');
-                    if (ps && typeof ps.width === 'function') {
-                        const psw = ps.width();
-                        if (psw > 30) priceScaleWidth = psw;
-                    }
-                }
-            } catch (e) {}
-            const chartPlotRight = Math.round(W - priceScaleWidth);
-
-            const entryY = Math.round(C.candleSeries.priceToCoordinate(pos.entry_price));
-            const slY = pos.current_sl ? Math.round(C.candleSeries.priceToCoordinate(pos.current_sl)) : null;
-            const t1Y = pos.target1 ? Math.round(C.candleSeries.priceToCoordinate(pos.target1)) : null;
-
-            ctx.save();
-
-            // A. Position Entry Line & Floating Live PnL Badge
-            if (entryY != null && entryY >= 0 && entryY <= H) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#00f2a9';
-                ctx.lineWidth = 1.8;
-                ctx.setLineDash([6, 4]);
-                ctx.moveTo(0, entryY);
-                ctx.lineTo(chartPlotRight, entryY);
-                ctx.stroke();
-
-                // Live On-Chart Unrealized PnL Badge
-                const pnl = pos.unrealized_pnl || 0.0;
-                const pnlPct = pos.unrealized_pnl_pct || 0.0;
-                const pts = pos.unrealized_pts || 0.0;
-                const sign = pnl > 0 ? '+' : '';
-                const trailTag = pos.be_locked ? ' [BE LOCK 🛡️]' : '';
-                const pnlText = `⚡ POS: ${sign}₹${pnl.toFixed(2)} (${sign}${pnlPct.toFixed(1)}%) | ${sign}${pts.toFixed(1)}p${trailTag}`;
-
-                ctx.font = 'bold 11px Inter, sans-serif';
-                const pnlTextW = Math.ceil(ctx.measureText(pnlText).width);
-                const pnlBadgeW = pnlTextW + 16;
-                const pnlBadgeH = 22;
-                const pnlBadgeX = Math.round(Math.max(10, (chartPlotRight - pnlBadgeW) / 2));
-                const pnlBadgeY = Math.round(entryY - pnlBadgeH / 2);
-
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(pnlBadgeX, pnlBadgeY, pnlBadgeW, pnlBadgeH, 4);
-                } else {
-                    ctx.rect(pnlBadgeX, pnlBadgeY, pnlBadgeW, pnlBadgeH);
-                }
-                ctx.fillStyle = pnl >= 0 ? 'rgba(0, 36, 20, 0.94)' : 'rgba(40, 6, 12, 0.94)';
-                ctx.fill();
-                ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-
-                ctx.fillStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
-                ctx.textBaseline = 'middle';
-                ctx.textAlign = 'left';
-                ctx.fillText(pnlText, pnlBadgeX + 8, pnlBadgeY + pnlBadgeH / 2);
-
-                // Right Column POS Tag before price scale
-                const posLabel = `⚡ POS ₹${pos.entry_price.toFixed(1)}`;
-                const posW = Math.ceil(ctx.measureText(posLabel).width) + 14;
-                const posBadgeX = Math.round(chartPlotRight - posW - 6);
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(posBadgeX, entryY - 10, posW, 20, 4);
-                } else {
-                    ctx.rect(posBadgeX, entryY - 10, posW, 20);
-                }
-                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
-                ctx.fill();
-                ctx.strokeStyle = '#00f2a9';
-                ctx.lineWidth = 1.2;
-                ctx.stroke();
-                ctx.fillStyle = '#00f2a9';
-                ctx.fillText(posLabel, posBadgeX + 7, entryY);
-            }
-
-            // B. Active Trailing Stop Loss Line
-            if (slY != null && slY >= 0 && slY <= H) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#ff4d6d';
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([4, 4]);
-                ctx.moveTo(0, slY);
-                ctx.lineTo(chartPlotRight, slY);
-                ctx.stroke();
-
-                const slLabel = `🛑 POS SL ₹${pos.current_sl.toFixed(1)}`;
-                ctx.font = 'bold 11px Inter, sans-serif';
-                const slW = Math.ceil(ctx.measureText(slLabel).width) + 14;
-                const slBadgeX = Math.round(chartPlotRight - slW - 6);
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(slBadgeX, slY - 10, slW, 20, 4);
-                } else {
-                    ctx.rect(slBadgeX, slY - 10, slW, 20);
-                }
-                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
-                ctx.fill();
-                ctx.strokeStyle = '#ff4d6d';
-                ctx.lineWidth = 1.2;
-                ctx.stroke();
-                ctx.fillStyle = '#ff4d6d';
-                ctx.fillText(slLabel, slBadgeX + 7, slY);
-            }
-
-            // C. Active Target Line
-            if (t1Y != null && t1Y >= 0 && t1Y <= H) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#ffd166';
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([5, 3]);
-                ctx.moveTo(0, t1Y);
-                ctx.lineTo(chartPlotRight, t1Y);
-                ctx.stroke();
-
-                const t1Label = `🎯 POS T1 ₹${pos.target1.toFixed(1)}`;
-                ctx.font = 'bold 11px Inter, sans-serif';
-                const t1W = Math.ceil(ctx.measureText(t1Label).width) + 14;
-                const t1BadgeX = Math.round(chartPlotRight - t1W - 6);
-                ctx.beginPath();
-                if (typeof ctx.roundRect === 'function') {
-                    ctx.roundRect(t1BadgeX, t1Y - 10, t1W, 20, 4);
-                } else {
-                    ctx.rect(t1BadgeX, t1Y - 10, t1W, 20);
-                }
-                ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
-                ctx.fill();
-                ctx.strokeStyle = '#ffd166';
-                ctx.lineWidth = 1.2;
-                ctx.stroke();
-                ctx.fillStyle = '#ffd166';
-                ctx.fillText(t1Label, t1BadgeX + 7, t1Y);
-            }
-
-            ctx.restore();
-        }
-    }
-
     // ── 1. Partial Horizontal Target & SL Lines with Right Column Badges (Requests 2 & 3)
     if (C.targetsEnabled && C.activeTargetSignal && C.candleSeries) {
         const sig = C.activeTargetSignal;
@@ -4260,7 +4115,119 @@ function renderReplayStep() {
             chgEl.textContent = `${chgAbs >= 0 ? '+' : ''}${chgAbs.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
             chgEl.className = chgAbs >= 0 ? 'pos' : 'neg';
         }
+
+        // 1. Update Market Buy button premium
+        updateMarketBuyButton(curCandle.close);
+
+        // 2. Evaluate active trading position and SL / Target auto-triggers during replay
+        evaluateReplayCandleTrading(curCandle);
     }
+}
+
+function evaluateReplayCandleTrading(candle) {
+    if (!C.tradingState) return;
+
+    // A. Evaluate pending limit orders for fills
+    if (C.tradingState.pending_orders && C.tradingState.pending_orders.length > 0) {
+        for (const o of [...C.tradingState.pending_orders]) {
+            if (o.symbol === C.symbol && o.side === 'BUY' && candle.low <= o.limit_price) {
+                const pos = {
+                    position_id: `POS_${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+                    symbol: o.symbol,
+                    side: o.side,
+                    lots: o.lots,
+                    units: o.units || (o.lots * 65),
+                    entry_price: o.limit_price,
+                    current_price: candle.close,
+                    sl: o.sl,
+                    current_sl: o.sl || Math.round(o.limit_price * 0.90 * 20) / 20,
+                    target1: o.target1,
+                    target2: o.target2,
+                    trailing_mode: o.trailing_mode || 'be_lock',
+                    be_locked: false,
+                    unrealized_pnl: 0.0,
+                    unrealized_pts: 0.0,
+                    status: 'OPEN'
+                };
+                C.tradingState.active_position = pos;
+                C.tradingState.pending_orders = C.tradingState.pending_orders.filter(item => item.order_id !== o.order_id);
+                flashExecutionAlert('⚡ LIMIT ORDER FILLED', `Filled 1 Lot @ ₹${o.limit_price.toFixed(1)}`, 'success');
+                fetch('/api/trade/tick', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: C.symbol, price: o.limit_price })
+                }).catch(() => {});
+            }
+        }
+    }
+
+    // B. Evaluate active position: SL trigger, Target trigger, and live PnL calculation
+    if (C.tradingState.active_position && C.tradingState.active_position.symbol === C.symbol) {
+        const pos = C.tradingState.active_position;
+        const curPx = candle.close;
+        const low = candle.low;
+        const high = candle.high;
+
+        // 1. Check Stop Loss breach
+        if (pos.current_sl && low <= pos.current_sl) {
+            executeAutoReplayExit('STOP_LOSS_HIT', pos.current_sl);
+            return;
+        }
+
+        // 2. Check Target 2 breach
+        if (pos.target2 && high >= pos.target2) {
+            executeAutoReplayExit('TARGET_2_HIT', pos.target2);
+            return;
+        }
+
+        // 3. Check Target 1 breach -> Break-Even Lock
+        if (pos.target1 && high >= pos.target1 && !pos.be_locked) {
+            pos.be_locked = true;
+            pos.current_sl = Math.max(pos.current_sl || 0, pos.entry_price);
+            flashExecutionAlert('🛡️ BREAK-EVEN LOCKED', `Target 1 (₹${pos.target1.toFixed(1)}) touched. SL ratcheted to ₹${pos.entry_price.toFixed(1)}`, 'success');
+        }
+
+        // 4. Mathematical PnL recalculation
+        const pts = Math.round((curPx - pos.entry_price) * 100) / 100;
+        pos.current_price = curPx;
+        pos.unrealized_pts = pts;
+        pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
+        pos.unrealized_pnl_pct = Math.round((pts / pos.entry_price) * 1000) / 10;
+
+        // 5. Instantly refresh toolbar buttons and canvas overlay
+        updateTradingUI(C.tradingState);
+        requestAnimationFrame(renderSMFCanvas);
+    }
+}
+
+async function executeAutoReplayExit(reason, exitPx) {
+    if (!C.tradingState?.active_position) return;
+    const pos = C.tradingState.active_position;
+    const pts = Math.round((exitPx - pos.entry_price) * 100) / 100;
+    const pnl = Math.round(pts * pos.units * 100) / 100;
+    const sign = pnl >= 0 ? '+' : '';
+
+    try {
+        await fetch('/api/trade/exit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: C.symbol,
+                exit_price: exitPx,
+                reason: reason
+            })
+        });
+    } catch (e) {
+        console.warn('Replay auto exit sync error:', e);
+    }
+
+    if (reason === 'STOP_LOSS_HIT') {
+        flashExecutionAlert('🛑 STOP LOSS TRIGGERED', `Exited @ ₹${exitPx.toFixed(1)} (${sign}₹${pnl})`, 'danger');
+    } else {
+        flashExecutionAlert('🎯 TARGET ACHIEVED', `Exited @ ₹${exitPx.toFixed(1)} (${sign}₹${pnl})`, 'success');
+    }
+
+    await fetchTradeState();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4378,6 +4345,19 @@ function updateTradingUI(state) {
             posPnlSub.style.color = pnl >= 0 ? '#ffffff' : '#ffccd5';
         }
 
+        // 7. Populate Active Position Overview HUD in Toolbar (POS, SL, T1, T2)
+        const posHud = document.getElementById('active-pos-hud');
+        const hudValPos = document.getElementById('hud-val-pos');
+        const hudValSl = document.getElementById('hud-val-sl');
+        const hudValT1 = document.getElementById('hud-val-t1');
+        const hudValT2 = document.getElementById('hud-val-t2');
+
+        if (posHud) posHud.classList.remove('hidden');
+        if (hudValPos) hudValPos.textContent = `₹${pos.entry_price.toFixed(1)}`;
+        if (hudValSl) hudValSl.textContent = `₹${(pos.current_sl || 0).toFixed(1)}`;
+        if (hudValT1) hudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
+        if (hudValT2) hudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
+
         // Also update Day PnL Pill to reflect active position's unrealized PnL!
         const totalPnl = (state.realized_day_pnl || 0.0) + pnl;
         if (dayPnlEl && dayPnlPill) {
@@ -4387,6 +4367,8 @@ function updateTradingUI(state) {
         }
     } else {
         if (exitBtn) exitBtn.classList.add('hidden');
+        const posHud = document.getElementById('active-pos-hud');
+        if (posHud) posHud.classList.add('hidden');
     }
 }
 
@@ -4621,6 +4603,18 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
         const entryPx = pos.entry_price;
         const curSl = pos.current_sl;
         const tgt1 = pos.target1;
+        const tgt2 = pos.target2;
+
+        // Dynamically compute fresh live PnL against the latest candle close
+        const curPx = (lastCandle ? lastCandle.close : 0.0);
+        if (curPx > 0 && entryPx > 0) {
+            const pts = curPx - entryPx;
+            pos.current_price = curPx;
+            pos.unrealized_pts = Math.round(pts * 100) / 100;
+            pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
+            pos.unrealized_pnl_pct = Math.round((pts / entryPx) * 1000) / 10;
+        }
+
         const pnl = pos.unrealized_pnl || 0.0;
         const pts = pos.unrealized_pts || 0.0;
         const sign = pnl >= 0 ? '+' : '';
@@ -4628,6 +4622,7 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
         const yEntry = Math.round(C.candleSeries.priceToCoordinate(entryPx));
         const yCurSl = curSl ? Math.round(C.candleSeries.priceToCoordinate(curSl)) : null;
         const yTgt1 = tgt1 ? Math.round(C.candleSeries.priceToCoordinate(tgt1)) : null;
+        const yTgt2 = tgt2 ? Math.round(C.candleSeries.priceToCoordinate(tgt2)) : null;
 
         ctx.save();
         ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
@@ -4703,7 +4698,7 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
             });
         }
 
-        // Active Target Line: Draggable
+        // Active Target 1 Line: Draggable
         if (yTgt1 != null && yTgt1 >= 0 && yTgt1 <= H) {
             ctx.beginPath();
             ctx.strokeStyle = '#ffd166';
@@ -4740,6 +4735,46 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
                 x: tgtBadgeX,
                 w: tgtBadgeW,
                 h: tgtBadgeH
+            });
+        }
+
+        // Active Target 2 Line: Draggable
+        if (yTgt2 != null && yTgt2 >= 0 && yTgt2 <= H) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffbe0b';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.moveTo(curCandleX, yTgt2);
+            ctx.lineTo(chartPlotRight, yTgt2);
+            ctx.stroke();
+
+            const tgt2Label = `🚀 POS T2: ₹${tgt2.toFixed(1)} ↕`;
+            const tgt2TextW = Math.ceil(ctx.measureText(tgt2Label).width);
+            const tgt2BadgeW = tgt2TextW + 16;
+            const tgt2BadgeH = 22;
+            const tgt2BadgeX = Math.round(chartPlotRight - tgt2BadgeW - 6);
+            const tgt2BadgeY = Math.round(yTgt2 - tgt2BadgeH / 2);
+
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH, 4);
+            else ctx.rect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH);
+            ctx.fill();
+            ctx.strokeStyle = '#ffbe0b';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffbe0b';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(tgt2Label, tgt2BadgeX + 8, tgt2BadgeY + tgt2BadgeH / 2);
+
+            C.limitToolHitBoxes.push({
+                type: 'pos_tgt2_drag',
+                y: yTgt2,
+                x: tgt2BadgeX,
+                w: tgt2BadgeW,
+                h: tgt2BadgeH
             });
         }
 
@@ -4824,6 +4859,10 @@ function initTradingCanvasMouseHandlers() {
                     if (C.tradingState?.active_position) {
                         C.tradingState.active_position.target1 = tickPx;
                     }
+                } else if (dragType === 'pos_tgt2_drag') {
+                    if (C.tradingState?.active_position) {
+                        C.tradingState.active_position.target2 = tickPx;
+                    }
                 }
                 requestAnimationFrame(renderSMFCanvas);
             }
@@ -4891,7 +4930,7 @@ function initTradingCanvasMouseHandlers() {
 
     window.addEventListener('mouseup', async () => {
         if (dragType) {
-            if (dragType === 'pos_sl_drag' || dragType === 'pos_tgt_drag') {
+            if (dragType === 'pos_sl_drag' || dragType === 'pos_tgt_drag' || dragType === 'pos_tgt2_drag') {
                 const pos = C.tradingState?.active_position;
                 if (pos) {
                     try {
@@ -4901,10 +4940,11 @@ function initTradingCanvasMouseHandlers() {
                             body: JSON.stringify({
                                 symbol: C.symbol,
                                 sl: pos.current_sl,
-                                target1: pos.target1
+                                target1: pos.target1,
+                                target2: pos.target2
                             })
                         });
-                        flashExecutionAlert('🛡️ LEVELS UPDATED', `SL: ₹${pos.current_sl.toFixed(1)} | Target: ₹${(pos.target1 || 0).toFixed(1)}`, 'success');
+                        flashExecutionAlert('🛡️ LEVELS UPDATED', `SL: ₹${pos.current_sl.toFixed(1)} | T1: ₹${(pos.target1 || 0).toFixed(1)} | T2: ₹${(pos.target2 || 0).toFixed(1)}`, 'success');
                     } catch (err) {
                         console.warn('Modify position levels error:', err);
                     }
