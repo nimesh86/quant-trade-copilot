@@ -4168,20 +4168,20 @@ function evaluateReplayCandleTrading(candle) {
         const low = candle.low;
         const high = candle.high;
 
-        // 1. Check Stop Loss breach
-        if (pos.current_sl && low <= pos.current_sl) {
+        // 1. Check Stop Loss breach (only if SL has been set by user)
+        if (pos.current_sl != null && pos.current_sl > 0 && low <= pos.current_sl) {
             executeAutoReplayExit('STOP_LOSS_HIT', pos.current_sl);
             return;
         }
 
-        // 2. Check Target 2 breach
-        if (pos.target2 && high >= pos.target2) {
+        // 2. Check Target 2 breach (only if T2 has been set by user)
+        if (pos.target2 != null && pos.target2 > 0 && high >= pos.target2) {
             executeAutoReplayExit('TARGET_2_HIT', pos.target2);
             return;
         }
 
-        // 3. Check Target 1 breach -> Break-Even Lock
-        if (pos.target1 && high >= pos.target1 && !pos.be_locked) {
+        // 3. Check Target 1 breach -> Break-Even Lock (only if T1 has been set by user)
+        if (pos.target1 != null && pos.target1 > 0 && high >= pos.target1 && !pos.be_locked) {
             pos.be_locked = true;
             pos.current_sl = Math.max(pos.current_sl || 0, pos.entry_price);
             flashExecutionAlert('🛡️ BREAK-EVEN LOCKED', `Target 1 (₹${pos.target1.toFixed(1)}) touched. SL ratcheted to ₹${pos.entry_price.toFixed(1)}`, 'success');
@@ -5010,10 +5010,10 @@ function initTradingTerminal() {
                 flashExecutionAlert('⚠️ NO PRICE', 'Waiting for live contract price...', 'warning');
                 return;
             }
-            const sig = C.activeTargetSignal;
-            const sl = sig?.sl || (curPx > 0 ? curPx * 0.90 : null);
-            const t1 = sig?.target1 || (curPx > 0 ? curPx * 1.08 : null);
-            const t2 = sig?.target2 || (curPx > 0 ? curPx * 1.15 : null);
+            // 1-Click Pure Market Buy: No automatic SL or Target forced until user sets one
+            const sl = null;
+            const t1 = null;
+            const t2 = null;
 
             try {
                 const res = await fetch('/api/trade/order', {
@@ -5028,7 +5028,7 @@ function initTradingTerminal() {
                         sl: sl,
                         target1: t1,
                         target2: t2,
-                        trailing_mode: 'be_lock'
+                        trailing_mode: 'manual'
                     })
                 });
                 const data = await res.json();

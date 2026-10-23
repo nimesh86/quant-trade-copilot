@@ -189,7 +189,7 @@ class ContractTradingEngine:
             "current_price": fill_price,
             "entry_time": datetime.now().isoformat(),
             "sl": order_data.get("sl"),
-            "current_sl": order_data.get("sl") or round(fill_price * 0.90, 2),  # Default 10% SL if none provided
+            "current_sl": order_data.get("sl"),  # None if user hasn't set an SL yet
             "target1": order_data.get("target1"),
             "target2": order_data.get("target2"),
             "trailing_mode": order_data.get("trailing_mode", "be_lock"),
@@ -370,26 +370,26 @@ class ContractTradingEngine:
             trailing_mode = pos.get("trailing_mode", "be_lock")
             t1 = pos.get("target1")
             t2 = pos.get("target2")
-            current_sl = pos.get("current_sl", 0.0)
+            current_sl = pos.get("current_sl")
 
             # A. Breakeven Lock at Target 1
             if trailing_mode in ("be_lock", "auto") and t1 and price >= t1:
                 if not pos.get("be_locked"):
-                    pos["current_sl"] = max(current_sl, pos["entry_price"])
+                    pos["current_sl"] = max(current_sl or 0.0, pos["entry_price"])
                     pos["be_locked"] = True
 
             # B. Dynamic Chandelier ATR Trailing
             if trailing_mode == "chandelier":
                 chandelier_stop = round(pos["highest_price"] - (1.5 * atr), 2)
-                if chandelier_stop > current_sl:
+                if current_sl is None or chandelier_stop > current_sl:
                     pos["current_sl"] = chandelier_stop
 
             # C. Check Automatic Exits
-            if current_sl > 0 and price <= current_sl:
+            if current_sl is not None and current_sl > 0 and price <= current_sl:
                 reason = "TRAILING_SL_HIT" if pos.get("be_locked") else "STOP_LOSS_HIT"
                 return self.close_position(reason=reason, exit_price=current_sl)
 
-            if t2 and price >= t2:
+            if t2 and t2 > 0 and price >= t2:
                 return self.close_position(reason="TARGET_2_HIT", exit_price=t2)
 
         return None
