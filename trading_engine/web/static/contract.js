@@ -3100,11 +3100,12 @@ function renderSMFCanvas() {
             : Math.max(0, chartPlotRight - 150);
 
         const isMkt = sig.recommendedOrder === 'MARKET';
+        const isMobile = W <= 768 || window.innerWidth <= 768;
         const levels = [
-            { key: 't2', price: sig.target2, label: `🚀 T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.40)', dash: [] },
-            { key: 't1', price: sig.target1, label: `🎯 T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.40)', dash: [5, 3] },
-            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `⚡ MKT ₹${sig.limitPrice?.toFixed(1)}` : `📥 LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: (isMkt ? 'rgba(0, 242, 169, 0.40)' : 'rgba(0, 229, 255, 0.40)'), dash: [] },
-            { key: 'sl', price: sig.sl, label: `🛑 SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.40)', dash: [5, 3] },
+            { key: 't2', price: sig.target2, label: `T2 ₹${sig.target2?.toFixed(1)}`, color: '#ffbe0b', lightColor: 'rgba(255, 190, 11, 0.40)', dash: [] },
+            { key: 't1', price: sig.target1, label: `T1 ₹${sig.target1?.toFixed(1)}`, color: '#ffd166', lightColor: 'rgba(255, 209, 102, 0.40)', dash: [5, 3] },
+            { key: 'lt', price: sig.limitPrice, label: (isMkt ? `MKT ₹${sig.limitPrice?.toFixed(1)}` : `LT ₹${sig.limitPrice?.toFixed(1)}`), color: (isMkt ? '#00f2a9' : '#00e5ff'), lightColor: (isMkt ? 'rgba(0, 242, 169, 0.40)' : 'rgba(0, 229, 255, 0.40)'), dash: [] },
+            { key: 'sl', price: sig.sl, label: `SL ₹${sig.sl?.toFixed(1)}`, color: '#ff4d6d', lightColor: 'rgba(255, 77, 109, 0.40)', dash: [5, 3] },
         ];
 
         let sigX = 0;
@@ -3119,7 +3120,7 @@ function renderSMFCanvas() {
             const y = Math.round(C.candleSeries.priceToCoordinate(lvl.price));
             if (y == null || y < -20 || y > H + 20) continue;
 
-            // A. Past timeframe (Request 2): Clean visible light line from signal candle up to current candle
+            // A. Past timeframe: Clean visible light line from signal candle up to current candle
             if (curCandleX > sigX) {
                 ctx.beginPath();
                 ctx.strokeStyle = lvl.lightColor;
@@ -3130,67 +3131,68 @@ function renderSMFCanvas() {
                 ctx.stroke();
             }
 
-            // B. Active timeframe (Request 2): Darker vibrant solid line from the current candle onwards into the blank area
+            // B. Active timeframe: Solid line from current candle into blank area
             ctx.beginPath();
             ctx.strokeStyle = lvl.color;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.3;
             ctx.setLineDash(lvl.dash);
             ctx.moveTo(curCandleX, y);
             ctx.lineTo(chartPlotRight, y);
             ctx.stroke();
 
-            // C. Dedicated Right Column Badge in preserved margin before price scale (Request 3)
+            // C. Dedicated Right Column Badge in preserved margin before price scale
             ctx.setLineDash([]);
-            ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.font = isMobile ? 'bold 9px Inter, -apple-system, sans-serif' : 'bold 10px Inter, -apple-system, sans-serif';
             const textW = Math.ceil(ctx.measureText(lvl.label).width);
-            const badgeW = textW + 16;
-            const badgeH = 20;
-            // Preserved area before Y-axis (leaves 6px margin before chartPlotRight, zero overlap on price scale numbers!)
-            const badgeX = Math.round(chartPlotRight - badgeW - 6);
+            const badgeW = textW + (isMobile ? 8 : 12);
+            const badgeH = isMobile ? 16 : 18;
+            const badgeX = Math.round(chartPlotRight - badgeW - 4);
             const badgeY = Math.round(y - badgeH / 2);
 
-            // Badge Background (Request 4e)
+            // Badge Background
             ctx.beginPath();
             if (typeof ctx.roundRect === 'function') {
-                ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+                ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
             } else {
                 ctx.rect(badgeX, badgeY, badgeW, badgeH);
             }
-            ctx.fillStyle = 'rgba(8, 14, 26, 0.94)';
+            ctx.fillStyle = 'rgba(8, 14, 26, 0.95)';
             ctx.fill();
             ctx.strokeStyle = lvl.color;
-            ctx.lineWidth = 1.2;
+            ctx.lineWidth = 1.1;
             ctx.stroke();
 
             // Badge Text
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
             ctx.fillStyle = lvl.color;
-            ctx.fillText(lvl.label, badgeX + 8, badgeY + badgeH / 2);
+            ctx.fillText(lvl.label, badgeX + (isMobile ? 4 : 6), badgeY + badgeH / 2);
         }
         ctx.restore();
     }
 
-    // ── 2. Visual Projections & Bottom Summary Pill (⚡ MKT, 🎯 T1, 🚀 T2) (Request 4) ───────────
+    // ── 2. Visual Projections & Bottom Summary Pill (MKT, T1, T2) ───────────
     if (C.targetsEnabled && C.activeTargetSignal) {
         const sig = C.activeTargetSignal;
         const isMkt = sig.recommendedOrder === 'MARKET';
-        const limText = isMkt ? `⚡ MKT ₹${sig.limitPrice.toFixed(1)}` : `📥 LT ₹${sig.limitPrice.toFixed(1)}`;
-        const tgtText = `🎯 T1 ₹${sig.target1.toFixed(1)}`;
-        const t2Text = sig.target2 ? `🚀 T2 ₹${sig.target2.toFixed(1)}` : '';
-        const chopText = sig.isMiddayChop ? `⚠️ CHOP` : '';
+        const isMobile = W <= 768 || window.innerWidth <= 768;
+        const limText = isMkt ? `MKT ₹${sig.limitPrice.toFixed(1)}` : `LT ₹${sig.limitPrice.toFixed(1)}`;
+        const tgtText = `T1 ₹${sig.target1.toFixed(1)}`;
+        const t2Text = sig.target2 ? `T2 ₹${sig.target2.toFixed(1)}` : '';
+        const chopText = sig.isMiddayChop ? `CHOP` : '';
 
         ctx.save();
-        ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.font = isMobile ? 'bold 9px Inter, -apple-system, sans-serif' : 'bold 10px Inter, -apple-system, sans-serif';
         const limW = Math.ceil(ctx.measureText(limText).width);
         const tgtW = Math.ceil(ctx.measureText(tgtText).width);
-        const t2W = t2Text ? Math.ceil(ctx.measureText(t2Text).width) + 10 : 0;
-        const chopW = chopText ? Math.ceil(ctx.measureText(chopText).width) + 10 : 0;
-        const pillW = limW + tgtW + t2W + chopW + 24;
-        const pillH = 22;
+        const t2W = t2Text ? Math.ceil(ctx.measureText(t2Text).width) + 8 : 0;
+        const chopW = chopText ? Math.ceil(ctx.measureText(chopText).width) + 8 : 0;
+        const pillW = limW + tgtW + t2W + chopW + 18;
+        const pillH = isMobile ? 18 : 20;
 
-        // Position at the bottom of the chart above time scale
-        const pillY = Math.round(H - pillH - 6);
+        // Position at the bottom of the chart ABOVE the time scale (uncovers time scale completely!)
+        const timeScaleHeight = 30;
+        const pillY = Math.round(H - timeScaleHeight - pillH - 5);
         const midY = Math.round(pillY + pillH / 2);
 
         let sigX = null;
@@ -3239,32 +3241,32 @@ function renderSMFCanvas() {
         ctx.textBaseline = 'middle';
         ctx.textAlign = 'left';
 
-        let curCursorX = pillX + 7;
+        let curCursorX = pillX + 6;
         ctx.fillStyle = isMkt ? '#00f2a9' : '#00e5ff';
         ctx.fillText(limText, curCursorX, midY);
-        curCursorX += limW + 5;
+        curCursorX += limW + 4;
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-        curCursorX += 6;
+        ctx.fillRect(Math.round(curCursorX), pillY + 3, 1, pillH - 6);
+        curCursorX += 5;
 
         ctx.fillStyle = '#ffd166';
         ctx.fillText(tgtText, curCursorX, midY);
-        curCursorX += tgtW + 5;
+        curCursorX += tgtW + 4;
 
         if (t2Text) {
             ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-            ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-            curCursorX += 6;
+            ctx.fillRect(Math.round(curCursorX), pillY + 3, 1, pillH - 6);
+            curCursorX += 5;
             ctx.fillStyle = '#ffbe0b';
             ctx.fillText(t2Text, curCursorX, midY);
-            curCursorX += t2W - 5;
+            curCursorX += t2W - 4;
         }
 
         if (chopText) {
             ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-            ctx.fillRect(Math.round(curCursorX), pillY + 4, 1, pillH - 8);
-            curCursorX += 6;
+            ctx.fillRect(Math.round(curCursorX), pillY + 3, 1, pillH - 6);
+            curCursorX += 5;
             ctx.fillStyle = '#ff6b6b';
             ctx.fillText(chopText, curCursorX, midY);
         }
@@ -3275,7 +3277,8 @@ function renderSMFCanvas() {
     // ── 3. Indicator Value Badges with Background Colors & Smart Spacing (Requests 3 & 4)
     if (C.allRawSignalMarkers && C.allRawSignalMarkers.length > 0) {
         ctx.save();
-        ctx.font = 'bold 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const isMobile = W <= 768 || window.innerWidth <= 768;
+        ctx.font = isMobile ? 'bold 9px Inter, -apple-system, sans-serif' : 'bold 10px Inter, -apple-system, sans-serif';
 
         const sorted = [...C.allRawSignalMarkers].sort((a, b) => a.time - b.time);
         const drawnBelow = [];
@@ -3317,8 +3320,8 @@ function renderSMFCanvas() {
             }
 
             const textW = Math.ceil(ctx.measureText(label).width);
-            const badgeW = textW + 14;
-            const badgeH = 20;
+            const badgeW = textW + (isMobile ? 8 : 12);
+            const badgeH = isMobile ? 16 : 18;
             const badgeX = Math.round(x - badgeW / 2);
 
             if (!isExit) {
@@ -4281,20 +4284,23 @@ async function fetchTradeState() {
 function updateTradingUI(state) {
     if (!state) return;
 
-    // 1. Day PnL Pill in Top Header
+    // 1. Day PnL and Balance without label (e.g. 1131.15/101131)
     const dayPnlEl = document.getElementById('val-day-pnl');
-    const dayPnlPill = document.getElementById('stat-day-pnl');
-    if (dayPnlEl && dayPnlPill) {
+    const pnlBalPill = document.getElementById('stat-pnl-bal') || document.getElementById('stat-day-pnl');
+    if (dayPnlEl) {
         const pnl = state.total_day_pnl || 0.0;
         const sign = pnl > 0 ? '+' : '';
-        dayPnlEl.textContent = `${sign}₹${pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        dayPnlPill.className = `stat-pill ${pnl > 0 ? 'pnl-positive' : (pnl < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+        dayPnlEl.textContent = `${sign}${pnl.toFixed(2)}`;
+        if (pnlBalPill) {
+            pnlBalPill.className = `stat-pill pnl-bal-pill ${pnl > 0 ? 'pnl-positive' : (pnl < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+        }
     }
 
     // 2. Capital Balance in Top Header
     const capEl = document.getElementById('val-capital');
     if (capEl) {
-        capEl.textContent = `₹${(state.capital || 100000).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+        const cap = Math.round(state.capital || 100000);
+        capEl.textContent = `${cap}`;
     }
 
     // 3. Mode Selection in Top Header
@@ -4304,15 +4310,17 @@ function updateTradingUI(state) {
         modeSelect.value = currentMode;
     }
 
-    // 4. Kill Switch Button
+    // 4. Kill Switch Button (Icon Only)
     const ksBtn = document.getElementById('btn-kill-switch');
     if (ksBtn) {
         if (state.is_kill_switch_active) {
             ksBtn.classList.add('locked');
-            ksBtn.innerHTML = `<span class="kill-icon">🔒</span> <span class="kill-text">LOCKED (Click to Unlock)</span>`;
+            ksBtn.innerHTML = `<span class="kill-icon">🔒</span>`;
+            ksBtn.title = 'Kill Switch ACTIVE (Locked). Click to Unlock.';
         } else {
             ksBtn.classList.remove('locked');
-            ksBtn.innerHTML = `<span class="kill-icon">🛑</span> <span class="kill-text">KILL SWITCH</span>`;
+            ksBtn.innerHTML = `<span class="kill-icon">🛑</span>`;
+            ksBtn.title = 'Emergency Flatten & Kill Switch';
         }
     }
 
@@ -4630,22 +4638,23 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
         const yTgt1 = (tgt1 != null && tgt1 > 0) ? Math.round(C.candleSeries.priceToCoordinate(tgt1)) : null;
         const yTgt2 = (tgt2 != null && tgt2 > 0) ? Math.round(C.candleSeries.priceToCoordinate(tgt2)) : null;
 
+        const isMobile = W <= 768 || window.innerWidth <= 768;
         ctx.save();
-        ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
+        ctx.font = isMobile ? 'bold 9px Inter, -apple-system, sans-serif' : 'bold 10.5px Inter, -apple-system, sans-serif';
 
         // Entry Line: Bright Emerald Solid (Stops before badge - no strike through!)
         if (yEntry != null && yEntry >= 0 && yEntry <= H) {
-            const entryLabel = `⚡ POS: ${pos.lots}L @ ₹${entryPx.toFixed(1)} | ${sign}₹${pnl.toFixed(0)} (${sign}${pts.toFixed(1)}p)${pos.be_locked ? ' [BE 🛡️]' : ''}`;
+            const entryLabel = `POS: ${pos.lots}L @ ₹${entryPx.toFixed(1)} | ${sign}₹${pnl.toFixed(0)} (${sign}${pts.toFixed(1)}p)${pos.be_locked ? ' [BE 🛡️]' : ''}`;
             const textW = Math.ceil(ctx.measureText(entryLabel).width);
-            const badgeW = textW + 16;
-            const badgeH = 22;
-            const badgeX = Math.round(chartPlotRight - badgeW - 6);
+            const badgeW = textW + (isMobile ? 10 : 16);
+            const badgeH = isMobile ? 18 : 22;
+            const badgeX = Math.round(chartPlotRight - badgeW - 4);
             const badgeY = Math.round(yEntry - badgeH / 2);
 
             // 1. Horizontal line terminates at badgeX - 3 (NEVER enters the badge)
             ctx.beginPath();
             ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
-            ctx.lineWidth = 1.6;
+            ctx.lineWidth = 1.5;
             ctx.setLineDash([]);
             ctx.moveTo(curCandleX, yEntry);
             ctx.lineTo(badgeX - 3, yEntry);
@@ -4653,33 +4662,33 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
             // 2. Clean, opaque badge container
             ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 3);
             else ctx.rect(badgeX, badgeY, badgeW, badgeH);
             ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
-            ctx.lineWidth = 1.3;
+            ctx.lineWidth = 1.2;
             ctx.stroke();
 
             // 3. Crisp text centered inside badge
             ctx.fillStyle = pnl >= 0 ? '#00f2a9' : '#ff4d6d';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(entryLabel, badgeX + 8, yEntry);
+            ctx.fillText(entryLabel, badgeX + (isMobile ? 5 : 8), yEntry);
         }
 
         // Active SL Line: Draggable (Stops before badge - no strike through!)
         if (yCurSl != null && yCurSl >= 0 && yCurSl <= H) {
-            const slLabel = `🛑 POS SL: ₹${curSl.toFixed(1)} ↕`;
+            const slLabel = `SL: ₹${curSl.toFixed(1)} ↕`;
             const slTextW = Math.ceil(ctx.measureText(slLabel).width);
-            const slBadgeW = slTextW + 16;
-            const slBadgeH = 22;
-            const slBadgeX = Math.round(chartPlotRight - slBadgeW - 6);
+            const slBadgeW = slTextW + (isMobile ? 10 : 16);
+            const slBadgeH = isMobile ? 18 : 22;
+            const slBadgeX = Math.round(chartPlotRight - slBadgeW - 4);
             const slBadgeY = Math.round(yCurSl - slBadgeH / 2);
 
             ctx.beginPath();
             ctx.strokeStyle = '#ff4d6d';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.4;
             ctx.setLineDash([4, 4]);
             ctx.moveTo(curCandleX, yCurSl);
             ctx.lineTo(slBadgeX - 3, yCurSl);
@@ -4687,18 +4696,18 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
             ctx.setLineDash([]);
             ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 4);
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(slBadgeX, slBadgeY, slBadgeW, slBadgeH, 3);
             else ctx.rect(slBadgeX, slBadgeY, slBadgeW, slBadgeH);
             ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ff4d6d';
-            ctx.lineWidth = 1.2;
+            ctx.lineWidth = 1.1;
             ctx.stroke();
 
             ctx.fillStyle = '#ff4d6d';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(slLabel, slBadgeX + 8, yCurSl);
+            ctx.fillText(slLabel, slBadgeX + (isMobile ? 5 : 8), yCurSl);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_sl_drag',
@@ -4712,16 +4721,16 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
         // Active Target 1 Line: Draggable (Stops before badge - no strike through!)
         if (yTgt1 != null && yTgt1 >= 0 && yTgt1 <= H) {
-            const tgtLabel = `🎯 POS T1: ₹${tgt1.toFixed(1)} ↕`;
+            const tgtLabel = `T1: ₹${tgt1.toFixed(1)} ↕`;
             const tgtTextW = Math.ceil(ctx.measureText(tgtLabel).width);
-            const tgtBadgeW = tgtTextW + 16;
-            const tgtBadgeH = 22;
-            const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 6);
+            const tgtBadgeW = tgtTextW + (isMobile ? 10 : 16);
+            const tgtBadgeH = isMobile ? 18 : 22;
+            const tgtBadgeX = Math.round(chartPlotRight - tgtBadgeW - 4);
             const tgtBadgeY = Math.round(yTgt1 - tgtBadgeH / 2);
 
             ctx.beginPath();
             ctx.strokeStyle = '#ffd166';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.4;
             ctx.setLineDash([4, 4]);
             ctx.moveTo(curCandleX, yTgt1);
             ctx.lineTo(tgtBadgeX - 3, yTgt1);
@@ -4729,18 +4738,18 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
             ctx.setLineDash([]);
             ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 4);
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH, 3);
             else ctx.rect(tgtBadgeX, tgtBadgeY, tgtBadgeW, tgtBadgeH);
             ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ffd166';
-            ctx.lineWidth = 1.2;
+            ctx.lineWidth = 1.1;
             ctx.stroke();
 
             ctx.fillStyle = '#ffd166';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(tgtLabel, tgtBadgeX + 8, yTgt1);
+            ctx.fillText(tgtLabel, tgtBadgeX + (isMobile ? 5 : 8), yTgt1);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_tgt_drag',
@@ -4754,16 +4763,16 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
         // Active Target 2 Line: Draggable (Stops before badge - no strike through!)
         if (yTgt2 != null && yTgt2 >= 0 && yTgt2 <= H) {
-            const tgt2Label = `🚀 POS T2: ₹${tgt2.toFixed(1)} ↕`;
+            const tgt2Label = `POS T2: ₹${tgt2.toFixed(1)} ↕`;
             const tgt2TextW = Math.ceil(ctx.measureText(tgt2Label).width);
-            const tgt2BadgeW = tgt2TextW + 16;
-            const tgt2BadgeH = 22;
-            const tgt2BadgeX = Math.round(chartPlotRight - tgt2BadgeW - 6);
+            const tgt2BadgeW = tgt2TextW + (isMobile ? 10 : 16);
+            const tgt2BadgeH = isMobile ? 18 : 22;
+            const tgt2BadgeX = Math.round(chartPlotRight - tgt2BadgeW - 4);
             const tgt2BadgeY = Math.round(yTgt2 - tgt2BadgeH / 2);
 
             ctx.beginPath();
             ctx.strokeStyle = '#ffbe0b';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1.4;
             ctx.setLineDash([4, 4]);
             ctx.moveTo(curCandleX, yTgt2);
             ctx.lineTo(tgt2BadgeX - 3, yTgt2);
@@ -4771,18 +4780,18 @@ function renderTradingCanvasOverlay(ctx, W, H, chartPlotRight) {
 
             ctx.setLineDash([]);
             ctx.beginPath();
-            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH, 4);
+            if (typeof ctx.roundRect === 'function') ctx.roundRect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH, 3);
             else ctx.rect(tgt2BadgeX, tgt2BadgeY, tgt2BadgeW, tgt2BadgeH);
             ctx.fillStyle = '#080e1a';
             ctx.fill();
             ctx.strokeStyle = '#ffbe0b';
-            ctx.lineWidth = 1.2;
+            ctx.lineWidth = 1.1;
             ctx.stroke();
 
             ctx.fillStyle = '#ffbe0b';
             ctx.textBaseline = 'middle';
             ctx.textAlign = 'left';
-            ctx.fillText(tgt2Label, tgt2BadgeX + 8, yTgt2);
+            ctx.fillText(tgt2Label, tgt2BadgeX + (isMobile ? 5 : 8), yTgt2);
 
             C.limitToolHitBoxes.push({
                 type: 'pos_tgt2_drag',

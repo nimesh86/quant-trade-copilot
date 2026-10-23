@@ -77,9 +77,9 @@
         <div class="header-trade-row">
             <div class="trade-mode-group">
                 <select id="trade-mode-select" class="trade-mode-select" title="Trading Execution Mode">
-                    <option value="paper" selected>📄 Paper</option>
-                    <option value="live">🔴 Live</option>
-                    <option value="replay">⏪ Replay</option>
+                    <option value="paper" selected>Paper</option>
+                    <option value="live">Live</option>
+                    <option value="replay">Replay</option>
                 </select>
             </div>
 
@@ -134,23 +134,20 @@
 
                 <!-- Single Clean Market Exit Button: Visible only when in position -->
                 <button id="btn-quick-exit" class="btn-clean-exit hidden" title="1-Click Instant Market Exit">
-                    <span class="exit-lbl">EXIT MKT</span>
+                    <span class="exit-lbl">EXIT</span>
                     <span id="btn-pos-pnl" class="exit-pnl">+₹0.00</span>
                 </button>
             </div>
 
             <div class="trade-stats-group">
-                <div id="stat-day-pnl" class="stat-pill pnl-neutral" title="Today's Aggregate Realized + Unrealized PnL">
-                    <span class="stat-label">Day PnL:</span>
-                    <span id="val-day-pnl" class="stat-val">₹0.00</span>
+                <div id="stat-pnl-bal" class="stat-pill pnl-bal-pill pnl-neutral" title="Today's Aggregate Realized + Unrealized PnL / Balance">
+                    <span id="val-day-pnl" class="stat-val">0.00</span>
+                    <span class="pnl-bal-sep">/</span>
+                    <span id="val-capital" class="stat-val">100000</span>
                 </div>
-                <div id="stat-capital" class="stat-pill" title="Available Margin & Trading Capital">
-                    <span class="stat-label">Bal:</span>
-                    <span id="val-capital" class="stat-val">₹1,00,000</span>
-                </div>
-                <button id="btn-kill-switch" class="btn-kill-switch" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
+                <button id="btn-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
                     <span class="kill-icon">🛑</span>
-                    <span class="kill-text">KILL SWITCH</span>
+                    <span class="kill-text" style="display:none"></span>
                 </button>
             </div>
         </div>
@@ -432,7 +429,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261023_0935"></script>
+<script src="/static/contract.js?v=20261023_0955"></script>
 
 </body>
 </html>

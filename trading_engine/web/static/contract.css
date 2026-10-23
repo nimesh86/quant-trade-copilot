@@ -2644,6 +2644,24 @@ kbd {
     color: #cbd5e1;
 }
 
+.stat-pill.pnl-bal-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 2px 7px;
+    height: 28px;
+    font-size: 11px;
+}
+
+.pnl-bal-sep {
+    color: #64748b;
+    font-weight: 700;
+    margin: 0 1px;
+}
+
 .btn-kill-switch {
     display: inline-flex;
     align-items: center;
@@ -2656,10 +2674,18 @@ kbd {
     font-size: 10.5px;
     letter-spacing: 0.5px;
     padding: 0 10px;
-    height: 26px;
+    height: 28px;
     cursor: pointer;
     transition: all 0.2s ease;
     box-shadow: 0 0 10px rgba(230, 57, 70, 0.35);
+}
+
+.btn-kill-switch.icon-only {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    font-size: 13px;
 }
 
 .btn-kill-switch:hover {
@@ -2890,3 +2916,53 @@ kbd {
         display: none !important;
     }
 }
+
+@media (max-width: 768px) {
+    .header-trade-row {
+        flex-wrap: nowrap !important;
+        gap: 4px !important;
+        padding: 3px 6px !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        justify-content: space-between;
+    }
+    .header-trade-row::-webkit-scrollbar {
+        display: none;
+    }
+    .header-trade-actions {
+        gap: 3px !important;
+    }
+    .trade-stats-group {
+        gap: 3px !important;
+    }
+    .trade-mode-select {
+        height: 26px !important;
+        padding: 0 4px !important;
+        font-size: 10px !important;
+    }
+    .lot-pill {
+        height: 26px !important;
+        padding: 1px 4px !important;
+        gap: 2px !important;
+        font-size: 10px !important;
+    }
+    .lot-btn {
+        padding: 0 2px !important;
+        font-size: 12px !important;
+    }
+    .btn-clean-buy, .btn-clean-limit, .btn-clean-exit, .btn-kill-switch.icon-only {
+        width: 28px !important;
+        height: 26px !important;
+        padding: 0 !important;
+    }
+    .stat-pill.pnl-bal-pill {
+        height: 26px !important;
+        padding: 0 5px !important;
+        font-size: 10px !important;
+    }
+    .stat-pill.pnl-bal-pill .stat-val {
+        font-size: 10px !important;
+    }
+}
+
