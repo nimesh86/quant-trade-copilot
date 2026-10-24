@@ -1509,10 +1509,25 @@ function handleContractTick(data) {
                 }
             }
         } else if (C.smfLastResult) {
-            const col = C.smfLastResult.latestRegime === 1 ? SMF.bullColor : SMF.bearColor;
+            const d = new Date(candleToPush.time * 1000);
+            const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+            const istM = (d.getUTCMinutes() + 30) % 60;
+            const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+            const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '09:25');
+            const isBull = C.smfLastResult.latestRegime === 1;
+
+            let col = isBull ? SMF.bullColor : SMF.bearColor;
+            let borderCol = col;
+            let wickCol = col;
+            if (isWarmup) {
+                // Light pastel translucent warmup styling (09:15 - 09:25 IST)
+                col = isBull ? 'rgba(0, 242, 169, 0.38)' : 'rgba(255, 77, 109, 0.38)';
+                borderCol = isBull ? 'rgba(0, 242, 169, 0.55)' : 'rgba(255, 77, 109, 0.55)';
+                wickCol = isBull ? 'rgba(0, 242, 169, 0.38)' : 'rgba(255, 77, 109, 0.38)';
+            }
             candleToPush.color = col;
-            candleToPush.borderColor = col;
-            candleToPush.wickColor = col;
+            candleToPush.borderColor = borderCol;
+            candleToPush.wickColor = wickCol;
         }
 
         try {
@@ -1928,7 +1943,7 @@ function computeSMF(candles) {
             const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
             const istM = (d.getUTCMinutes() + 30) % 60;
             const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
-            const isMidday = (cTimeStr >= '11:15' && cTimeStr <= '13:15');
+            const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '09:25');
 
             const span = Math.max(c.high - c.low, 0.05);
             const bodyRatio = (c.close - c.low) / span;
@@ -1940,7 +1955,7 @@ function computeSMF(candles) {
             }
             const brokeResistance = (c.close >= prevSwingHigh - 0.10 * atr[i]);
 
-            if (!isMidday && cloudBullStreak >= 2 && bodyRatio >= 0.50 && rsi[i] >= 48 && brokeResistance) {
+            if (!isWarmup && cloudBullStreak >= 2 && bodyRatio >= 0.50 && rsi[i] >= 48 && brokeResistance) {
                 currLS = 1;
                 aboveCount = 0; // reset streak after confirmed flip
             }
@@ -2233,17 +2248,35 @@ function applySMFCloud(agg) {
     const smf = computeSMF(agg);
     C.smfLastResult = smf;
 
-    // Color candles
+    // Color candles (with soft light translucent styling for 09:15 - 09:25 warmup period)
     const coloredCandles = agg.map((c, i) => {
-        let col = smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor;
-        if (!C.smfEnabled) {
-            col = c.close >= c.open ? '#00f2a9' : '#ff4d6d';
+        const d = new Date(c.time * 1000);
+        const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+        const istM = (d.getUTCMinutes() + 30) % 60;
+        const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+        const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '09:25');
+        const isBull = smf.lastSignal[i] === 1;
+
+        let col, borderCol, wickCol;
+        if (isWarmup) {
+            // Light translucent pastel styling for indicator warmup / stabilization
+            col = isBull ? 'rgba(0, 242, 169, 0.38)' : 'rgba(255, 77, 109, 0.38)';
+            borderCol = isBull ? 'rgba(0, 242, 169, 0.55)' : 'rgba(255, 77, 109, 0.55)';
+            wickCol = isBull ? 'rgba(0, 242, 169, 0.38)' : 'rgba(255, 77, 109, 0.38)';
+        } else {
+            col = isBull ? SMF.bullColor : SMF.bearColor;
+            if (!C.smfEnabled) {
+                col = c.close >= c.open ? '#00f2a9' : '#ff4d6d';
+            }
+            borderCol = col;
+            wickCol = col;
         }
+
         return {
             ...c,
             color: col,
-            borderColor: col,
-            wickColor: col,
+            borderColor: borderCol,
+            wickColor: wickCol,
         };
     });
     C.candleSeries.setData(coloredCandles);
@@ -2511,7 +2544,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     exitPrice = c.close;
                 }
                 if (!exitReason && cTime >= '15:15') {
-                    exitReason = 'EOD_EXIT';
+                    exitReason = 'INTRADAY_TIME_EXIT';
                     exitPrice = c.close;
                 }
 
@@ -2597,7 +2630,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                         exitReason = 'REGIME_FLIP';
                         exitPrice = c.close;
                     } else if (!exitReason && cTime >= '15:15') {
-                        exitReason = 'EOD_EXIT';
+                        exitReason = 'INTRADAY_TIME_EXIT';
                         exitPrice = c.close;
                     } else if (!exitReason && variantUpper !== 'V1') {
                         // V2+ Trailing Stop & Health Checks
@@ -2739,7 +2772,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         // 2. Check Re-Entry if no active trade (V5, V5_P1)
         if (!activeTrade && ['V5', 'V5_P1'].includes(variantUpper) && reentryWatcher && !dayHalted) {
             const w = reentryWatcher;
-            if (lastSignal[i] === w.regime && w.reentryCount < 2 && i > w.pausedUntilBar && dailyTradeCount < 3) {
+            const inTimeWindow = (cTime >= '09:25' && cTime <= '15:15');
+            if (inTimeWindow && lastSignal[i] === w.regime && w.reentryCount < 2 && i > w.pausedUntilBar && dailyTradeCount < 4) {
                 const ths = calcTHS(i);
                 w.pullbackLow = Math.min(w.pullbackLow, c.low);
 
@@ -2758,7 +2792,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     const entryP = roundTick(c.close + slip(c.close));
                     const rawStop = Math.max(bMain[i] - 0.35 * atr[i], entryP - 1.5 * atr[i]);
                     const rawR = entryP - rawStop;
-                    const clampedR = Math.min(Math.max(rawR, 1.5), 0.12 * entryP);
+                    const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
                     const initStop = roundTick(entryP - clampedR);
                     const R = roundTick(entryP - initStop);
 
@@ -2815,15 +2849,14 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         }
 
         // 3. Check New Entry on SMF Switch Up
-        if (!activeTrade && isSwitchUp && !dayHalted && dailyTradeCount < 3) {
-            const isMidday = (cTime >= '11:15' && cTime <= '13:15');
-            const inTimeWindow = (cTime >= '09:30' && cTime <= '15:00' && !isMidday);
+        if (!activeTrade && isSwitchUp && !dayHalted && dailyTradeCount < 4) {
+            const inTimeWindow = (cTime >= '09:25' && cTime <= '15:15');
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
             if (inTimeWindow && (!needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
                 const rawStop = Math.max(bMain[i] - 0.35 * atr[i], entryP - 1.5 * atr[i]);
                 const rawR = entryP - rawStop;
-                const clampedR = Math.min(Math.max(rawR, 1.5), 0.12 * entryP);
+                const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
                 const initStop = roundTick(entryP - clampedR);
                 const R = roundTick(entryP - initStop);
 
@@ -4374,7 +4407,14 @@ function renderReplayStep() {
     const totTimeEl = document.getElementById('rp-total-time');
     const barCountEl = document.getElementById('rp-bar-count');
 
-    if (curTimeEl && curCandle) curTimeEl.textContent = fmtTime(curCandle.time);
+    if (curTimeEl && curCandle) {
+        const tStr = fmtTime(curCandle.time);
+        if (tStr >= '09:15' && tStr < '09:25') {
+            curTimeEl.innerHTML = `${tStr} <span style="font-size:10px;color:rgba(0,242,169,0.8);font-weight:700;letter-spacing:0.5px;">[WARMUP]</span>`;
+        } else {
+            curTimeEl.textContent = tStr;
+        }
+    }
     if (totTimeEl && lastCandle) totTimeEl.textContent = fmtTime(lastCandle.time);
     if (barCountEl) barCountEl.textContent = `${curIdx + 1} / ${totalBars}`;
 
@@ -4490,6 +4530,16 @@ function evaluateManualReplayTrading(candle) {
     const dayPnlPill = document.getElementById('pill-day-pnl');
 
     if (pos) {
+        // 0. Enforce strict intraday cutoff: no overnight holds past 15:15 IST
+        const d = new Date(candle.time * 1000);
+        const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+        const istM = (d.getUTCMinutes() + 30) % 60;
+        const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+        if (cTimeStr >= '15:15') {
+            closeManualReplayPosition(candle.close, 'INTRADAY_TIME_EXIT (15:15 Cutoff)');
+            return;
+        }
+
         // 1. Check Stop Loss breach
         if (pos.current_sl && candle.low <= pos.current_sl) {
             closeManualReplayPosition(pos.current_sl, 'STOP_LOSS_HIT');
@@ -5579,10 +5629,25 @@ function initTradingTerminal() {
                     }
                     const curCandle = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1] : null;
                     if (!curCandle) return;
+
+                    const d = new Date(curCandle.time * 1000);
+                    const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+                    const istM = (d.getUTCMinutes() + 30) % 60;
+                    const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+
+                    if (cTimeStr < '09:25') {
+                        flashExecutionAlert('⚠️ WARMUP CANDLES (09:15 - 09:25)', 'Indicators are calibrating during the first 10 minutes. Trading opens at 09:25 AM.', 'warning');
+                        return;
+                    }
+                    if (cTimeStr > '15:15') {
+                        flashExecutionAlert('⚠️ INTRADAY CUTOFF REACHED (15:15 IST)', 'No trades allowed after 15:15 to prevent holding past close or next day.', 'warning');
+                        return;
+                    }
+
                     const smf = C.smfLastResult;
                     const curAtr = (smf && smf.atr && smf.atr.length > 0) ? smf.atr[smf.atr.length - 1] : 3.0;
                     const entryPrice = curCandle.close;
-                    const entryTimeStr = new Date(curCandle.time * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const entryTimeStr = cTimeStr;
 
                     Replay.manualPosition = {
                         entryPrice: entryPrice,
