@@ -2587,6 +2587,17 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     // Update Ladder Floor
                     t.ladderFloor = Math.max(t.ladderFloor, calcRelaxedLadder(t));
 
+                    // Dynamic swing-low trail after T1:
+                    // Protect profit / reduce loss by trailing to previous bar low (minus 1.5 pt buffer)
+                    if (t.t1Booked) {
+                        const prevLow = candles[Math.max(0, i - 1)].low;
+                        t.ladderFloor = Math.max(t.ladderFloor, roundTick(prevLow - 1.5));
+                    }
+                    if (!exitReason && t.target2 && c.high >= t.target2) {
+                        // Once T2 is reached, guarantee exit floor is at least Target 1
+                        t.ladderFloor = Math.max(t.ladderFloor, t.target1);
+                    }
+
                     // ── SMART TARGET 1 PARTIAL PROFIT SCALING (50% at T1 or >= +1.2R) ──
                     if (!t.t1Booked && (c.high >= (t.target1 || (t.entryPrice + 1.2 * t.R)) || t.mfeR >= 1.2)) {
                         t.t1Booked = true;
@@ -2594,8 +2605,9 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                         const partialP = Math.max(targetPx, roundTick(t.entryPrice + 1.2 * t.R));
                         t.realizedPts += 0.50 * (partialP - t.entryPrice);
                         t.remQty = 0.50;
-                        // Immediately lock BE + costs for the remaining 50% runner!
-                        t.ladderFloor = Math.max(t.ladderFloor, roundTick(t.entryPrice + COSTS + NSE_TICK));
+                        // Trail stop to previous candle low minus buffer (reducing risk while letting runner breathe)
+                        const prevLow = candles[Math.max(0, i - 1)].low;
+                        t.ladderFloor = Math.max(t.ladderFloor, roundTick(prevLow - 1.5));
                         markers.push({
                             time: c.time,
                             position: 'aboveBar',
@@ -2798,8 +2810,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     const initStop = roundTick(entryP - clampedR);
                     const R = roundTick(entryP - initStop);
 
-                    const minT1Pts = Math.max(7.5, atr[i] * 1.2);
-                    const t1 = roundTick(entryP + Math.max(minT1Pts, 1.2 * R));
+                    const minT1Pts = Math.max(6.5, atr[i] * 1.1);
+                    const t1 = roundTick(entryP + minT1Pts);
                     const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
                     const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
 
@@ -2862,8 +2874,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                 const initStop = roundTick(entryP - clampedR);
                 const R = roundTick(entryP - initStop);
 
-                const minT1Pts = Math.max(7.5, atr[i] * 1.2);
-                const t1 = roundTick(entryP + Math.max(minT1Pts, 1.2 * R));
+                const minT1Pts = Math.max(6.5, atr[i] * 1.1);
+                const t1 = roundTick(entryP + minT1Pts);
                 const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
                 const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
 
@@ -4691,7 +4703,9 @@ function openBacktestModal() {
                     grossRs: grossRs,
                     charges: charges,
                     netCash: netCash,
-                    isWin: (t.pnlPts || 0) >= 0
+                    isWin: (t.pnlPts || 0) >= 0,
+                    t1Booked: t.t1Booked,
+                    target1: t.target1
                 };
             });
             if (de.summary) {
@@ -4712,7 +4726,9 @@ function openBacktestModal() {
             grossRs: t.grossRs,
             charges: t.charges,
             netCash: t.netCash,
-            isWin: t.pnlPts >= 0
+            isWin: t.pnlPts >= 0,
+            t1Booked: false,
+            target1: null
         }));
     }
 
@@ -4752,6 +4768,12 @@ function openBacktestModal() {
             tableBody.innerHTML = tradesList.map(t => {
                 const signPts = t.pnlPts >= 0 ? '+' : '';
                 const signNet = t.netCash >= 0 ? '+' : '';
+                const exitPriceHtml = (t.t1Booked && t.target1)
+                    ? `₹${t.target1.toFixed(2)} <span style="font-size:10px;color:#fbbf24;">(50%)</span><br><span style="color:#94a3b8;font-size:11px;">₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'} (50%)</span>`
+                    : `₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'}`;
+                const exitReasonHtml = t.t1Booked
+                    ? `<span style="color: #fbbf24; font-weight: 600;">🎯 T1 (50%)</span> + <span style="color: #94a3b8;">${t.exitReason} (50%)</span>`
+                    : `${t.exitReason}`;
                 return `
                     <tr>
                         <td><strong>#${t.num}</strong></td>
@@ -4759,8 +4781,8 @@ function openBacktestModal() {
                         <td>${t.entryTime}</td>
                         <td>₹${t.entryPrice.toFixed(2)}</td>
                         <td>${t.exitTime}</td>
-                        <td>₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'}</td>
-                        <td style="font-size: 11px; color: #94a3b8;">${t.exitReason}</td>
+                        <td>${exitPriceHtml}</td>
+                        <td style="font-size: 11px;">${exitReasonHtml}</td>
                         <td style="color: ${t.pnlPts >= 0 ? '#34d399' : '#f87171'}; font-weight: 700;">${signPts}${t.pnlPts.toFixed(2)}</td>
                         <td style="color: #f59e0b;">-₹${t.charges}</td>
                         <td style="color: ${t.netCash >= 0 ? '#34d399' : '#f87171'}; font-weight: 800;">${signNet}₹${Math.round(t.netCash).toLocaleString('en-IN')}</td>
