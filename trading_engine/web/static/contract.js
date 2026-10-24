@@ -547,8 +547,21 @@ async function initSessionDateSelector() {
                             });
                         } catch (err) {}
                     }
-                    if (!Replay.active && C.rawCandles && C.rawCandles.length > 0) {
-                        startReplay();
+                    if (C.rawCandles && C.rawCandles.length > 0) {
+                        const rpDatePicker = document.getElementById('rp-date-picker');
+                        if (rpDatePicker) rpDatePicker.value = chosen;
+                        if (Replay.active) {
+                            pauseReplay();
+                            Replay.fullCandles = [...C.rawCandles];
+                            const scrubber = document.getElementById('rp-scrubber');
+                            if (scrubber) {
+                                scrubber.min = 5;
+                                scrubber.max = Replay.fullCandles.length - 1;
+                            }
+                            jumpToEnd();
+                        } else {
+                            startReplay();
+                        }
                     }
                 }
                 showLoading(false);
@@ -4076,7 +4089,12 @@ function initReplayController() {
                     if (sessionSel) sessionSel.value = chosenDate;
                     C.rawCandles = formatCandles(candles);
                     Replay.fullCandles = [...C.rawCandles];
-                    jumpToStart();
+                    const scrubber = document.getElementById('rp-scrubber');
+                    if (scrubber) {
+                        scrubber.min = 5;
+                        scrubber.max = Replay.fullCandles.length - 1;
+                    }
+                    jumpToEnd();
                 } else {
                     alert(`No historical candle data found for ${C.symbol} on ${chosenDate}.`);
                 }
