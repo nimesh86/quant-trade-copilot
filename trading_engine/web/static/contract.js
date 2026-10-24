@@ -2702,8 +2702,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                 pnlR: pnlR,
             });
 
-            // If stopped out on hard initial stop or catastrophic stop, do NOT prime a re-entry attempt
-            if (['INITIAL_STOP', 'CATASTROPHIC_STOP'].includes(reason)) {
+            // If stopped out on hard stop, target reversal, or max target completion, do NOT prime a re-entry attempt
+            if (['INITIAL_STOP', 'CATASTROPHIC_STOP', 'TARGET_1_REVERSAL', 'MAX_TARGET_HIT'].includes(reason)) {
                 reentryWatcher = null;
             } else {
                 const pauseBars = (consecutiveLosses >= 2) ? 20 : 0;
