@@ -387,21 +387,24 @@ def calculate_initial_stop_and_r(entry_price: float, b_main_val: float, atr_val:
 
 def calculate_relaxed_ladder_floor(trade: ActiveTrade) -> float:
     """
-    Pillar 1: Relaxed Profit-Lock Ladder.
-    - MFE >= +3.5R: Entry + 50% of peak profit (caps give-back to 50%).
-    - MFE >= +2.5R: Entry + 0.50R.
-    - MFE >= +1.8R: Entry + Costs (true Break-Even lock).
-    - MFE >= +1.0R: Entry - 0.50R (halves risk, lets the normal retest breathe!).
-    - MFE <  +1.0R: Initial stop.
+    Pillar 1: Calibrated Option Buyer Profit-Lock Ladder.
+    - MFE >= +3.2R: Entry + 60% of peak profit.
+    - MFE >= +2.2R: Entry + 1.0R.
+    - MFE >= +1.5R: Entry + 0.50R (guaranteed profit).
+    - MFE >= +1.0R: Entry + Costs (true Break-Even lock).
+    - MFE >= +0.8R: Entry - 0.40R (cuts risk by 60%).
+    - MFE <  +0.8R: Initial stop.
     """
-    if trade.mfe_r >= 3.5:
-        return round_tick(trade.entry_price + 0.50 * (trade.hh - trade.entry_price))
-    elif trade.mfe_r >= 2.5:
+    if trade.mfe_r >= 3.2:
+        return round_tick(trade.entry_price + 0.60 * (trade.hh - trade.entry_price))
+    elif trade.mfe_r >= 2.2:
+        return round_tick(trade.entry_price + 1.0 * trade.R)
+    elif trade.mfe_r >= 1.5:
         return round_tick(trade.entry_price + 0.50 * trade.R)
-    elif trade.mfe_r >= 1.8:
-        return round_tick(trade.entry_price + COSTS_PER_UNIT)
     elif trade.mfe_r >= 1.0:
-        return round_tick(trade.entry_price - 0.50 * trade.R)
+        return round_tick(trade.entry_price + COSTS_PER_UNIT + NSE_TICK)
+    elif trade.mfe_r >= 0.8:
+        return round_tick(trade.entry_price - 0.40 * trade.R)
     return trade.initial_stop
 
 def detect_climax_exhaustion(i: int, closes: np.ndarray, highs: np.ndarray, lows: np.ndarray, ind: Dict[str, np.ndarray]) -> bool:

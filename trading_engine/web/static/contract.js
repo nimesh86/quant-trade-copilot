@@ -1771,16 +1771,20 @@ function calculateSMFLimitAndTarget(candles, i, atr, bMain, vsma, rsi) {
     const stopLoss = Math.round(Math.max(suggestedLimit - slRisk, curBm - 0.75 * curAtr) * 20) / 20;
     const risk = Math.max(3.0, suggestedLimit - stopLoss);
 
-    // 2. Scalp Target 1 (50% Qty Lock): 1.0x Risk or +8.0 pts (~65% hit rate)
-    const scalpPts = Math.max(6.0, Math.min(12.0, risk * 1.0));
+    // 2. Scalp Target 1 (50% Qty Lock): 1.2x Risk or at least 7.5 pts
+    // Ensures net profit is well above statutory taxes (~1.0 pt on NIFTY)
+    const minTarget1Pts = Math.max(7.5, curAtr * 1.2);
+    const scalpPts = Math.max(minTarget1Pts, risk * 1.2);
     const target1 = Math.round((suggestedLimit + scalpPts) * 20) / 20;
 
-    // 3. Break-Even Lock Trigger Level (+6.0 pts)
-    const beLockTrigger = Math.round((suggestedLimit + 6.0) * 20) / 20;
+    // 3. Break-Even Lock Trigger Level (Entry + costs)
+    const beLockTrigger = Math.round((suggestedLimit + Math.max(4.5, curAtr * 0.8)) * 20) / 20;
 
-    // 4. Runner Target 2 (50% Qty Expansion): 2.5x Risk or +20.0 pts
-    const target2 = Math.round((suggestedLimit + Math.max(18.0, risk * 2.5)) * 20) / 20;
-    const maxTarget = Math.round((suggestedLimit + Math.max(28.0, risk * 3.5)) * 20) / 20;
+    // 4. Runner Target 2: 2.2x Risk or 16.0 pts
+    const target2 = Math.round((suggestedLimit + Math.max(16.0, risk * 2.2, curAtr * 2.2)) * 20) / 20;
+    
+    // 5. Maximum Gamma Target: 3.2x Risk or 26.0 pts
+    const maxTarget = Math.round((suggestedLimit + Math.max(26.0, risk * 3.2, curAtr * 3.2)) * 20) / 20;
 
     // 5. Session Momentum Window Check (IST):
     // Morning Ignition: 09:30 - 10:45 | Afternoon Momentum: 13:15 - 14:30 | Midday Chop: 11:00 - 13:15
@@ -2437,10 +2441,11 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
     };
 
     const calcRelaxedLadder = (t) => {
-        if (t.mfeR >= 3.5) return roundTick(t.entryPrice + 0.50 * (t.hh - t.entryPrice));
-        if (t.mfeR >= 2.5) return roundTick(t.entryPrice + 0.50 * t.R);
-        if (t.mfeR >= 1.8) return roundTick(t.entryPrice + COSTS);
-        if (t.mfeR >= 1.0) return roundTick(t.entryPrice - 0.50 * t.R);
+        if (t.mfeR >= 3.2) return roundTick(t.entryPrice + 0.60 * (t.hh - t.entryPrice));
+        if (t.mfeR >= 2.2) return roundTick(t.entryPrice + 1.0 * t.R);
+        if (t.mfeR >= 1.5) return roundTick(t.entryPrice + 0.50 * t.R);
+        if (t.mfeR >= 1.0) return roundTick(t.entryPrice + COSTS + NSE_TICK); // True Break-Even!
+        if (t.mfeR >= 0.80) return roundTick(t.entryPrice - 0.40 * t.R); // Cut risk by 60%
         return t.initialStop;
     };
 
@@ -2527,36 +2532,61 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     t.mfeR = (t.hh - t.entryPrice) / t.R;
 
                     // Update Phase
-                    if (t.mfeR >= 2.5) t.phase = 'RUNNER';
+                    if (t.mfeR >= 2.2) t.phase = 'RUNNER';
                     else if (t.mfeR >= 1.0) t.phase = 'SECURED';
                     else t.phase = 'PROTECT';
 
                     // Update Ladder Floor
                     t.ladderFloor = Math.max(t.ladderFloor, calcRelaxedLadder(t));
 
-                    // Partial Booking P1 (+1.5R)
-                    if (enableP1 && !t.p1Booked && t.mfeR >= 1.5) {
-                        t.p1Booked = true;
-                        const partialP = roundTick(t.entryPrice + 1.5 * t.R);
-                        t.realizedPts += 0.25 * (partialP - t.entryPrice);
-                        t.remQty = 0.75;
+                    // ── SMART TARGET 1 PARTIAL PROFIT SCALING (50% at T1 or >= +1.2R) ──
+                    if (!t.t1Booked && (c.high >= (t.target1 || (t.entryPrice + 1.2 * t.R)) || t.mfeR >= 1.2)) {
+                        t.t1Booked = true;
+                        const targetPx = t.target1 || roundTick(t.entryPrice + 1.2 * t.R);
+                        const partialP = Math.max(targetPx, roundTick(t.entryPrice + 1.2 * t.R));
+                        t.realizedPts += 0.50 * (partialP - t.entryPrice);
+                        t.remQty = 0.50;
+                        // Immediately lock BE + costs for the remaining 50% runner!
+                        t.ladderFloor = Math.max(t.ladderFloor, roundTick(t.entryPrice + COSTS + NSE_TICK));
                         markers.push({
                             time: c.time,
                             position: 'aboveBar',
                             color: '#fbbf24',
                             shape: 'circle',
-                            text: `P1 BOOKED (+1.5R)`,
+                            text: `🎯 T1 BOOKED 50% (+${(partialP - t.entryPrice).toFixed(1)} pts)`,
                         });
+
+                        // ── TARGET 1 RE-EVALUATION: CONTINUATION VS REVERSAL CHECK ──
+                        const span = Math.max(c.high - c.low, 0.05);
+                        const upperWick = c.high - Math.max(c.open, c.close);
+                        const sellP = upperWick / span;
+                        const isBlowoff = (sellP >= 0.50) && (rvol[i] >= 1.3 || c.close < targetPx);
+                        if (isBlowoff) {
+                            // Sellers dumped into Target 1! Tighten stop immediately to candle low!
+                            t.ladderFloor = Math.max(t.ladderFloor, roundTick(c.low - NSE_TICK));
+                            if (c.close <= c.low + 0.25 * span) {
+                                // Closed right at bottom of the rejection candle -> exit remaining qty immediately!
+                                exitReason = 'TARGET_1_REVERSAL';
+                                exitPrice = c.close;
+                            }
+                        }
+                    }
+
+                    // ── MAXIMUM TARGET HIT CHECK ──
+                    if (!exitReason && t.maxTarget && c.high >= t.maxTarget) {
+                        exitReason = 'MAX_TARGET_HIT';
+                        exitPrice = t.maxTarget;
+                        isLimit = true;
                     }
 
                     // Structural exits
-                    if (isSwitchDown) {
+                    if (!exitReason && isSwitchDown) {
                         exitReason = 'REGIME_FLIP';
                         exitPrice = c.close;
-                    } else if (cTime >= '15:15') {
+                    } else if (!exitReason && cTime >= '15:15') {
                         exitReason = 'EOD_EXIT';
                         exitPrice = c.close;
-                    } else if (variantUpper !== 'V1') {
+                    } else if (!exitReason && variantUpper !== 'V1') {
                         // V2+ Trailing Stop & Health Checks
                         let ths = null;
                         if (['V3', 'V4', 'V5', 'V5_P1'].includes(variantUpper)) {
@@ -2576,14 +2606,17 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                         }
 
                         if (!exitReason) {
-                            // Chandelier Trail
-                            let k = (variantUpper === 'V2') ? 2.2 : (K_BY_STATE[t.state] || 2.2);
+                            // Adaptive Chandelier Trail
+                            let k = (t.mfeR >= 2.0) ? 1.0 : (t.mfeR >= 1.0 ? 1.4 : 1.8);
                             if (['V4', 'V5', 'V5_P1'].includes(variantUpper)) {
                                 const span = c.high - c.low;
-                                const isClimax = (rvol[i] >= 2.5) && (span >= 2.0 * atr[i]) && (sellerPressure[i] >= 0.50) && (ext[i] >= 2.5);
-                                if (isClimax) t.climaxUntilBar = i + 3;
-                                if (i <= t.climaxUntilBar) k = Math.min(k, 0.8);
-                                if (ext[i] > 3.5 || cTime >= '14:30') k = Math.min(k, 1.4);
+                                const isClimax = (rvol[i] >= 1.5) && (sellerPressure[i] >= 0.55);
+                                if (isClimax) {
+                                    t.climaxUntilBar = i + 2;
+                                    k = Math.min(k, 0.8);
+                                    t.ladderFloor = Math.max(t.ladderFloor, roundTick(c.low - NSE_TICK));
+                                }
+                                if (ext[i] > 3.2 || cTime >= '14:30') k = Math.min(k, 1.2);
                             }
 
                             const rawTrail = roundTick(t.hh - k * atr[i]);
@@ -2644,6 +2677,9 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                 exitReason: reason,
                 isReentry: t.isReentry,
                 reentryType: t.reentryType,
+                target1: t.target1,
+                maxTarget: t.maxTarget,
+                t1Booked: t.t1Booked,
                 p1Booked: t.p1Booked,
             };
             trades.push(rec);
@@ -2713,11 +2749,19 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     const initStop = roundTick(entryP - clampedR);
                     const R = roundTick(entryP - initStop);
 
+                    const minT1Pts = Math.max(7.5, atr[i] * 1.2);
+                    const t1 = roundTick(entryP + Math.max(minT1Pts, 1.2 * R));
+                    const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
+                    const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
+
                     activeTrade = {
                         entryPrice: entryP,
                         entryBar: i,
                         entryTime: cTime,
                         initialStop: initStop,
+                        target1: t1,
+                        target2: t2,
+                        maxTarget: maxT,
                         R,
                         catastrophicStop: roundTick(entryP - 2.0 * R),
                         baseQty: 1.0,
@@ -2732,6 +2776,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                         climaxUntilBar: -1,
                         lowThsBars: 0,
                         improvingBars: 0,
+                        t1Booked: false,
                         p1Booked: false,
                         realizedPts: 0.0,
                         isReentry: true,
@@ -2741,7 +2786,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     dailyTradeCount++;
                     reentryWatcher = null;
 
-                    const reLabel = reType === 'PULLBACK' ? `🔄 RE-PB ₹${entryP.toFixed(1)}` : `🔄 RE-BO ₹${entryP.toFixed(1)}`;
+                    const reLabel = reType === 'PULLBACK' ? `🔄 RE-PB ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]` : `🔄 RE-BO ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]`;
                     markers.push({
                         time: c.time,
                         position: 'belowBar',
@@ -2769,11 +2814,19 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                 const initStop = roundTick(entryP - clampedR);
                 const R = roundTick(entryP - initStop);
 
+                const minT1Pts = Math.max(7.5, atr[i] * 1.2);
+                const t1 = roundTick(entryP + Math.max(minT1Pts, 1.2 * R));
+                const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
+                const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
+
                 activeTrade = {
                     entryPrice: entryP,
                     entryBar: i,
                     entryTime: cTime,
                     initialStop: initStop,
+                    target1: t1,
+                    target2: t2,
+                    maxTarget: maxT,
                     R,
                     catastrophicStop: roundTick(entryP - 2.0 * R),
                     baseQty: 1.0,
@@ -2788,6 +2841,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     climaxUntilBar: -1,
                     lowThsBars: 0,
                     improvingBars: 0,
+                    t1Booked: false,
                     p1Booked: false,
                     realizedPts: 0.0,
                     isReentry: false,
@@ -2802,7 +2856,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     position: 'belowBar',
                     color: '#00f2a9',
                     shape: 'arrowUp',
-                    text: `▲ BUY ₹${entryP.toFixed(1)}`,
+                    text: `▲ BUY ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]`,
                     signalType: 'DE_BUY',
                     entryPrice: entryP,
                     R: R,
