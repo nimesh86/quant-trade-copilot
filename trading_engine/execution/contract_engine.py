@@ -397,7 +397,8 @@ class ContractTradingEngine:
     def get_state(self) -> Dict[str, Any]:
         """Returns comprehensive trading terminal state."""
         # Calculate today's realized PnL
-        today_trades = [t for t in self.trade_history if t.get("exit_time", "").startswith(self.today_date)]
+        today_str = date.today().isoformat()
+        today_trades = [t for t in self.trade_history if t.get("exit_time", "").startswith(today_str)]
         realized_day_pnl = sum(t.get("net_pnl", 0.0) for t in today_trades)
         
         unrealized_pnl = self.active_position.get("unrealized_pnl", 0.0) if self.active_position else 0.0

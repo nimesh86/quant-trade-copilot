@@ -1858,6 +1858,7 @@ function computeSMF(candles) {
     lastSignal[0] = prevRegime;
     let belowCount = 0;
     let aboveCount = 0;
+    let cloudBullStreak = 0;
 
     // Daily trade tracking for strict 5-trade limit & active signal targets
     let currentDayStr = null;
@@ -1872,8 +1873,15 @@ function computeSMF(candles) {
         const c = candles[i];
         const buf = atr[i] * mult;
 
-        const isBelow = c.close < bMain[i] - buf;
-        const isAbove = c.close > bMain[i] + buf;
+        const cloudTop = Math.max(fEMA[i], sEMA[i]);
+        const cloudBottom = Math.min(fEMA[i], sEMA[i]);
+        const cloudBull = fEMA[i] >= sEMA[i];
+
+        if (cloudBull) cloudBullStreak++;
+        else cloudBullStreak = 0;
+
+        const isBelow = c.close < cloudBottom - buf;
+        const isAbove = c.close > cloudTop + buf;
 
         if (isBelow) {
             belowCount++;
@@ -1886,15 +1894,39 @@ function computeSMF(candles) {
             aboveCount = 0;
         }
 
-        // Multi-Bar Confirmed Trend Reversal:
-        // Requires consecutive closes beyond the buffer to confirm a flip.
+        // Multi-Bar Confirmed Trend Reversal with Strict Support & Resistance Validation:
+        // Requires consecutive closes beyond the buffer plus structural resistance clearance.
         let currLS = prevRegime;
         if (prevRegime === 1 && belowCount >= reqBars) {
             currLS = -1;
             belowCount = 0; // reset streak after confirmed flip
         } else if (prevRegime === -1 && aboveCount >= reqBars) {
-            currLS = 1;
-            aboveCount = 0; // reset streak after confirmed flip
+            // High-Conviction Bullish Filter:
+            // 1. Block entries during midday dead chop (11:15 - 13:15 IST)
+            // 2. Cloud Ribbon must be confirmed Bullish for >= 2 consecutive bars (prevents single-bar traps)
+            // 3. Candle body must be solid bullish (bodyRatio >= 0.50, no shooting star / upper wick rejections)
+            // 4. RSI >= 48 (healthy expanding momentum)
+            // 5. Structure Break (CHoCH): must clear 8-bar swing high (clearing immediate resistance ceiling)
+            const d = new Date(c.time * 1000);
+            const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+            const istM = (d.getUTCMinutes() + 30) % 60;
+            const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+            const isMidday = (cTimeStr >= '11:15' && cTimeStr <= '13:15');
+
+            const span = Math.max(c.high - c.low, 0.05);
+            const bodyRatio = (c.close - c.low) / span;
+
+            const startIdx = Math.max(0, i - 8);
+            let prevSwingHigh = -Infinity;
+            for (let k = startIdx; k < i; k++) {
+                if (highs[k] > prevSwingHigh) prevSwingHigh = highs[k];
+            }
+            const brokeResistance = (c.close >= prevSwingHigh - 0.10 * atr[i]);
+
+            if (!isMidday && cloudBullStreak >= 2 && bodyRatio >= 0.50 && rsi[i] >= 48 && brokeResistance) {
+                currLS = 1;
+                aboveCount = 0; // reset streak after confirmed flip
+            }
         }
 
         lastSignal[i] = currLS;
@@ -2563,7 +2595,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                                 exitPrice = c.close;
                             } else if (['V4', 'V5', 'V5_P1'].includes(variantUpper)) {
                                 // Time Stops
-                                if ((i - t.entryBar >= 8) && t.mfeR < 0.5 && c.close < t.entryPrice) {
+                                if ((i - t.entryBar >= 14) && t.mfeR < 0.3 && c.close < (t.entryPrice - 0.5 * t.R)) {
                                     exitReason = 'FAIL_FAST';
                                     exitPrice = c.close;
                                 } else if ((i - t.lastHighBar >= 12) && ths !== null && ths < 60) {
@@ -2634,18 +2666,23 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                 pnlR: pnlR,
             });
 
-            const pauseBars = (consecutiveLosses >= 2) ? 20 : 0;
-            reentryWatcher = {
-                regime: 1,
-                exitBar: barIdx,
-                exitPrice: exitP,
-                exitReason: reason,
-                lastHh: t.hh,
-                lastHigherLow: t.ladderFloor,
-                pullbackLow: Infinity,
-                reentryCount: t.legReentries,
-                pausedUntilBar: barIdx + pauseBars,
-            };
+            // If stopped out on hard initial stop or catastrophic stop, do NOT prime a re-entry attempt
+            if (['INITIAL_STOP', 'CATASTROPHIC_STOP'].includes(reason)) {
+                reentryWatcher = null;
+            } else {
+                const pauseBars = (consecutiveLosses >= 2) ? 20 : 0;
+                reentryWatcher = {
+                    regime: 1,
+                    exitBar: barIdx,
+                    exitPrice: exitP,
+                    exitReason: reason,
+                    lastHh: t.hh,
+                    lastHigherLow: t.ladderFloor,
+                    pullbackLow: Infinity,
+                    reentryCount: t.legReentries,
+                    pausedUntilBar: barIdx + pauseBars,
+                };
+            }
 
             activeTrade = null;
         }
@@ -2721,7 +2758,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
 
         // 3. Check New Entry on SMF Switch Up
         if (!activeTrade && isSwitchUp && !dayHalted && dailyTradeCount < 3) {
-            const inTimeWindow = (cTime >= '09:30' && cTime <= '14:30');
+            const isMidday = (cTime >= '11:15' && cTime <= '13:15');
+            const inTimeWindow = (cTime >= '09:30' && cTime <= '15:00' && !isMidday);
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
             if (inTimeWindow && (!needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
