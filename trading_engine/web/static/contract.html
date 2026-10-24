@@ -215,6 +215,21 @@
                 <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
             </div>
 
+            <!-- Mode Toggle: Auto Backtest vs Manual Practice -->
+            <div class="rp-mode-switch" id="rp-mode-switch" title="Replay Mode: Auto-System Backtest vs Manual Paper Practice">
+                <button type="button" id="rp-mode-auto" class="rp-mode-btn active" title="Auto-System Backtest: Strategy enters & exits trades automatically">
+                    ⚡ Auto
+                </button>
+                <button type="button" id="rp-mode-manual" class="rp-mode-btn" title="Manual Replay Trading: Use BUY / EXIT buttons to trade replay candles yourself">
+                    ✍️ Manual
+                </button>
+            </div>
+
+            <!-- Report Button -->
+            <button type="button" id="rp-btn-scorecard" class="rp-scorecard-btn" title="View Full Accuracy Scorecard & Trades Ledger">
+                📊 Report
+            </button>
+
             <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
         </div>
 
@@ -433,11 +448,90 @@
 
 </div><!-- /page-shell -->
 
+<!-- ── Full-Day System Accuracy & Trade Ledger Modal ───────────────────────── -->
+<div id="backtest-report-modal" class="bt-modal-backdrop hidden" onclick="if(event.target===this)closeBacktestModal()">
+    <div class="bt-modal-card">
+        <div class="bt-modal-header">
+            <div class="bt-modal-title">
+                <span class="bt-modal-icon">📊</span>
+                <div>
+                    <h3 id="bt-modal-symbol">NIFTY Option Backtest Scorecard</h3>
+                    <p class="bt-modal-sub" id="bt-modal-sub">Historical Session Accuracy & Trade Ledger</p>
+                </div>
+            </div>
+            <div class="bt-modal-header-actions">
+                <button type="button" id="bt-btn-fastforward" class="bt-btn-action" title="Jump to End of Day & Calculate Full Session">⚡ Full Day</button>
+                <button type="button" id="bt-btn-close" class="bt-modal-close" onclick="closeBacktestModal()">✕</button>
+            </div>
+        </div>
+
+        <div class="bt-modal-body">
+            <!-- Accuracy & Performance KPI Cards -->
+            <div class="bt-kpi-grid">
+                <div class="bt-kpi-card winrate-card">
+                    <span class="bt-kpi-lbl">WIN RATE</span>
+                    <span class="bt-kpi-val" id="bt-kpi-winrate">--%</span>
+                    <span class="bt-kpi-note" id="bt-kpi-wl">0W / 0L</span>
+                </div>
+                <div class="bt-kpi-card pnl-card">
+                    <span class="bt-kpi-lbl">NET CASH IN HAND</span>
+                    <span class="bt-kpi-val" id="bt-kpi-net-cash">₹0.00</span>
+                    <span class="bt-kpi-note" id="bt-kpi-pts">+0.0 pts</span>
+                </div>
+                <div class="bt-kpi-card">
+                    <span class="bt-kpi-lbl">GROSS GAIN</span>
+                    <span class="bt-kpi-val" id="bt-kpi-gross">₹0.00</span>
+                    <span class="bt-kpi-note">1 Lot (65 Qty)</span>
+                </div>
+                <div class="bt-kpi-card charges-card">
+                    <span class="bt-kpi-lbl">CHARGES & TAXES</span>
+                    <span class="bt-kpi-val" id="bt-kpi-charges">-₹0.00</span>
+                    <span class="bt-kpi-note">Brokerage + STT + GST</span>
+                </div>
+                <div class="bt-kpi-card">
+                    <span class="bt-kpi-lbl">TOTAL TRADES</span>
+                    <span class="bt-kpi-val" id="bt-kpi-trades">0</span>
+                    <span class="bt-kpi-note" id="bt-kpi-mode">⚡ Auto System</span>
+                </div>
+                <div class="bt-kpi-card">
+                    <span class="bt-kpi-lbl">CAPTURE RATIO</span>
+                    <span class="bt-kpi-val" id="bt-kpi-capture">--%</span>
+                    <span class="bt-kpi-note" id="bt-kpi-giveback">Giveback: --%</span>
+                </div>
+            </div>
+
+            <!-- Complete Trade Ledger Table -->
+            <div class="bt-table-wrap">
+                <table class="bt-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Side</th>
+                            <th>Entry Time</th>
+                            <th>Entry Price</th>
+                            <th>Exit Time</th>
+                            <th>Exit Price</th>
+                            <th>Exit Trigger</th>
+                            <th>Points</th>
+                            <th>Charges</th>
+                            <th>Net Cash</th>
+                            <th>Outcome</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bt-table-body">
+                        <!-- Populated dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- LightweightCharts library (same copy as main dashboard) -->
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261024_2125"></script>
+<script src="/static/contract.js?v=20261024_2152"></script>
 
 </body>
 </html>

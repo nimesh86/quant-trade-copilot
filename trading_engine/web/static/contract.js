@@ -4024,6 +4024,10 @@ const Replay = {
     fullCandles: [],
     currentIndex: 0,
     speedMs: 600,
+    mode: 'auto', // 'auto' (Auto-System Backtest) | 'manual' (Manual Practice)
+    manualPosition: null, // { entryPrice, entryTime, lots, units, sl, current_sl, target1, target2, be_locked }
+    manualTrades: [], // closed manual trades
+    lastNotifiedTradeCount: 0,
 };
 
 function initReplayController() {
@@ -4039,6 +4043,11 @@ function initReplayController() {
     const exitBtn = document.getElementById('rp-btn-exit');
     const datePicker = document.getElementById('rp-date-picker');
     const loadDateBtn = document.getElementById('rp-btn-load-date');
+
+    const modeAutoBtn = document.getElementById('rp-mode-auto');
+    const modeManualBtn = document.getElementById('rp-mode-manual');
+    const scorecardBtn = document.getElementById('rp-btn-scorecard');
+    const ffBtn = document.getElementById('bt-btn-fastforward');
 
     if (toggleBtn) {
         toggleBtn.addEventListener('click', toggleReplay);
@@ -4072,6 +4081,33 @@ function initReplayController() {
     }
     if (exitBtn) {
         exitBtn.addEventListener('click', exitReplay);
+    }
+
+    if (modeAutoBtn && modeManualBtn) {
+        modeAutoBtn.addEventListener('click', () => {
+            Replay.mode = 'auto';
+            modeAutoBtn.classList.add('active');
+            modeManualBtn.classList.remove('active');
+            flashExecutionAlert('⚡ AUTO BACKTEST MODE', 'System executes SMF Dynamic Exit strategy automatically to measure accuracy.', 'info');
+            renderReplayStep();
+        });
+        modeManualBtn.addEventListener('click', () => {
+            Replay.mode = 'manual';
+            modeManualBtn.classList.add('active');
+            modeAutoBtn.classList.remove('active');
+            flashExecutionAlert('✍️ MANUAL REPLAY MODE', 'Use BUY MKT and EXIT buttons to practice discretionary trading on replay candles.', 'info');
+            renderReplayStep();
+        });
+    }
+
+    if (scorecardBtn) {
+        scorecardBtn.addEventListener('click', openBacktestModal);
+    }
+    if (ffBtn) {
+        ffBtn.addEventListener('click', () => {
+            jumpToEnd();
+            openBacktestModal();
+        });
     }
 
     if (loadDateBtn && datePicker) {
@@ -4363,110 +4399,335 @@ function renderReplayStep() {
 }
 
 function evaluateReplayCandleTrading(candle) {
-    if (!C.tradingState) return;
+    if (!candle) return;
+    const posBadge = document.getElementById('badge-pos-state');
+    const posHud = document.getElementById('active-pos-hud');
+    const exitBtn = document.getElementById('btn-quick-exit');
+    const posPnlSub = document.getElementById('btn-pos-pnl');
+    const dayPnlEl = document.getElementById('stat-day-pnl');
+    const dayPnlPill = document.getElementById('pill-day-pnl');
 
-    // A. Evaluate pending limit orders for fills
-    if (C.tradingState.pending_orders && C.tradingState.pending_orders.length > 0) {
-        for (const o of [...C.tradingState.pending_orders]) {
-            if (o.symbol === C.symbol && o.side === 'BUY' && candle.low <= o.limit_price) {
-                const pos = {
-                    position_id: `POS_${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
-                    symbol: o.symbol,
-                    side: o.side,
-                    lots: o.lots,
-                    units: o.units || (o.lots * 65),
-                    entry_price: o.limit_price,
-                    current_price: candle.close,
-                    sl: o.sl,
-                    current_sl: o.sl || Math.round(o.limit_price * 0.90 * 20) / 20,
-                    target1: o.target1,
-                    target2: o.target2,
-                    trailing_mode: o.trailing_mode || 'be_lock',
-                    be_locked: false,
-                    unrealized_pnl: 0.0,
-                    unrealized_pts: 0.0,
-                    status: 'OPEN'
-                };
-                C.tradingState.active_position = pos;
-                C.tradingState.pending_orders = C.tradingState.pending_orders.filter(item => item.order_id !== o.order_id);
-                flashExecutionAlert('⚡ LIMIT ORDER FILLED', `Filled 1 Lot @ ₹${o.limit_price.toFixed(1)}`, 'success');
-                fetch('/api/trade/tick', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: C.symbol, price: o.limit_price })
-                }).catch(() => {});
+    if (Replay.mode === 'auto') {
+        const deResult = C.dynamicExitLastResult;
+        if (deResult) {
+            const activeT = deResult.activeTrade;
+            if (activeT) {
+                const pts = candle.close - activeT.entryPrice;
+                const grossRs = pts * 65;
+                const sign = pts >= 0 ? '+' : '';
+
+                if (posBadge) {
+                    posBadge.className = 'pos-badge open-long';
+                    posBadge.textContent = `🟢 AUTO LONG (1 Lot) @ ₹${activeT.entryPrice.toFixed(1)} | ${sign}${pts.toFixed(1)}p`;
+                }
+                if (posHud) {
+                    posHud.classList.remove('hidden');
+                    const hPos = document.getElementById('hud-val-pos');
+                    const hSl = document.getElementById('hud-val-sl');
+                    const hT1 = document.getElementById('hud-val-t1');
+                    const hT2 = document.getElementById('hud-val-t2');
+                    if (hPos) hPos.textContent = `₹${activeT.entryPrice.toFixed(1)}`;
+                    if (hSl) hSl.textContent = `₹${Math.max(activeT.initialStop, activeT.ladderFloor).toFixed(1)}`;
+                    if (hT1) hT1.textContent = `₹${activeT.target1.toFixed(1)}`;
+                    if (hT2) hT2.textContent = `₹${activeT.maxTarget.toFixed(1)}`;
+                }
+                if (exitBtn) {
+                    exitBtn.classList.remove('hidden');
+                    if (posPnlSub) {
+                        posPnlSub.textContent = `${sign}₹${Math.round(grossRs)} (${sign}${pts.toFixed(1)}p)`;
+                        posPnlSub.style.color = pts >= 0 ? '#ffffff' : '#ffccd5';
+                    }
+                }
+            } else {
+                if (posBadge) {
+                    posBadge.className = 'pos-badge flat';
+                    posBadge.textContent = deResult.reentryWatcher ? '🔄 ARMED RE-ENTRY' : '⚠️ FLAT (Waiting Signal)';
+                }
+                if (posHud) posHud.classList.add('hidden');
+                if (exitBtn) exitBtn.classList.add('hidden');
+            }
+
+            // Real-time cumulative PnL for Auto Backtest
+            const realizedPts = deResult.trades.reduce((acc, tr) => acc + (tr.pnlPts || 0), 0);
+            const activePts = activeT ? (candle.close - activeT.entryPrice) : 0;
+            const totalPts = realizedPts + activePts;
+            const totalTradesCount = deResult.trades.length + (activeT ? 1 : 0);
+            const totalCharges = totalTradesCount * 55;
+            const netCash = (totalPts * 65) - totalCharges;
+            const signCash = netCash >= 0 ? '+' : '';
+            const signPts = totalPts >= 0 ? '+' : '';
+
+            if (dayPnlEl && dayPnlPill) {
+                dayPnlEl.textContent = `${signCash}₹${Math.round(netCash).toLocaleString('en-IN')} (${signPts}${totalPts.toFixed(1)}p)`;
+                dayPnlPill.className = `stat-pill ${netCash > 0 ? 'pnl-positive' : (netCash < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+            }
+
+            // Toast alert when a new trade is booked while playing
+            if (Replay.playing && deResult.trades.length > Replay.lastNotifiedTradeCount) {
+                const latest = deResult.trades[deResult.trades.length - 1];
+                const isWin = (latest.pnlPts || 0) >= 0;
+                flashExecutionAlert(
+                    isWin ? '🎯 AUTO PROFIT BOOKED' : '🛑 AUTO STOP EXITED',
+                    `Trade #${latest.tradeNum}: ${latest.exitReason} (${(latest.pnlPts || 0) >= 0 ? '+' : ''}${(latest.pnlPts || 0).toFixed(1)} pts)`,
+                    isWin ? 'success' : 'danger'
+                );
+                Replay.lastNotifiedTradeCount = deResult.trades.length;
             }
         }
+    } else {
+        // Manual Replay Practice Mode
+        evaluateManualReplayTrading(candle);
     }
+}
 
-    // B. Evaluate active position: SL trigger, Target trigger, and live PnL calculation
-    if (C.tradingState.active_position && C.tradingState.active_position.symbol === C.symbol) {
-        const pos = C.tradingState.active_position;
-        const curPx = candle.close;
-        const low = candle.low;
-        const high = candle.high;
+function evaluateManualReplayTrading(candle) {
+    const pos = Replay.manualPosition;
+    const posBadge = document.getElementById('badge-pos-state');
+    const posHud = document.getElementById('active-pos-hud');
+    const exitBtn = document.getElementById('btn-quick-exit');
+    const posPnlSub = document.getElementById('btn-pos-pnl');
+    const dayPnlEl = document.getElementById('stat-day-pnl');
+    const dayPnlPill = document.getElementById('pill-day-pnl');
 
-        // 1. Check Stop Loss breach (only if SL has been set by user)
-        if (pos.current_sl != null && pos.current_sl > 0 && low <= pos.current_sl) {
-            executeAutoReplayExit('STOP_LOSS_HIT', pos.current_sl);
+    if (pos) {
+        // 1. Check Stop Loss breach
+        if (pos.current_sl && candle.low <= pos.current_sl) {
+            closeManualReplayPosition(pos.current_sl, 'STOP_LOSS_HIT');
             return;
         }
-
-        // 2. Check Target 2 breach (only if T2 has been set by user)
-        if (pos.target2 != null && pos.target2 > 0 && high >= pos.target2) {
-            executeAutoReplayExit('TARGET_2_HIT', pos.target2);
+        // 2. Check Target 2 breach
+        if (pos.target2 && candle.high >= pos.target2) {
+            closeManualReplayPosition(pos.target2, 'TARGET_2_HIT');
             return;
         }
-
-        // 3. Check Target 1 breach -> Break-Even Lock (only if T1 has been set by user)
-        if (pos.target1 != null && pos.target1 > 0 && high >= pos.target1 && !pos.be_locked) {
+        // 3. Check Target 1 breach -> Lock Break-Even
+        if (pos.target1 && candle.high >= pos.target1 && !pos.be_locked) {
             pos.be_locked = true;
             pos.current_sl = Math.max(pos.current_sl || 0, pos.entry_price);
-            flashExecutionAlert('🛡️ BREAK-EVEN LOCKED', `Target 1 (₹${pos.target1.toFixed(1)}) touched. SL ratcheted to ₹${pos.entry_price.toFixed(1)}`, 'success');
+            flashExecutionAlert('🛡️ MANUAL BREAK-EVEN LOCKED', `Target 1 (₹${pos.target1.toFixed(1)}) hit. SL ratcheted to ₹${pos.entry_price.toFixed(1)}`, 'success');
         }
 
-        // 4. Mathematical PnL recalculation
-        const pts = Math.round((curPx - pos.entry_price) * 100) / 100;
-        pos.current_price = curPx;
-        pos.unrealized_pts = pts;
-        pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
-        pos.unrealized_pnl_pct = Math.round((pts / pos.entry_price) * 1000) / 10;
+        const pts = candle.close - pos.entry_price;
+        const grossRs = pts * pos.units;
+        const sign = pts >= 0 ? '+' : '';
 
-        // 5. Instantly refresh toolbar buttons and canvas overlay
-        updateTradingUI(C.tradingState);
-        requestAnimationFrame(renderSMFCanvas);
-    }
-}
-
-async function executeAutoReplayExit(reason, exitPx) {
-    if (!C.tradingState?.active_position) return;
-    const pos = C.tradingState.active_position;
-    const pts = Math.round((exitPx - pos.entry_price) * 100) / 100;
-    const pnl = Math.round(pts * pos.units * 100) / 100;
-    const sign = pnl >= 0 ? '+' : '';
-
-    try {
-        await fetch('/api/trade/exit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                symbol: C.symbol,
-                exit_price: exitPx,
-                reason: reason
-            })
-        });
-    } catch (e) {
-        console.warn('Replay auto exit sync error:', e);
-    }
-
-    if (reason === 'STOP_LOSS_HIT') {
-        flashExecutionAlert('🛑 STOP LOSS TRIGGERED', `Exited @ ₹${exitPx.toFixed(1)} (${sign}₹${pnl})`, 'danger');
+        if (posBadge) {
+            posBadge.className = 'pos-badge open-long';
+            posBadge.textContent = `🟢 MANUAL LONG (1 Lot) @ ₹${pos.entry_price.toFixed(1)} | ${sign}${pts.toFixed(1)}p`;
+        }
+        if (posHud) {
+            posHud.classList.remove('hidden');
+            const hPos = document.getElementById('hud-val-pos');
+            const hSl = document.getElementById('hud-val-sl');
+            const hT1 = document.getElementById('hud-val-t1');
+            const hT2 = document.getElementById('hud-val-t2');
+            if (hPos) hPos.textContent = `₹${pos.entry_price.toFixed(1)}`;
+            if (hSl) hSl.textContent = `₹${(pos.current_sl || 0).toFixed(1)}`;
+            if (hT1) hT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
+            if (hT2) hT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
+        }
+        if (exitBtn) {
+            exitBtn.classList.remove('hidden');
+            if (posPnlSub) {
+                posPnlSub.textContent = `${sign}₹${Math.round(grossRs)} (${sign}${pts.toFixed(1)}p)`;
+                posPnlSub.style.color = pts >= 0 ? '#ffffff' : '#ffccd5';
+            }
+        }
     } else {
-        flashExecutionAlert('🎯 TARGET ACHIEVED', `Exited @ ₹${exitPx.toFixed(1)} (${sign}₹${pnl})`, 'success');
+        if (posBadge) {
+            posBadge.className = 'pos-badge flat';
+            posBadge.textContent = '⚠️ MANUAL FLAT (Click BUY MKT)';
+        }
+        if (posHud) posHud.classList.add('hidden');
+        if (exitBtn) exitBtn.classList.add('hidden');
     }
 
-    await fetchTradeState();
+    // Cumulative Manual Day PnL
+    const realizedPts = Replay.manualTrades.reduce((acc, tr) => acc + tr.pnlPts, 0);
+    const activePts = pos ? (candle.close - pos.entry_price) : 0;
+    const totalPts = realizedPts + activePts;
+    const totalTradesCount = Replay.manualTrades.length + (pos ? 1 : 0);
+    const totalCharges = totalTradesCount * 55;
+    const netCash = (totalPts * 65) - totalCharges;
+    const signCash = netCash >= 0 ? '+' : '';
+    const signPts = totalPts >= 0 ? '+' : '';
+
+    if (dayPnlEl && dayPnlPill) {
+        dayPnlEl.textContent = `${signCash}₹${Math.round(netCash).toLocaleString('en-IN')} (${signPts}${totalPts.toFixed(1)}p)`;
+        dayPnlPill.className = `stat-pill ${netCash > 0 ? 'pnl-positive' : (netCash < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+    }
 }
+
+function closeManualReplayPosition(exitPx, reason = 'MANUAL_EXIT') {
+    if (!Replay.manualPosition) return;
+    const pos = Replay.manualPosition;
+    const pts = Math.round((exitPx - pos.entry_price) * 100) / 100;
+    const grossRs = pts * pos.units;
+    const charges = 55;
+    const netCash = grossRs - charges;
+    const sign = pts >= 0 ? '+' : '';
+
+    const curCandle = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1] : null;
+    const exitTimeStr = curCandle ? new Date(curCandle.time * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '--';
+
+    Replay.manualTrades.push({
+        tradeNum: Replay.manualTrades.length + 1,
+        side: 'BUY',
+        entryTime: pos.entryTime,
+        entryPrice: pos.entry_price,
+        exitTime: exitTimeStr,
+        exitPrice: exitPx,
+        exitReason: reason,
+        pnlPts: pts,
+        grossRs: grossRs,
+        charges: charges,
+        netCash: netCash,
+        isWin: pts >= 0
+    });
+
+    Replay.manualPosition = null;
+    flashExecutionAlert(
+        pts >= 0 ? '🎯 MANUAL PROFIT LOCKED' : '🛑 MANUAL LOSS EXITED',
+        `${reason}: Exited @ ₹${exitPx.toFixed(1)} (${sign}${pts.toFixed(1)} pts | ${sign}₹${Math.round(netCash)} Net)`,
+        pts >= 0 ? 'success' : 'danger'
+    );
+    if (curCandle) evaluateManualReplayTrading(curCandle);
+}
+
+function openBacktestModal() {
+    const modal = document.getElementById('backtest-report-modal');
+    if (!modal) return;
+
+    const symEl = document.getElementById('bt-modal-symbol');
+    const subEl = document.getElementById('bt-modal-sub');
+    const kpiWin = document.getElementById('bt-kpi-winrate');
+    const kpiWl = document.getElementById('bt-kpi-wl');
+    const kpiNet = document.getElementById('bt-kpi-net-cash');
+    const kpiPts = document.getElementById('bt-kpi-pts');
+    const kpiGross = document.getElementById('bt-kpi-gross');
+    const kpiCharges = document.getElementById('bt-kpi-charges');
+    const kpiTrades = document.getElementById('bt-kpi-trades');
+    const kpiMode = document.getElementById('bt-kpi-mode');
+    const kpiCapture = document.getElementById('bt-kpi-capture');
+    const kpiGiveback = document.getElementById('bt-kpi-giveback');
+    const tableBody = document.getElementById('bt-table-body');
+
+    if (symEl) symEl.textContent = `${C.symbol || 'Option Contract'} — Backtest Scorecard`;
+    if (subEl) subEl.textContent = `Session: ${C.selectedSessionDate || 'Replay'} | Mode: ${Replay.mode === 'auto' ? '⚡ Auto-System Dependent' : '✍️ Manual Replay Practice'}`;
+    if (kpiMode) kpiMode.textContent = Replay.mode === 'auto' ? '⚡ Auto System' : '✍️ Manual Practice';
+
+    let tradesList = [];
+    let captureRatio = 0;
+    let giveBack = 0;
+
+    if (Replay.mode === 'auto') {
+        const de = C.dynamicExitLastResult;
+        if (de && de.trades) {
+            tradesList = de.trades.map(t => {
+                const grossRs = (t.pnlPts || 0) * 65;
+                const charges = 55;
+                const netCash = grossRs - charges;
+                return {
+                    num: t.tradeNum,
+                    side: 'BUY',
+                    entryTime: t.entryTime || '--',
+                    entryPrice: t.entryPrice,
+                    exitTime: t.exitTime || '--',
+                    exitPrice: t.exitPrice,
+                    exitReason: t.exitReason || t.reason || 'EXIT',
+                    pnlPts: t.pnlPts || 0,
+                    grossRs: grossRs,
+                    charges: charges,
+                    netCash: netCash,
+                    isWin: (t.pnlPts || 0) >= 0
+                };
+            });
+            if (de.summary) {
+                captureRatio = de.summary.captureRatio || 0;
+                giveBack = de.summary.giveBack || 0;
+            }
+        }
+    } else {
+        tradesList = Replay.manualTrades.map(t => ({
+            num: t.tradeNum,
+            side: t.side,
+            entryTime: t.entryTime,
+            entryPrice: t.entryPrice,
+            exitTime: t.exitTime,
+            exitPrice: t.exitPrice,
+            exitReason: t.exitReason,
+            pnlPts: t.pnlPts,
+            grossRs: t.grossRs,
+            charges: t.charges,
+            netCash: t.netCash,
+            isWin: t.pnlPts >= 0
+        }));
+    }
+
+    const totalTrades = tradesList.length;
+    const winTrades = tradesList.filter(t => t.isWin).length;
+    const lossTrades = totalTrades - winTrades;
+    const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
+    const totalPts = tradesList.reduce((acc, t) => acc + t.pnlPts, 0);
+    const totalGross = totalPts * 65;
+    const totalCharges = totalTrades * 55;
+    const totalNetCash = totalGross - totalCharges;
+
+    if (kpiWin) kpiWin.textContent = `${winRate.toFixed(0)}%`;
+    if (kpiWl) kpiWl.textContent = `${winTrades}W / ${lossTrades}L`;
+    if (kpiNet) {
+        const sign = totalNetCash >= 0 ? '+' : '';
+        kpiNet.textContent = `${sign}₹${Math.round(totalNetCash).toLocaleString('en-IN')}`;
+        kpiNet.className = `bt-kpi-val ${totalNetCash >= 0 ? 'positive' : 'negative'}`;
+    }
+    if (kpiPts) {
+        const sign = totalPts >= 0 ? '+' : '';
+        kpiPts.textContent = `${sign}${totalPts.toFixed(1)} pts`;
+    }
+    if (kpiGross) {
+        const sign = totalGross >= 0 ? '+' : '';
+        kpiGross.textContent = `${sign}₹${Math.round(totalGross).toLocaleString('en-IN')}`;
+    }
+    if (kpiCharges) kpiCharges.textContent = `-₹${totalCharges.toFixed(0)}`;
+    if (kpiTrades) kpiTrades.textContent = totalTrades;
+    if (kpiCapture) kpiCapture.textContent = `${captureRatio.toFixed(1)}%`;
+    if (kpiGiveback) kpiGiveback.textContent = `Giveback: ${giveBack.toFixed(1)}%`;
+
+    if (tableBody) {
+        if (tradesList.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #64748b; padding: 24px;">No trades executed yet. Step forward or click "⚡ Full Day" to compute backtest.</td></tr>`;
+        } else {
+            tableBody.innerHTML = tradesList.map(t => {
+                const signPts = t.pnlPts >= 0 ? '+' : '';
+                const signNet = t.netCash >= 0 ? '+' : '';
+                return `
+                    <tr>
+                        <td><strong>#${t.num}</strong></td>
+                        <td style="color: #34d399; font-weight: 700;">${t.side}</td>
+                        <td>${t.entryTime}</td>
+                        <td>₹${t.entryPrice.toFixed(2)}</td>
+                        <td>${t.exitTime}</td>
+                        <td>₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'}</td>
+                        <td style="font-size: 11px; color: #94a3b8;">${t.exitReason}</td>
+                        <td style="color: ${t.pnlPts >= 0 ? '#34d399' : '#f87171'}; font-weight: 700;">${signPts}${t.pnlPts.toFixed(2)}</td>
+                        <td style="color: #f59e0b;">-₹${t.charges}</td>
+                        <td style="color: ${t.netCash >= 0 ? '#34d399' : '#f87171'}; font-weight: 800;">${signNet}₹${Math.round(t.netCash).toLocaleString('en-IN')}</td>
+                        <td><span class="${t.isWin ? 'bt-pill-win' : 'bt-pill-loss'}">${t.isWin ? 'WIN' : 'LOSS'}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeBacktestModal() {
+    const modal = document.getElementById('backtest-report-modal');
+    if (modal) modal.classList.add('hidden');
+}
+window.openBacktestModal = openBacktestModal;
+window.closeBacktestModal = closeBacktestModal;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ── CONTRACT TRADING ENGINE TERMINAL (ON-CHART & RISK CONTROLS) ──────────────
@@ -5305,7 +5566,42 @@ function initTradingTerminal() {
                 flashExecutionAlert('⚠️ NO PRICE', 'Waiting for live contract price...', 'warning');
                 return;
             }
-            // 1-Click Pure Market Buy: No automatic SL or Target forced until user sets one
+
+            // In Replay Mode: Handle Auto vs Manual execution
+            if (C.replayMode || Replay.active) {
+                if (Replay.mode === 'auto') {
+                    flashExecutionAlert('⚡ AUTO BACKTEST MODE', 'System executes trades automatically on SMF signals. Switch to "✍️ Manual" on the replay dock to place manual orders.', 'info');
+                    return;
+                } else {
+                    if (Replay.manualPosition) {
+                        flashExecutionAlert('⚠️ POSITION ACTIVE', 'You already have an open manual position. Click EXIT to close it first.', 'warning');
+                        return;
+                    }
+                    const curCandle = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1] : null;
+                    if (!curCandle) return;
+                    const smf = C.smfLastResult;
+                    const curAtr = (smf && smf.atr && smf.atr.length > 0) ? smf.atr[smf.atr.length - 1] : 3.0;
+                    const entryPrice = curCandle.close;
+                    const entryTimeStr = new Date(curCandle.time * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+                    Replay.manualPosition = {
+                        entryPrice: entryPrice,
+                        entryTime: entryTimeStr,
+                        lots: C.tradingLots || 1,
+                        units: (C.tradingLots || 1) * 65,
+                        sl: Math.round((entryPrice - curAtr * 1.5) * 20) / 20,
+                        current_sl: Math.round((entryPrice - curAtr * 1.5) * 20) / 20,
+                        target1: Math.round((entryPrice + Math.max(8.0, curAtr * 1.5)) * 20) / 20,
+                        target2: Math.round((entryPrice + curAtr * 3.0) * 20) / 20,
+                        be_locked: false
+                    };
+                    flashExecutionAlert('⚡ MANUAL BUY FILLED', `Bought 1 Lot @ ₹${entryPrice.toFixed(1)} (SL ₹${Replay.manualPosition.sl} | T1 ₹${Replay.manualPosition.target1})`, 'success');
+                    evaluateManualReplayTrading(curCandle);
+                    return;
+                }
+            }
+
+            // 1-Click Pure Market Buy for Live / Paper:
             const sl = null;
             const t1 = null;
             const t2 = null;
@@ -5371,6 +5667,18 @@ function initTradingTerminal() {
     if (btnExit) {
         btnExit.addEventListener('click', async () => {
             const curPx = C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : null;
+
+            // In Replay Mode:
+            if (C.replayMode || Replay.active) {
+                if (Replay.mode === 'manual' && Replay.manualPosition) {
+                    if (curPx) closeManualReplayPosition(curPx, 'MANUAL_QUICK_EXIT');
+                    return;
+                } else if (Replay.mode === 'auto') {
+                    flashExecutionAlert('⚡ AUTO BACKTEST MODE', 'In auto backtest mode, the system automatically manages trade exits.', 'info');
+                    return;
+                }
+            }
+
             try {
                 const res = await fetch('/api/trade/exit', {
                     method: 'POST',
