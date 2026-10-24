@@ -2308,12 +2308,6 @@ function applySMFCloud(agg) {
     // Update horizontal target projections & header target badge
     updateTargetPriceLines(smf.latestTradeSignal, agg[agg.length - 1]?.close);
 
-    // Combine markers from SMF Cloud based on active toggles
-    const allMarkers = [];
-    if (C.smfEnabled && smf.smfMarkers && smf.smfMarkers.length > 0) {
-        allMarkers.push(...smf.smfMarkers);
-    }
-
     // ── SMF Dynamic Exit & Chandelier Trailing Engine Execution ──────────────
     let deResult = null;
     if (C.dynamicExitEnabled) {
@@ -2326,15 +2320,22 @@ function applySMFCloud(agg) {
             if (C.dynamicLadderSeries && deResult.ladderPoints) {
                 C.dynamicLadderSeries.setData(deResult.ladderPoints);
             }
-            if (deResult.markers && deResult.markers.length > 0) {
-                allMarkers.push(...deResult.markers);
-            }
         }
     } else {
         if (C.dynamicTrailSeries) C.dynamicTrailSeries.setData([]);
         if (C.dynamicLadderSeries) C.dynamicLadderSeries.setData([]);
     }
     updateDynamicExitHUD(deResult, agg);
+
+    // Combine markers: When Dynamic Exit is enabled, deResult.markers is the SINGLE SOURCE OF TRUTH
+    // for trade entries, targets, and exits. This prevents duplicate BUY markers and prevents ghost EXIT
+    // markers from appearing after a trade was already stopped out!
+    const allMarkers = [];
+    if (C.dynamicExitEnabled && deResult && deResult.markers && deResult.markers.length > 0) {
+        allMarkers.push(...deResult.markers);
+    } else if (C.smfEnabled && smf.smfMarkers && smf.smfMarkers.length > 0) {
+        allMarkers.push(...smf.smfMarkers);
+    }
 
     C.allRawSignalMarkers = allMarkers;
     try {
@@ -2563,9 +2564,10 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     exitPrice = Math.min(t.catastrophicStop, c.open);
                 } else {
                     const hardStop = Math.max(t.initialStop, t.ladderFloor);
-                    if (c.close < hardStop) {
+                    if (c.low <= hardStop) {
                         exitReason = (hardStop > t.initialStop) ? 'LADDER_FLOOR' : 'INITIAL_STOP';
-                        exitPrice = c.close;
+                        // Stop loss order triggers at the stop price (or gap open if opened below stop)
+                        exitPrice = (c.open < hardStop) ? roundTick(c.open - slip(c.open)) : roundTick(hardStop - slip(hardStop));
                     }
                 }
 
@@ -2790,7 +2792,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
 
                 if (reType) {
                     const entryP = roundTick(c.close + slip(c.close));
-                    const rawStop = Math.max(bMain[i] - 0.35 * atr[i], entryP - 1.5 * atr[i]);
+                    const rawStop = bMain[i] - 0.35 * atr[i];
                     const rawR = entryP - rawStop;
                     const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
                     const initStop = roundTick(entryP - clampedR);
@@ -2854,7 +2856,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
             if (inTimeWindow && (!needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
-                const rawStop = Math.max(bMain[i] - 0.35 * atr[i], entryP - 1.5 * atr[i]);
+                const rawStop = bMain[i] - 0.35 * atr[i];
                 const rawR = entryP - rawStop;
                 const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
                 const initStop = roundTick(entryP - clampedR);
