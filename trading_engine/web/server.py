@@ -268,21 +268,28 @@ class EngineState:
 state = EngineState()
 
 
-def build_option_chain_data(spot: float) -> Dict[str, Any]:
-    """Generates real-time 11-strike option chain centered around dynamic ATM."""
-    atm_strike = int(round(spot / 50.0) * 50)
-    strikes = [atm_strike + (i * 50) for i in range(-5, 6)]
+def build_option_chain_data(spot: float, underlying: str = "NIFTY") -> Dict[str, Any]:
+    """Generates real-time 11-strike option chain centered around dynamic ATM for the requested index."""
+    try:
+        from trading_engine.config import get_index_spec
+    except ImportError:
+        from config import get_index_spec
+
+    spec = get_index_spec(underlying)
+    gap = float(spec.get("strike_gap", 50))
+    atm_strike = int(round(spot / gap) * gap)
+    strikes = [atm_strike + int(i * gap) for i in range(-5, 6)]
     chain_rows = []
     for s in strikes:
         dist = s - spot
         call_iv = round(12.5 + abs(dist) * 0.004, 2)
-        call_delta = round(max(0.05, min(0.95, 0.50 - (dist / 400.0))), 2)
-        call_ltp = round(max(5.0, 160.0 - (dist * 0.55)), 2)
+        call_delta = round(max(0.05, min(0.95, 0.50 - (dist / (gap * 8.0)))), 2)
+        call_ltp = round(max(5.0, (gap * 3.2) - (dist * 0.55)), 2)
         call_oi = int(max(1000, 45000 - abs(dist) * 45))
 
         put_iv = round(13.2 + abs(dist) * 0.004, 2)
-        put_delta = round(max(-0.95, min(-0.05, -0.50 - (dist / 400.0))), 2)
-        put_ltp = round(max(5.0, 160.0 + (dist * 0.55)), 2)
+        put_delta = round(max(-0.95, min(-0.05, -0.50 - (dist / (gap * 8.0)))), 2)
+        put_ltp = round(max(5.0, (gap * 3.2) + (dist * 0.55)), 2)
         put_oi = int(max(1000, 42000 - abs(dist) * 40))
 
         chain_rows.append({
@@ -298,7 +305,7 @@ def build_option_chain_data(spot: float) -> Dict[str, Any]:
             "put_oi": put_oi,
         })
     return {
-        "underlying": "NIFTY 50",
+        "underlying": spec.get("display_name", underlying),
         "spot": round(spot, 2),
         "atm_strike": atm_strike,
         "chain": chain_rows
@@ -941,38 +948,45 @@ async def get_candles(limit: int = Query(375, ge=10, le=1000), date: Optional[st
 
 
 @app.get("/api/option_chain")
-async def get_option_chain(date: Optional[str] = Query(None)):
+async def get_option_chain(date: Optional[str] = Query(None), underlying: str = Query("NIFTY")):
     """Returns option chain matrix with strike grid around ATM for the specified date or current spot."""
-    spot = state.current_spot or 22800.0
+    try:
+        from trading_engine.config import get_index_spec
+    except ImportError:
+        from config import get_index_spec
+
+    spec = get_index_spec(underlying)
+    fut_symbol = spec.get("kite_fut_prefix", "NIFTY") + "-I"
+    spot = state.current_spot or (80000.0 if "SENSEX" in underlying.upper() else 22800.0)
     if date:
         target_date = date.strip()
         try:
             q = text("""
                 SELECT close FROM minute_candles 
-                WHERE symbol = 'NIFTY-I'
+                WHERE (symbol = :fut OR symbol = :sym OR symbol = :sym50)
                   AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :target_date
                 ORDER BY timestamp DESC 
                 LIMIT 1
             """)
             with state.db_engine.connect() as conn:
-                row = conn.execute(q, {"target_date": target_date}).fetchone()
+                row = conn.execute(q, {"fut": fut_symbol, "sym": underlying, "sym50": f"{underlying} 50", "target_date": target_date}).fetchone()
                 if row and row[0]:
                     spot = float(row[0])
                 else:
-                    # If requested date has no candles yet (e.g. today pre-market), get previous close
+                    # If requested date has no candles yet, get previous close
                     q_prev = text("""
                         SELECT close FROM minute_candles 
-                        WHERE symbol = 'NIFTY-I'
+                        WHERE (symbol = :fut OR symbol = :sym OR symbol = :sym50)
                         ORDER BY timestamp DESC 
                         LIMIT 1
                     """)
-                    row_prev = conn.execute(q_prev).fetchone()
+                    row_prev = conn.execute(q_prev, {"fut": fut_symbol, "sym": underlying, "sym50": f"{underlying} 50"}).fetchone()
                     if row_prev and row_prev[0]:
                         spot = float(row_prev[0])
         except Exception as e:
             print(f"Error querying spot for option chain: {e}")
 
-    return build_option_chain_data(spot)
+    return build_option_chain_data(spot, underlying=underlying)
 
 
 @app.get("/api/paper/trades")

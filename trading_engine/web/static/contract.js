@@ -697,6 +697,16 @@ function initOptionChain() {
             fetchOptionChain();
         });
     }
+
+    const undSel = document.getElementById('oc-underlying-select');
+    if (undSel) {
+        undSel.addEventListener('change', async (e) => {
+            C.underlying = e.target.value;
+            C.selectedExpiry = null;
+            await initExpirySelector();
+            await fetchOptionChain();
+        });
+    }
 }
 
 async function fetchOptionChain() {

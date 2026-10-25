@@ -248,7 +248,13 @@
             <div class="oc-header">
                 <div class="oc-title-block">
                     <span class="oc-title">⚡ Option Chain</span>
-                    <span id="oc-underlying-badge" class="oc-pill">NIFTY</span>
+                    <select id="oc-underlying-select" class="oc-select" style="font-weight: 700; margin-left: 6px; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08); color: var(--gold, #f59e0b); border: 1px solid rgba(255,255,255,0.15);">
+                        <option value="NIFTY" selected>NIFTY 50</option>
+                        <option value="BANKNIFTY">BANK NIFTY</option>
+                        <option value="SENSEX">SENSEX</option>
+                        <option value="FINNIFTY">FINNIFTY</option>
+                        <option value="MIDCPNIFTY">MIDCAP NIFTY</option>
+                    </select>
                     <span id="oc-spot-display" class="oc-spot-text">Spot: <strong id="oc-spot-val">--</strong></span>
                 </div>
                 <div class="oc-controls">

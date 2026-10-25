@@ -29,19 +29,29 @@ class LiveAdapter(BaseAdapter):
         print("LiveAdapter: Initialized. Institutional Order Slicer READY.", flush=True)
         print(f"  NSE Statutory Freeze Limit: {self.cfg.freeze_lots} lots | Slicing Delay: {getattr(self.cfg, 'slice_delay_ms', 250)}ms", flush=True)
 
-    def open_position(self, symbol: str, side: str, price: float, atr: float, timestamp: Any, is_sar: bool = False):
+        try:
+            from ..config import get_index_spec
+        except ImportError:
+            from config import get_index_spec
+
+        spec = get_index_spec(symbol)
+        lot_size = spec.get("lot_size", self.cfg.lot_size)
+        freeze_lots = spec.get("freeze_lots", self.cfg.freeze_lots)
+        exchange = spec.get("exchange_code", "NFO")
+        strike_step = float(spec.get("strike_gap", 50.0))
+
         # 1. Position Sizing: Compounding 7% risk
         stop_dist_pts = self.cfg.stop_atr_mult * atr
         opt_sl_pts = stop_dist_pts * 0.35 + (self.cfg.slippage_per_side * 2)
-        risk_per_lot = opt_sl_pts * self.cfg.lot_size
+        risk_per_lot = opt_sl_pts * lot_size
         est_premium = max(80.0, atr * 5.0)
 
         risk_budget = self.capital * self.cfg.risk_per_trade_pct
         max_lots_by_risk = int(risk_budget // risk_per_lot) if risk_per_lot > 0 else 0
-        max_lots_by_capital = int(self.capital // (est_premium * self.cfg.lot_size))
+        max_lots_by_capital = int(self.capital // (est_premium * lot_size))
 
         n_lots = max(1, min(max_lots_by_risk, max_lots_by_capital, self.cfg.max_lots))
-        units = n_lots * self.cfg.lot_size
+        units = n_lots * lot_size
 
         entry_dt = timestamp if isinstance(timestamp, datetime) else datetime.now()
 
@@ -51,11 +61,14 @@ class LiveAdapter(BaseAdapter):
             side=side,
             base_option_price=est_premium,
             spot_price=price,
-            entry_time=entry_dt
+            entry_time=entry_dt,
+            strike_step=strike_step,
+            freeze_lots=freeze_lots,
+            lot_size=lot_size,
         )
 
         print("\n" + "=" * 80)
-        print(f"  [LIVE ORDER DISPATCHER] Initiating Parent Order: BUY {side} {n_lots:,} lots ({units:,} units)")
+        print(f"  [LIVE ORDER DISPATCHER] Initiating Parent Order ({spec.get('display_name', symbol)}): BUY {side} {n_lots:,} lots ({units:,} units) via {exchange}")
         print("=" * 80)
         print(self.slicer.format_execution_log(report))
 
@@ -66,7 +79,7 @@ class LiveAdapter(BaseAdapter):
                 try:
                     order_id = self.broker.place_order(
                         variety="regular",
-                        exchange="NFO",
+                        exchange=exchange,
                         tradingsymbol=s.trading_symbol,
                         transaction_type="BUY",
                         quantity=s.units,

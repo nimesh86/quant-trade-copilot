@@ -18,6 +18,10 @@ STOCK_CODE_MAP = {
     "FINNIFTY": "NIFFIN",
     "NIFTY FIN SERVICE": "NIFFIN",
     "MIDCPNIFTY": "NIFMID",
+    "SENSEX": "BSX",
+    "BSX": "BSX",
+    "BANKEX": "BKX",
+    "BKX": "BKX",
 }
 
 # Reverse mapping: Breeze Stock Code -> Canonical Underlying
@@ -26,6 +30,8 @@ REVERSE_STOCK_CODE_MAP = {
     "CNXBAN": "BANKNIFTY",
     "NIFFIN": "FINNIFTY",
     "NIFMID": "MIDCPNIFTY",
+    "BSX": "SENSEX",
+    "BKX": "BANKEX",
 }
 
 MONTH_MAP = {
@@ -33,20 +39,35 @@ MONTH_MAP = {
     "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12
 }
 
+KITE_MONTH_CHAR_MAP = {
+    "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6,
+    "7": 7, "8": 8, "9": 9, "O": 10, "N": 11, "D": 12
+}
+
 MONTH_NUM_TO_NAME = {v: k for k, v in MONTH_MAP.items()}
+
+
+def _get_exchange_for_underlying(underlying: str, product_type: str = "options") -> str:
+    """Returns correct exchange (BFO/BSE for BSE underlyings, NFO/NSE for NSE underlyings)."""
+    und = underlying.strip().upper()
+    is_bse = und in ("SENSEX", "BSX", "BANKEX", "BKX")
+    if product_type == "cash":
+        return "BSE" if is_bse else "NSE"
+    return "BFO" if is_bse else "NFO"
 
 
 def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
     """
-    Parses a standard NSE option trading symbol.
+    Parses a standard NSE/BSE option or futures trading symbol.
     Examples:
       - NIFTY26OCT22500CE -> Underlying: NIFTY, Year: 2026, Month: OCT, Strike: 22500, Type: CE
+      - SENSEX26OCT79500CE -> Underlying: SENSEX, Year: 2026, Month: OCT, Strike: 79500, Type: CE, Exchange: BFO
       - BANKNIFTY24DEC48000PE -> Underlying: BANKNIFTY, Year: 2024, Month: DEC, Strike: 48000, Type: PE
       - NIFTY24O2422500CE -> Weekly option with single letter month code
     """
     clean_sym = symbol.strip().upper()
 
-    # Pattern 1: Standard Monthly / Dated (e.g. NIFTY26OCT22500CE or NIFTY24OCT3122500CE)
+    # Pattern 1: Standard Monthly / Dated 3-char month (e.g. NIFTY26OCT22500CE or SENSEX26OCT79500CE)
     m = re.match(r"^([A-Z]+)(\d{2})([A-Z]{3})(\d+)(CE|PE)$", clean_sym)
     if m:
         underlying = m.group(1)
@@ -73,6 +94,7 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
 
         right = "Call" if opt_type == "CE" else "Put"
         breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "options")
 
         return {
             "canonical_symbol": clean_sym,
@@ -83,10 +105,76 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "right": right,
             "expiry_date": exp_date,
             "product_type": "options",
-            "exchange_code": "NFO"
+            "exchange_code": exchange_code
         }
 
-    # Pattern 2: Futures (e.g. NIFTY26OCTFUT)
+    # Pattern 2: Kite Weekly with single-char month [1-9OND] (e.g. NIFTY26O2424500CE or SENSEX26O2479500CE)
+    m_weekly = re.match(r"^([A-Z]+)(\d{2})([1-9OND])(\d{2})(\d+)(CE|PE)$", clean_sym)
+    if m_weekly:
+        underlying = m_weekly.group(1)
+        year_short = int(m_weekly.group(2))
+        month_char = m_weekly.group(3)
+        day_num = int(m_weekly.group(4))
+        strike = float(m_weekly.group(5))
+        opt_type = m_weekly.group(6)
+
+        year_full = 2000 + year_short
+        month_num = KITE_MONTH_CHAR_MAP.get(month_char, 1)
+
+        try:
+            exp_date = datetime(year_full, month_num, min(day_num, 31))
+        except Exception:
+            exp_date = datetime(year_full, month_num, 28)
+
+        right = "Call" if opt_type == "CE" else "Put"
+        breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "options")
+
+        return {
+            "canonical_symbol": clean_sym,
+            "underlying": underlying,
+            "breeze_stock_code": breeze_code,
+            "strike_price": int(strike) if strike.is_integer() else strike,
+            "option_type": opt_type,
+            "right": right,
+            "expiry_date": exp_date,
+            "product_type": "options",
+            "exchange_code": exchange_code
+        }
+
+    # Pattern 3: Standard 6-digit YYMMDD date code (e.g. NIFTY26042424500CE)
+    m_6d = re.match(r"^([A-Z]+)(\d{2})(\d{2})(\d{2})(\d+)(CE|PE)$", clean_sym)
+    if m_6d:
+        underlying = m_6d.group(1)
+        year_short = int(m_6d.group(2))
+        month_num = int(m_6d.group(3))
+        day_num = int(m_6d.group(4))
+        strike = float(m_6d.group(5))
+        opt_type = m_6d.group(6)
+
+        year_full = 2000 + year_short
+        try:
+            exp_date = datetime(year_full, max(1, min(12, month_num)), min(day_num, 31))
+        except Exception:
+            exp_date = datetime(year_full, 1, 28)
+
+        right = "Call" if opt_type == "CE" else "Put"
+        breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "options")
+
+        return {
+            "canonical_symbol": clean_sym,
+            "underlying": underlying,
+            "breeze_stock_code": breeze_code,
+            "strike_price": int(strike) if strike.is_integer() else strike,
+            "option_type": opt_type,
+            "right": right,
+            "expiry_date": exp_date,
+            "product_type": "options",
+            "exchange_code": exchange_code
+        }
+
+    # Pattern 4: Futures (e.g. NIFTY26OCTFUT, SENSEX26OCTFUT)
     m_fut = re.match(r"^([A-Z]+)(\d{2})([A-Z]{3})FUT$", clean_sym)
     if m_fut:
         underlying = m_fut.group(1)
@@ -97,6 +185,7 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
         exp_date = datetime(year_full, month_num, 28)
 
         breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "futures")
         return {
             "canonical_symbol": clean_sym,
             "underlying": underlying,
@@ -106,22 +195,32 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "right": "Others",
             "expiry_date": exp_date,
             "product_type": "futures",
-            "exchange_code": "NFO"
+            "exchange_code": exchange_code
         }
 
-    # Fallback for Spot Index (e.g. NIFTY 50, NIFTY)
-    if "NIFTY" in clean_sym and not any(clean_sym.endswith(x) for x in ["CE", "PE", "FUT"]):
-        return {
-            "canonical_symbol": clean_sym,
-            "underlying": "NIFTY",
-            "breeze_stock_code": "NIFTY",
-            "strike_price": 0,
-            "option_type": "SPOT",
-            "right": "Others",
-            "expiry_date": None,
-            "product_type": "cash",
-            "exchange_code": "NSE"
-        }
+    # Pattern 5: Spot Index (e.g. NIFTY 50, NIFTY, BANKNIFTY, SENSEX)
+    for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSX", "FINNIFTY", "MIDCPNIFTY"):
+        if clean_sym == spot_name or clean_sym.startswith(spot_name):
+            und = "SENSEX" if "SENSEX" in spot_name or "BSX" in spot_name else (
+                "BANKNIFTY" if "BANK" in spot_name else (
+                    "FINNIFTY" if "FIN" in spot_name else (
+                        "MIDCPNIFTY" if "MID" in spot_name else "NIFTY"
+                    )
+                )
+            )
+            breeze_code = STOCK_CODE_MAP.get(und, und)
+            exchange_code = _get_exchange_for_underlying(und, "cash")
+            return {
+                "canonical_symbol": clean_sym,
+                "underlying": und,
+                "breeze_stock_code": breeze_code,
+                "strike_price": 0,
+                "option_type": "SPOT",
+                "right": "Others",
+                "expiry_date": None,
+                "product_type": "cash",
+                "exchange_code": exchange_code
+            }
 
     return None
 

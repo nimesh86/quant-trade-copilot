@@ -64,6 +64,27 @@ def get_all_bus_prices() -> Dict[str, Dict]:
         return dict(_live_price_bus)
 
 
+# ── Active Trade Watchdog Registry ──────────────────────────────────────────
+_pinned_trade_symbols: set = set()
+
+
+def pin_trade_symbol(symbol: str):
+    """Pins a contract symbol to the persistent live price watchdog until trade closure."""
+    if symbol:
+        _pinned_trade_symbols.add(symbol.strip().upper())
+
+
+def unpin_trade_symbol(symbol: str):
+    """Unpins a contract symbol once trade is closed."""
+    if symbol:
+        _pinned_trade_symbols.discard(symbol.strip().upper())
+
+
+def get_pinned_trade_symbols() -> list:
+    """Returns list of currently active pinned trade symbols."""
+    return list(_pinned_trade_symbols)
+
+
 def _get_ist_now() -> datetime:
     try:
         from zoneinfo import ZoneInfo
@@ -325,9 +346,16 @@ def _load_instruments() -> List[Dict]:
         if kite:
             nfo = kite.instruments("NFO")
             nse = kite.instruments("NSE")
-            _instruments_cache = nfo + nse
+            bfo = []
+            bse = []
+            try:
+                bfo = kite.instruments("BFO")
+                bse = kite.instruments("BSE")
+            except Exception as _e_bfo:
+                print(f"ContractDataManager: Note loading BFO/BSE from Kite: {_e_bfo}", flush=True)
+            _instruments_cache = nfo + nse + bfo + bse
             _instruments_ts = now
-            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from Kite client.", flush=True)
+            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from Kite client (NFO+NSE+BFO+BSE).", flush=True)
             _sync_instruments_to_symbol_master(_instruments_cache)
             return _instruments_cache
     except Exception as e:
@@ -336,10 +364,11 @@ def _load_instruments() -> List[Dict]:
     # 2. Fallback to public Zerodha Kite instruments endpoint (zero auth needed)
     try:
         nfo = _fetch_public_instruments("NFO")
-        if nfo:
-            _instruments_cache = nfo
+        bfo = _fetch_public_instruments("BFO")
+        if nfo or bfo:
+            _instruments_cache = (nfo or []) + (bfo or [])
             _instruments_ts = now
-            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from public NFO endpoint.", flush=True)
+            print(f"ContractDataManager: Loaded {len(_instruments_cache)} instruments from public NFO+BFO endpoints.", flush=True)
             _sync_instruments_to_symbol_master(_instruments_cache)
             return _instruments_cache
     except Exception as e:
@@ -419,9 +448,15 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
     today = _get_ist_now().date()
     und_upper = underlying.strip().upper()
     
+    try:
+        from trading_engine.config import get_index_spec
+    except ImportError:
+        from config import get_index_spec
+
+    spec = get_index_spec(und_upper)
     exps = set()
     for i in insts:
-        if i.get("name") == und_upper and i.get("segment") == "NFO-OPT":
+        if (i.get("name") == und_upper or i.get("name") == spec.get("breeze_stock_code")) and i.get("segment") in ("NFO-OPT", "BFO-OPT"):
             exp = i.get("expiry")
             if exp and exp >= today:
                 exps.add(exp)
@@ -546,13 +581,21 @@ def get_option_chain_data(
     else:
         live_prices = get_all_live_prices()
 
-    step = 50 if und_upper == "NIFTY" else (100 if "BANK" in und_upper else 50)
+    try:
+        from trading_engine.config import get_index_spec
+    except ImportError:
+        from config import get_index_spec
+
+    spec = get_index_spec(und_upper)
+    step = spec.get("strike_gap", 50)
     atm_strike = int(round(spot_price / step) * step)
 
-    # Filter instruments for this underlying and expiry
+    # Filter instruments for this underlying and expiry across both NFO-OPT (NSE) and BFO-OPT (BSE)
     opts = [
         i for i in insts
-        if i.get("name") == und_upper and i.get("segment") == "NFO-OPT" and str(i.get("expiry")) == expiry
+        if (i.get("name") == und_upper or i.get("name") == spec.get("breeze_stock_code"))
+        and i.get("segment") in ("NFO-OPT", "BFO-OPT")
+        and str(i.get("expiry")) == expiry
     ]
 
     strike_map: Dict[float, Dict] = {}

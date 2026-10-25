@@ -1584,9 +1584,23 @@ kbd {
         align-items: center !important;
         justify-content: space-between !important;
         width: 100% !important;
+        flex-wrap: wrap !important;
+        gap: 6px !important;
     }
     .oc-title {
         font-size: 13px !important;
+        font-weight: 800 !important;
+    }
+    #oc-underlying-select {
+        height: 26px !important;
+        font-size: 11px !important;
+        padding: 1px 6px !important;
+        margin: 0 !important;
+        flex-shrink: 0 !important;
+    }
+    .oc-spot-text {
+        font-size: 11px !important;
+        white-space: nowrap !important;
     }
 
     .oc-controls {

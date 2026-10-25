@@ -60,3 +60,90 @@ class EngineConfig:
     strike_dispersion: bool = True     # Disperse across ATM/ITM/OTM if order > 300 lots to minimize market impact
     slice_delay_ms: int = 250          # 250ms interval between sequential child order submissions
 
+
+INDEX_SPEC_REGISTRY = {
+    "NIFTY": {
+        "display_name": "NIFTY 50",
+        "kite_spot": "NSE:NIFTY 50",
+        "kite_fut_prefix": "NIFTY",
+        "kite_token": 256265,
+        "breeze_stock_code": "NIFTY",
+        "exchange_code": "NFO",
+        "cash_exchange": "NSE",
+        "strike_gap": 50,
+        "lot_size": 65,
+        "freeze_limit_units": 1800,
+        "freeze_lots": 27,
+    },
+    "BANKNIFTY": {
+        "display_name": "BANK NIFTY",
+        "kite_spot": "NSE:NIFTY BANK",
+        "kite_fut_prefix": "BANKNIFTY",
+        "kite_token": 260105,
+        "breeze_stock_code": "CNXBAN",
+        "exchange_code": "NFO",
+        "cash_exchange": "NSE",
+        "strike_gap": 100,
+        "lot_size": 15,
+        "freeze_limit_units": 900,
+        "freeze_lots": 60,
+    },
+    "SENSEX": {
+        "display_name": "SENSEX",
+        "kite_spot": "BSE:SENSEX",
+        "kite_fut_prefix": "SENSEX",
+        "kite_token": 265,
+        "breeze_stock_code": "BSX",
+        "exchange_code": "BFO",
+        "cash_exchange": "BSE",
+        "strike_gap": 100,
+        "lot_size": 10,
+        "freeze_limit_units": 1000,
+        "freeze_lots": 100,
+    },
+    "FINNIFTY": {
+        "display_name": "FINNIFTY",
+        "kite_spot": "NSE:NIFTY FIN SERVICE",
+        "kite_fut_prefix": "FINNIFTY",
+        "kite_token": 257801,
+        "breeze_stock_code": "NIFFIN",
+        "exchange_code": "NFO",
+        "cash_exchange": "NSE",
+        "strike_gap": 50,
+        "lot_size": 25,
+        "freeze_limit_units": 1800,
+        "freeze_lots": 72,
+    },
+    "MIDCPNIFTY": {
+        "display_name": "MIDCAP NIFTY",
+        "kite_spot": "NSE:NIFTY MID SELECT",
+        "kite_fut_prefix": "MIDCPNIFTY",
+        "kite_token": 288009,
+        "breeze_stock_code": "NIFMID",
+        "exchange_code": "NFO",
+        "cash_exchange": "NSE",
+        "strike_gap": 25,
+        "lot_size": 75,
+        "freeze_limit_units": 4200,
+        "freeze_lots": 56,
+    },
+}
+
+
+def get_index_spec(underlying: str) -> dict:
+    """Returns index specifications by underlying symbol with safe fallback to NIFTY."""
+    if not underlying:
+        return INDEX_SPEC_REGISTRY["NIFTY"]
+    u = underlying.strip().upper()
+    if u in INDEX_SPEC_REGISTRY:
+        return INDEX_SPEC_REGISTRY[u]
+    if "BANK" in u:
+        return INDEX_SPEC_REGISTRY["BANKNIFTY"]
+    if "SENSEX" in u or "BSX" in u:
+        return INDEX_SPEC_REGISTRY["SENSEX"]
+    if "FIN" in u:
+        return INDEX_SPEC_REGISTRY["FINNIFTY"]
+    if "MID" in u:
+        return INDEX_SPEC_REGISTRY["MIDCPNIFTY"]
+    return INDEX_SPEC_REGISTRY["NIFTY"]
+

@@ -67,12 +67,16 @@ class OrderSlicer:
         base_option_price: float,
         spot_price: float,
         entry_time: datetime,
-        strike_step: float = 50.0
+        strike_step: float = 50.0,
+        freeze_lots: Optional[int] = None,
+        lot_size: Optional[int] = None,
     ) -> SlicedExecutionReport:
         """
         Breaks down a large parent order (up to 1,000+ lots) into statutory
         freeze compliant child orders. Uses strike dispersion if enabled and lots > 300.
         """
+        active_freeze = freeze_lots or self.freeze_lots
+        active_lot_size = lot_size or self.lot_size
         atm_strike = self.calculate_atm_strike(spot_price, strike_step)
 
         # Determine strike allocations
@@ -111,8 +115,8 @@ class OrderSlicer:
             strike_base_px = max(15.0, base_option_price - (strike_diff * 0.50))
 
             while rem_lots > 0:
-                take_lots = min(rem_lots, self.freeze_lots)
-                units = take_lots * self.lot_size
+                take_lots = min(rem_lots, active_freeze)
+                units = take_lots * active_lot_size
                 rem_lots -= take_lots
 
                 # Market depth impact:
