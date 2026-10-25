@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#070b14" />
     <title>Parallel Option Stations (CE + PE) — AI Trader</title>
     <meta name="description" content="Parallel live contract stations for CALL and PUT options with Smart Money Flow Cloud and synchronized backtesting." />
-    <link rel="stylesheet" href="/static/contract.css?v=20261025_1645" />
+    <link rel="stylesheet" href="/static/contract.css?v=20261025_2145" />
 </head>
 <body>
 <div id="page-shell">
@@ -95,7 +95,7 @@
                         <span id="ce-ltp" class="station-ltp">₹--</span>
                         <span id="ce-chg" class="station-chg">--</span>
                     </div>
-                    <div class="station-toolbar">
+                    <div id="ce-toolbar" class="station-toolbar">
                         <div class="lot-stepper" title="Order Lot Size">
                             <button id="ce-lot-minus" class="lot-btn">-</button>
                             <span id="ce-lot-val" class="lot-num">1</span>
@@ -177,7 +177,7 @@
                         <span id="pe-ltp" class="station-ltp">₹--</span>
                         <span id="pe-chg" class="station-chg">--</span>
                     </div>
-                    <div class="station-toolbar">
+                    <div id="pe-toolbar" class="station-toolbar">
                         <div class="lot-stepper" title="Order Lot Size">
                             <button id="pe-lot-minus" class="lot-btn">-</button>
                             <span id="pe-lot-val" class="lot-num">1</span>
@@ -437,7 +437,7 @@
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
 <!-- Parallel Option Stations Controller -->
-<script src="/static/contract.js?v=20261025_1645"></script>
+<script src="/static/contract.js?v=20261025_2145"></script>
 
 </body>
 </html>

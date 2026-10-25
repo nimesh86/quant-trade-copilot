@@ -29,6 +29,7 @@ class ContractTradingEngine:
         
         # Positions and Orders
         self.active_position: Optional[Dict[str, Any]] = None
+        self.active_positions: Dict[str, Dict[str, Any]] = {}
         self.pending_orders: List[Dict[str, Any]] = []
         self.trade_history: List[Dict[str, Any]] = []
         
@@ -152,14 +153,15 @@ class ContractTradingEngine:
 
     def _fill_order(self, order_data: Dict[str, Any], fill_price: float) -> Dict[str, Any]:
         """Fills an order into an active position."""
-        # If position already open in same symbol, average/add lots or close previous
-        if self.active_position is not None:
-            # If opposite side, close existing position
-            if self.active_position["side"] != order_data["side"]:
-                self.close_position(reason="REVERSE_ORDER", exit_price=fill_price)
+        sym = order_data["symbol"]
+        existing_pos = self.active_positions.get(sym) or (self.active_position if (self.active_position and self.active_position.get("symbol") == sym) else None)
+        
+        # If position already open in same symbol, average/add lots or close previous if opposite side
+        if existing_pos is not None:
+            if existing_pos["side"] != order_data["side"]:
+                self.close_position(reason="REVERSE_ORDER", exit_price=fill_price, symbol=sym)
             else:
-                # Add lots to existing position (averaging)
-                pos = self.active_position
+                pos = existing_pos
                 new_units = pos["units"] + order_data["units"]
                 total_cost = (pos["entry_price"] * pos["units"]) + (fill_price * order_data["units"])
                 pos["entry_price"] = round(total_cost / new_units, 2)
@@ -169,6 +171,8 @@ class ContractTradingEngine:
                 pos["current_sl"] = pos["sl"] or pos["current_sl"]
                 pos["target1"] = order_data["target1"] or pos["target1"]
                 pos["target2"] = order_data["target2"] or pos["target2"]
+                self.active_positions[sym] = pos
+                self.active_position = pos
                 self.save_state()
                 return {"status": "success", "action": "POSITION_INCREASED", "position": pos}
 
@@ -201,6 +205,7 @@ class ContractTradingEngine:
             "status": "OPEN"
         }
 
+        self.active_positions[sym] = position
         self.active_position = position
         # Remove from pending orders if was pending
         self.pending_orders = [o for o in self.pending_orders if o.get("order_id") != order_data.get("order_id")]
@@ -245,12 +250,22 @@ class ContractTradingEngine:
 
         return {"status": "error", "message": "No active position or pending order to modify."}
 
-    def close_position(self, reason: str = "MANUAL_CLOSE", exit_price: Optional[float] = None) -> Dict[str, Any]:
+    def close_position(self, reason: str = "MANUAL_CLOSE", exit_price: Optional[float] = None, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Instantly closes the active position at market price."""
-        if not self.active_position:
+        target_pos = None
+        if symbol and symbol in self.active_positions:
+            target_pos = self.active_positions[symbol]
+        elif symbol and self.active_position and self.active_position.get("symbol") == symbol:
+            target_pos = self.active_position
+        elif not symbol and self.active_position:
+            target_pos = self.active_position
+        elif self.active_positions:
+            target_pos = next(iter(self.active_positions.values()))
+
+        if not target_pos:
             return {"status": "error", "message": "No active position to close."}
 
-        pos = self.active_position
+        pos = target_pos
         px = float(exit_price or pos.get("current_price") or self.current_price or pos["entry_price"])
         px = round(px, 2)
         units = pos["units"]
@@ -287,7 +302,12 @@ class ContractTradingEngine:
         }
 
         self.trade_history.append(trade_record)
-        self.active_position = None
+        sym = pos["symbol"]
+        if sym in self.active_positions:
+            del self.active_positions[sym]
+        if self.active_position and self.active_position.get("position_id") == pos["position_id"]:
+            self.active_position = next(iter(self.active_positions.values())) if self.active_positions else None
+
         self.save_state()
         return {"status": "success", "action": "POSITION_CLOSED", "record": trade_record}
 
@@ -401,7 +421,7 @@ class ContractTradingEngine:
         today_trades = [t for t in self.trade_history if t.get("exit_time", "").startswith(today_str)]
         realized_day_pnl = sum(t.get("net_pnl", 0.0) for t in today_trades)
         
-        unrealized_pnl = self.active_position.get("unrealized_pnl", 0.0) if self.active_position else 0.0
+        unrealized_pnl = sum(p.get("unrealized_pnl", 0.0) for p in self.active_positions.values()) if self.active_positions else (self.active_position.get("unrealized_pnl", 0.0) if self.active_position else 0.0)
         total_day_pnl = round(realized_day_pnl + unrealized_pnl, 2)
 
         return {
@@ -412,6 +432,7 @@ class ContractTradingEngine:
             "unrealized_pnl": round(unrealized_pnl, 2),
             "total_day_pnl": total_day_pnl,
             "active_position": self.active_position,
+            "active_positions": self.active_positions,
             "pending_orders": self.pending_orders,
             "is_kill_switch_active": self.is_kill_switch_active,
             "kill_switch_triggered_at": self.kill_switch_triggered_at,
@@ -424,6 +445,7 @@ class ContractTradingEngine:
         """Resets paper account balance and trade logs."""
         self.capital = float(capital or self.initial_capital)
         self.active_position = None
+        self.active_positions.clear()
         self.pending_orders.clear()
         self.trade_history.clear()
         self.is_kill_switch_active = False
@@ -438,6 +460,7 @@ class ContractTradingEngine:
                 "capital": self.capital,
                 "initial_capital": self.initial_capital,
                 "active_position": self.active_position,
+                "active_positions": self.active_positions,
                 "pending_orders": self.pending_orders,
                 "trade_history": self.trade_history[-200:],  # Store last 200 trades
                 "is_kill_switch_active": self.is_kill_switch_active,
@@ -459,6 +482,9 @@ class ContractTradingEngine:
                     self.capital = float(data.get("capital", self.initial_capital))
                     self.initial_capital = float(data.get("initial_capital", self.initial_capital))
                     self.active_position = data.get("active_position")
+                    self.active_positions = data.get("active_positions", {})
+                    if self.active_position and not self.active_positions and self.active_position.get("symbol"):
+                        self.active_positions = {self.active_position["symbol"]: self.active_position}
                     self.pending_orders = data.get("pending_orders", [])
                     self.trade_history = data.get("trade_history", [])
                     self.is_kill_switch_active = bool(data.get("is_kill_switch_active", False))

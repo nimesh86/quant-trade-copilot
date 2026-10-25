@@ -4031,7 +4031,7 @@ body.replay-mode-active #stations-stream {
 .station-hdr {
     display: flex !important;
     flex-direction: column !important;
-    padding: 6px 10px;
+    padding: 5px 8px;
     background: rgba(10, 16, 28, 0.9);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     gap: 4px;
@@ -4080,14 +4080,14 @@ body.replay-mode-active #stations-stream {
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: nowrap;
 }
 
 .rate-cluster {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
 }
 
 .station-ltp {
@@ -4377,16 +4377,16 @@ body.replay-mode-active #stations-stream {
     align-items: center;
     height: 100%;
     border-right: 1px solid rgba(255, 255, 255, 0.12);
-    padding: 0 4px;
-    gap: 3px;
+    padding: 0 2px;
+    gap: 2px;
     background: rgba(0, 0, 0, 0.2);
 }
 
 .station-toolbar .hud-pill {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    padding: 0 4px;
+    gap: 2px;
+    padding: 0 2px;
     height: 20px;
     border-radius: 3px;
     background: transparent;
@@ -4411,22 +4411,58 @@ body.replay-mode-active #stations-stream {
 .pill-t1 .hud-tag { color: #fbbf24; }
 .pill-t2 .hud-tag { color: #34d399; }
 
+.station-toolbar.has-pos .lot-stepper,
+.station-toolbar.has-pos .btn-station-buy,
+.station-toolbar.has-pos .btn-station-limit,
+.station-toolbar.has-pos .pill-t1,
+.station-toolbar.has-pos .pill-t2 {
+    display: none !important;
+}
+
+.station-toolbar.has-pos {
+    background: rgba(24, 12, 16, 0.95);
+    border-color: rgba(239, 68, 68, 0.45);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
+}
+
 .station-toolbar .btn-station-exit {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
+    gap: 3px;
     height: 100%;
-    padding: 0 8px;
+    padding: 0 6px;
     border: none;
     border-radius: 0;
-    background: rgba(239, 68, 68, 0.25);
-    color: #fca5a5;
-    font-size: 10px;
+    background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+    color: #ffffff;
+    font-size: 11px;
     font-weight: 800;
     cursor: pointer;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+    transition: all 0.15s ease;
+    white-space: nowrap;
 }
+
 .station-toolbar .btn-station-exit:hover {
-    background: #ef4444;
+    background: #dc2626;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.7);
+    color: #ffffff;
+}
+
+.station-toolbar .btn-station-exit .exit-txt {
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: 0.5px;
+}
+
+.station-toolbar .btn-station-exit .exit-pnl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.4);
     color: #ffffff;
 }
 

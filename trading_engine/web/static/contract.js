@@ -5321,42 +5321,14 @@ function updateTradingUI(state) {
     // 8. Update Station CE and Station PE Exit Buttons & HUDs
     ['ce', 'pe'].forEach((pfx) => {
         const station = pfx === 'ce' ? Stations.CE : Stations.PE;
-        const sExitBtn = document.getElementById(`${pfx}-btn-exit`);
-        const sPosPnlSub = document.getElementById(`${pfx}-pos-pnl`);
-        const sPosHud = document.getElementById(`${pfx}-pos-hud`);
-        const sHudValPos = document.getElementById(`${pfx}-hud-pos`);
-        const sHudValSl = document.getElementById(`${pfx}-hud-sl`);
-        const sHudValT1 = document.getElementById(`${pfx}-hud-t1`);
-        const sHudValT2 = document.getElementById(`${pfx}-hud-t2`);
-
-        const pos = (state && state.active_position) || station.activePosition;
-        if (pos && (pos.symbol === station.symbol || pos.isReplayManual)) {
-            if (sExitBtn) sExitBtn.classList.remove('hidden');
-            if (sPosHud) sPosHud.classList.remove('hidden');
-
-            const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
-            const entryPx = pos.entry_price || pos.entryPrice || 0;
-            if (curPx > 0 && entryPx > 0) {
-                const pts = curPx - entryPx;
-                pos.unrealized_pnl = Math.round(pts * (pos.units || 65) * 100) / 100;
-            }
-            const pnl = pos.unrealized_pnl || 0.0;
-            const sign = pnl >= 0 ? '+' : '';
-            if (sPosPnlSub) sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
-            if (sHudValPos) sHudValPos.textContent = `₹${entryPx.toFixed(1)}`;
-            if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || pos.sl || 0).toFixed(1)}`;
-            if (sHudValT1) sHudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
-            if (sHudValT2) sHudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
-        } else {
-            if (sExitBtn) sExitBtn.classList.add('hidden');
-            if (sPosHud) sPosHud.classList.add('hidden');
-        }
+        updateStationPosHud(station, state);
     });
 }
 
-function updateStationPosHud(station) {
+function updateStationPosHud(station, state) {
     if (!station) return;
     const pfx = station.type.toLowerCase();
+    const toolbar = document.getElementById(`${pfx}-toolbar`);
     const sExitBtn = document.getElementById(`${pfx}-btn-exit`);
     const sPosPnlSub = document.getElementById(`${pfx}-pos-pnl`);
     const sPosHud = document.getElementById(`${pfx}-pos-hud`);
@@ -5365,22 +5337,54 @@ function updateStationPosHud(station) {
     const sHudValT1 = document.getElementById(`${pfx}-hud-t1`);
     const sHudValT2 = document.getElementById(`${pfx}-hud-t2`);
 
-    const pos = station.activePosition;
+    // Strictly resolve position belonging to this station ONLY (never cross-contaminate CE/PE)
+    const tradeState = state || MasterState.tradingState || C.tradingState;
+    let pos = null;
+    if (tradeState && tradeState.active_positions && station.symbol && tradeState.active_positions[station.symbol]) {
+        pos = tradeState.active_positions[station.symbol];
+    } else if (tradeState && tradeState.active_position && station.symbol && tradeState.active_position.symbol === station.symbol) {
+        pos = tradeState.active_position;
+    } else if (station.activePosition && (station.activePosition.symbol === station.symbol || station.activePosition.type === station.type)) {
+        pos = station.activePosition;
+    }
+
     if (pos) {
+        if (toolbar) toolbar.classList.add('has-pos');
         if (sExitBtn) sExitBtn.classList.remove('hidden');
         if (sPosHud) sPosHud.classList.remove('hidden');
 
         const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : (pos.entry_price || pos.entryPrice || 0);
         const entryPx = pos.entry_price || pos.entryPrice || 0;
         const pts = curPx - entryPx;
-        const pnl = pts * (pos.units || 65);
+        const units = pos.units || (station.tradingLots * (station.lotUnits || 65)) || 65;
+        const pnl = pts * units;
         const sign = pnl >= 0 ? '+' : '';
-        if (sPosPnlSub) sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
+        const ptSign = pts >= 0 ? '+' : '';
+
+        if (sPosPnlSub) {
+            sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
+            sPosPnlSub.style.color = pnl >= 0 ? '#34d399' : '#f87171';
+        }
         if (sHudValPos) sHudValPos.textContent = `₹${entryPx.toFixed(1)}`;
         if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || pos.sl || 0).toFixed(1)}`;
-        if (sHudValT1) sHudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
-        if (sHudValT2) sHudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
+        if (sHudValT1) {
+            if (pos.target1) {
+                sHudValT1.textContent = `₹${pos.target1.toFixed(1)}`;
+                sHudValT1.parentElement?.classList.remove('hidden');
+            } else {
+                sHudValT1.parentElement?.classList.add('hidden');
+            }
+        }
+        if (sHudValT2) {
+            if (pos.target2) {
+                sHudValT2.textContent = `₹${pos.target2.toFixed(1)}`;
+                sHudValT2.parentElement?.classList.remove('hidden');
+            } else {
+                sHudValT2.parentElement?.classList.add('hidden');
+            }
+        }
     } else {
+        if (toolbar) toolbar.classList.remove('has-pos');
         if (sExitBtn) sExitBtn.classList.add('hidden');
         if (sPosHud) sPosHud.classList.add('hidden');
     }
@@ -6549,15 +6553,17 @@ function bindStationControls(station) {
                         exchange: 'NFO',
                         side: 'BUY',
                         order_type: 'MARKET',
+                        lots: station.tradingLots,
                         quantity: units,
                         product: 'MIS',
                         validity: 'DAY',
                         price: curPx,
+                        current_market_price: curPx
                     })
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    flashExecutionAlert(`🟢 ${station.type} BUY EXECUTED`, `Bought ${units} qty @ ₹${curPx.toFixed(1)}`, 'success');
+                    flashExecutionAlert(`🟢 ${station.type} BUY EXECUTED`, `Bought ${station.tradingLots} Lot (${units} qty) of ${station.symbol} @ ₹${curPx.toFixed(1)}`, 'success');
                     await fetchTradeState();
                 } else {
                     flashExecutionAlert(`❌ ORDER REJECTED`, data.detail || 'Trade failed', 'danger');

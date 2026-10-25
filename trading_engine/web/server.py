@@ -1129,13 +1129,13 @@ async def place_contract_order(payload: Dict[str, Any] = Body(...)):
     
     side = payload.get("side", "BUY")
     order_type = payload.get("order_type", "MARKET")
-    lots = int(payload.get("lots", 1))
+    lots = int(payload.get("lots") or (payload.get("quantity", 65) // 65) or 1)
     limit_price = payload.get("limit_price")
     sl = payload.get("sl")
     target1 = payload.get("target1")
     target2 = payload.get("target2")
     trailing_mode = payload.get("trailing_mode", "be_lock")
-    current_market_price = payload.get("current_market_price")
+    current_market_price = payload.get("current_market_price") or payload.get("price")
 
     res = contract_engine.place_order(
         symbol=symbol,
@@ -1159,7 +1159,8 @@ async def exit_contract_position(payload: Dict[str, Any] = Body(default={})):
     """1-click Market Exit for the active position."""
     reason = payload.get("reason", "MANUAL_EXIT")
     exit_price = payload.get("exit_price")
-    res = contract_engine.close_position(reason=reason, exit_price=exit_price)
+    symbol = payload.get("symbol")
+    res = contract_engine.close_position(reason=reason, exit_price=exit_price, symbol=symbol)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message", "Exit failed."))
     return res
