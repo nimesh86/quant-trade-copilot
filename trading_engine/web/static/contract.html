@@ -4,133 +4,151 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#070b14" />
-    <title>Contract Analysis — AI Trader</title>
-    <meta name="description" content="Live contract chart and Smart Money Flow Cloud analysis for NIFTY options, futures and equities." />
-    <link rel="stylesheet" href="/static/contract.css?v=20261025_1605" />
+    <title>Parallel Option Stations (CE + PE) — AI Trader</title>
+    <meta name="description" content="Parallel live contract stations for CALL and PUT options with Smart Money Flow Cloud and synchronized backtesting." />
+    <link rel="stylesheet" href="/static/contract.css?v=20261025_1645" />
 </head>
 <body>
 <div id="page-shell">
 
-    <!-- ── Loading Bar ───────────────────────────────────────────────────── -->
+    <!-- ── Loading Top Bar ──────────────────────────────────────────────── -->
     <div id="loading-bar"></div>
 
-    <!-- ── Header ────────────────────────────────────────────────────────── -->
-    <header id="header">
-        <div class="header-main-row">
-            <div class="header-nav-group">
+    <!-- ── Master Sticky Global Header ───────────────────────────────────── -->
+    <header id="master-header">
+        <!-- Row 1: Navigation, Underlying, Strike Stepper, Expiry, TF, Session Date -->
+        <div class="hdr-row hdr-row-nav">
+            <div class="hdr-left-group">
                 <!-- 1. Back to Dashboard Button -->
                 <a href="/" id="home-link" class="nav-switch-btn" title="Back to Main Dashboard">
                     <span class="home-arrow">←</span>
                     <span class="home-text">Dashboard</span>
                 </a>
 
-                <!-- 2. Small Contract Name & Price Label -->
-                <div id="contract-badge" class="contract-badge-compact" title="Active Contract Info">
-                    <span id="badge-symbol" class="badge-symbol-text">No contract selected</span>
-                    <span id="badge-ltp" class="badge-ltp-text">——</span>
-                    <span id="badge-chg" class="badge-chg-text"></span>
-                    <span id="badge-target" class="badge-target-text" style="display:none;">🎯 --</span>
-                </div>
-
-                <!-- 2b. Dual ATM Strike Pair Pill (Instant 1-Tap Flip & Live Radar Alert) -->
-                <div id="atm-pair-pill" class="atm-pair-pill" title="ATM Strike Pair: 1-Tap Flip between CALL & PUT">
-                    <button id="pill-btn-ce" class="pair-pill-btn active" title="Switch to CALL (CE)">
-                        <span class="pill-type pill-ce">CE</span>
-                        <span id="pill-ce-ltp" class="pill-ltp">--</span>
-                        <span id="pill-ce-radar" class="pill-radar hidden">🎯 BUY</span>
-                    </button>
-                    <div class="pair-pill-divider"></div>
-                    <button id="pill-btn-pe" class="pair-pill-btn" title="Switch to PUT (PE)">
-                        <span class="pill-type pill-pe">PE</span>
-                        <span id="pill-pe-ltp" class="pill-ltp">--</span>
-                        <span id="pill-pe-radar" class="pill-radar hidden">🎯 BUY</span>
-                    </button>
-                    <button id="btn-toggle-dual" class="btn-dual-toggle" title="Toggle Split-Screen Dual Chart (CE + PE)">
-                        <span class="dual-icon">🥞</span>
-                    </button>
-                </div>
-
-                <!-- 3. Small Option Chain Button -->
-                <button id="btn-toggle-oc" class="oc-toggle-btn-small" title="Open Option Chain (⚡)">
-                    <span class="oc-btn-icon">⚡</span>
-                    <span class="oc-btn-text">Chain</span>
-                    <span id="oc-btn-badge" class="oc-btn-badge" style="display:none;">19 OCT</span>
-                </button>
-
-                <!-- 4. 1m / 5m Timeframe Toggle Pill (Space Saver) -->
-                <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
-                    <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute Candle">1m</button>
-                    <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute Candle">5m</button>
-                </div>
-            </div>
-
-            <div class="header-tools-group">
-                <!-- 5. Icon-Only Action Buttons with Tooltips -->
-                <div class="icon-toolbar" role="toolbar" aria-label="Chart Indicators & Controls">
-                    <button id="smf-toggle-btn" class="icon-btn" title="Toggle Smart Money Flow Cloud">⬡</button>
-                    <button id="smf-price-toggle-btn" class="icon-btn" title="Toggle Signal Price on Markers">🏷</button>
-                    <button id="smf-target-toggle-btn" class="icon-btn" title="Toggle Maximum Target & Profit Lines">🎯</button>
-                    <button id="dynamic-exit-btn" class="icon-btn dynamic-exit-btn active" title="Toggle SMF Dynamic Exit & Chandelier Trail Engine">🛡️</button>
-                    <button id="btn-fit-contract" class="icon-btn" title="Fit all candles in view">⤢</button>
-                    <button id="btn-replay-toggle" class="icon-btn replay-toggle-btn" title="Toggle Bar Replay Simulator (Shift+R)">⏪</button>
-                </div>
-
-                <!-- 6. Session Day Dropdown (Today Live Feed vs Historical Replay) -->
-                <div id="session-date-wrapper" class="session-date-compact" title="Trading Session Day (Today · Live / Historical Replay)">
-                    <span class="session-date-icon">📅</span>
-                    <select id="session-date-select" title="Switch Trading Session Day">
-                        <option value="today">Today (Live)</option>
+                <!-- 2. Master Underlying Select -->
+                <div class="underlying-select-wrap">
+                    <select id="master-underlying-select" title="Switch Underlying Index">
+                        <option value="NIFTY" selected>NIFTY 50</option>
+                        <option value="BANKNIFTY">BANK NIFTY</option>
+                        <option value="SENSEX">SENSEX</option>
+                        <option value="FINNIFTY">FINNIFTY</option>
+                        <option value="MIDCPNIFTY">MIDCAP NIFTY</option>
                     </select>
                 </div>
 
-                <!-- 7. Compact Expiry Filter Dropdown -->
-                <div id="expiry-wrapper" class="expiry-compact" title="Option Contract Expiry Date">
-                    <span class="expiry-icon">⏳</span>
-                    <select id="expiry-select" title="Contract Expiry Date">
+                <!-- 3. Master Strike Stepper (Synchronizes both CE & PE stations) -->
+                <div class="strike-stepper-box" title="Strike Stepper (Synchronizes both CALL & PUT stations)">
+                    <button id="btn-strike-prev" class="step-btn" title="Previous Strike (-Step)">-50</button>
+                    <div id="strike-display-pill" class="strike-pill">
+                        <span id="cur-strike-val" class="strike-num">22700</span>
+                        <span id="cur-strike-tag" class="strike-tag atm">ATM</span>
+                    </div>
+                    <button id="btn-strike-next" class="step-btn" title="Next Strike (+Step)">+50</button>
+                </div>
+
+                <!-- 4. Expiry Filter Dropdown -->
+                <div class="expiry-select-wrap" title="Option Expiry Date">
+                    <select id="master-expiry-select" title="Contract Expiry Date">
                         <option value="">Expiry</option>
                     </select>
                 </div>
 
-                <!-- 8. Connection Status Indicator -->
-                <div id="conn-pill" class="waiting" title="Connection status">
-                    <div id="conn-dot"></div>
-                    <span id="conn-label">Connecting…</span>
+                <!-- 5. Timeframe Toggle Pill (1m / 5m) -->
+                <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
+                    <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute Candle">1m</button>
+                    <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute Candle">5m</button>
                 </div>
+
+                <!-- 6. Session Day Dropdown (Today Live Feed vs Historical Replay) -->
+                <div class="session-date-wrap" title="Trading Session Day">
+                    <select id="master-session-date-select" title="Switch Trading Session Day">
+                        <option value="today">Today (Live)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Row 1 Right: Master Actions & Combined Portfolio PnL -->
+            <div class="hdr-right-group">
+                <!-- Option Chain Trigger -->
+                <button id="btn-master-chain" class="hdr-btn chain-btn" title="Open Option Chain (⚡)">
+                    <span class="btn-icon">⚡</span>
+                    <span class="btn-txt">Chain</span>
+                </button>
+
+                <!-- Replay Simulator Toggle -->
+                <button id="btn-master-replay" class="hdr-btn replay-btn" title="Toggle Synchronized Bar Replay Simulator">
+                    <span class="btn-icon">⏪</span>
+                    <span class="btn-txt">Replay</span>
+                </button>
+
+                <!-- Combined Backtest Scorecard & Ledger Modal Trigger -->
+                <button id="btn-master-report" class="hdr-btn report-btn" title="View Combined Session Accuracy Scorecard & Trade Ledger">
+                    <span class="btn-icon">📊</span>
+                    <span class="btn-txt">Report</span>
+                </button>
+
+                <!-- Combined Portfolio PnL Pill (Aggregates CE + PE Realized + Unrealized) -->
+                <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Combined Portfolio Realized + Unrealized PnL / Balance">
+                    <span class="pnl-tag">PORTFOLIO</span>
+                    <span id="val-portfolio-pnl" class="pnl-num">+₹0.00</span>
+                    <span class="pnl-sep">/</span>
+                    <span id="val-portfolio-cap" class="cap-num">100k</span>
+                </div>
+
+                <!-- Emergency Kill Switch (Icon Only) -->
+                <button id="btn-master-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
+                    <span class="kill-icon">🛑</span>
+                </button>
             </div>
         </div>
+    </header>
 
-        <!-- ── Trading Header Strip (Day PnL, Capital, Mode, Single-Click Trade, Kill Switch) ───── -->
-        <div class="header-trade-row">
-            <div class="trade-mode-group">
-                <select id="trade-mode-select" class="trade-mode-select" title="Trading Execution Mode">
-                    <option value="paper" selected>Paper</option>
-                    <option value="live">Live</option>
-                    <option value="replay">Replay</option>
-                </select>
+    <!-- ── Stations Stream: Both Contracts Running on the Same Screen ───────── -->
+    <main id="stations-stream">
+
+        <!-- ════════════════════════════════════════════════════════════════════ -->
+        <!-- STATION 1: CALL (CE) STATION                                        -->
+        <!-- ════════════════════════════════════════════════════════════════════ -->
+        <section id="station-ce" class="contract-station station-call" aria-label="CALL Option Station">
+            <!-- CE Station Header Bar -->
+            <div class="station-hdr">
+                <div class="station-meta-left">
+                    <span class="station-badge ce-badge">CALL (CE)</span>
+                    <span id="ce-symbol-text" class="station-symbol">22700 CE</span>
+                    <span id="ce-ltp" class="station-ltp">₹--</span>
+                    <span id="ce-chg" class="station-chg">--</span>
+                    <span id="ce-signal" class="station-signal flat">ANALYZING…</span>
+                </div>
+                <div class="station-tools-right">
+                    <button id="ce-btn-smf" class="tool-btn active" title="Toggle Smart Money Flow Cloud">⬡</button>
+                    <button id="ce-btn-price" class="tool-btn" title="Toggle Signal Price on Markers">🏷</button>
+                    <button id="ce-btn-target" class="tool-btn active" title="Toggle Max Target Lines">🎯</button>
+                    <button id="ce-btn-exit-engine" class="tool-btn active" title="Toggle SMF Dynamic Exit Engine">🛡️</button>
+                    <button id="ce-btn-fit" class="tool-btn" title="Fit Candles in View">⤢</button>
+                </div>
             </div>
 
-            <!-- Single-Click Execution Center: Ultra clean, no chart clutter -->
-            <div class="header-trade-actions">
-                <div class="lot-pill" title="Order Lot Size">
-                    <button id="btn-qty-minus" class="lot-btn" title="Decrease Lots">-</button>
-                    <span id="trade-lots-val" class="lot-num">1</span>
-                    <button id="btn-qty-plus" class="lot-btn" title="Increase Lots">+</button>
-                    <span id="trade-units-val" style="display:none">65</span>
+            <!-- CE Station Control Bar (Independent Trading Controls & HUD) -->
+            <div class="station-controls ce-controls">
+                <div class="lot-stepper" title="Order Lot Size">
+                    <button id="ce-lot-minus" class="lot-btn">-</button>
+                    <span id="ce-lot-val" class="lot-num">1</span>
+                    <button id="ce-lot-plus" class="lot-btn">+</button>
                 </div>
 
-                <!-- Single Clean Market Buy Button: Cart Icon, compact, no live price -->
-                <button id="btn-quick-buy-mkt" class="btn-clean-buy" title="1-Click Market Buy (Instant Execution)">
-                    <svg class="cart-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Clean 1-Click Market Buy Button -->
+                <button id="ce-btn-buy" class="btn-station-buy ce-buy" title="1-Click Market Buy CALL (Instant Execution)">
+                    <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="9" cy="21" r="1"></circle>
                         <circle cx="20" cy="21" r="1"></circle>
                         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
                     </svg>
-                    <span id="btn-mkt-px" style="display:none"></span>
+                    <span id="ce-buy-txt">BUY CE</span>
                 </button>
 
-                <!-- TradingView-Style Interactive Limit / Order Box Tool Button (Icon only) -->
-                <button id="btn-draw-limit" class="btn-clean-limit" title="Draw Order Box (TradingView Limit, Target & SL Tool)">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <!-- TradingView-Style Interactive Limit Box Tool -->
+                <button id="ce-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
                         <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
                         <polyline points="4 15 10 9 14 13 20 7"></polyline>
@@ -138,439 +156,380 @@
                     </svg>
                 </button>
 
-                <!-- Active Position HUD: POS, SL, T1, T2 directly in toolbar -->
-                <div id="active-pos-hud" class="active-pos-hud hidden" title="Active Position Overview">
-                    <div class="pos-hud-pill pill-pos" title="Position Entry Rate">
-                        <span class="hud-tag">POS</span>
-                        <span id="hud-val-pos" class="hud-num">₹--</span>
-                    </div>
-                    <div class="pos-hud-pill pill-sl" title="Current Stop Loss (Drag line on chart)">
-                        <span class="hud-tag">SL</span>
-                        <span id="hud-val-sl" class="hud-num">₹--</span>
-                    </div>
-                    <div class="pos-hud-pill pill-t1" title="Target 1 (Drag line on chart)">
-                        <span class="hud-tag">T1</span>
-                        <span id="hud-val-t1" class="hud-num">₹--</span>
-                    </div>
-                    <div class="pos-hud-pill pill-t2" title="Target 2 (Drag line on chart)">
-                        <span class="hud-tag">T2</span>
-                        <span id="hud-val-t2" class="hud-num">₹--</span>
-                    </div>
+                <!-- Active Position HUD for CE: POS, SL, T1, T2 -->
+                <div id="ce-pos-hud" class="station-pos-hud hidden" title="Active CE Position Overview">
+                    <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="ce-hud-pos" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="ce-hud-sl" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="ce-hud-t1" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="ce-hud-t2" class="hud-num">₹--</span></div>
                 </div>
 
-                <!-- Single Clean Market Exit Button: Visible only when in position -->
-                <button id="btn-quick-exit" class="btn-clean-exit hidden" title="1-Click Instant Market Exit">
-                    <span class="exit-lbl">EXIT</span>
-                    <span id="btn-pos-pnl" class="exit-pnl">+₹0.00</span>
+                <!-- Clean 1-Click Market Exit Button for CE -->
+                <button id="ce-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for CE">
+                    <span class="exit-txt">EXIT</span>
+                    <span id="ce-pos-pnl" class="exit-pnl">+₹0.00</span>
                 </button>
             </div>
 
-            <div class="trade-stats-group">
-                <div id="stat-pnl-bal" class="stat-pill pnl-bal-pill pnl-neutral" title="Today's Aggregate Realized + Unrealized PnL / Balance">
-                    <span id="val-day-pnl" class="stat-val">0.00</span>
-                    <span class="pnl-bal-sep">/</span>
-                    <span id="val-capital" class="stat-val">100000</span>
+            <!-- CE Station Chart Area with Canvas Ribbon -->
+            <div class="station-chart-box">
+                <div id="ce-chart-container" class="chart-container-inner"></div>
+                <canvas id="ce-smf-canvas" class="station-canvas"></canvas>
+            </div>
+
+            <!-- CE Station Footer: Independent 1-Day Backtest & Expandable Ledger -->
+            <div class="station-footer ce-footer">
+                <div class="footer-strip-row">
+                    <div class="footer-left-info">
+                        <span class="footer-badge ce-footer-badge">📊 CE BACKTEST</span>
+                    </div>
+                    <div class="footer-metrics-grid">
+                        <div class="metric-item"><span class="m-lbl">TRADES</span><span id="ce-stat-trades" class="m-val">0</span></div>
+                        <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="ce-stat-winrate" class="m-val">--%</span></div>
+                        <div class="metric-item"><span class="m-lbl">NET PnL</span><span id="ce-stat-pnl" class="m-val highlight">+0.00R</span></div>
+                        <div class="metric-item"><span class="m-lbl">POINTS</span><span id="ce-stat-pts" class="m-val highlight">+0.0 pts</span></div>
+                        <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="ce-stat-cash" class="m-val highlight">+₹0.00</span></div>
+                    </div>
+                    <div class="footer-right-actions">
+                        <button id="ce-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse CE Trades Log">📋 Trades (<span id="ce-log-count">0</span>) ▾</button>
+                    </div>
                 </div>
-                <button id="btn-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
-                    <span class="kill-icon">🛑</span>
-                    <span class="kill-text" style="display:none"></span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Hidden Search elements retained for contract.js compatibility and / shortcut -->
-        <div id="search-wrapper" style="display:none;">
-            <input type="text" id="search-input" placeholder="Search contract… (/ or ⌘K)" />
-            <div id="search-dropdown"></div>
-        </div>
-    </header>
-
-    <!-- ── Chart Area ─────────────────────────────────────────────────────── -->
-    <main id="chart-area">
-        <div id="contract-chart-container" class="chart-box"></div>
-        <canvas id="contract-smf-canvas"></canvas>
-
-        <!-- Secondary Chart Container for Dual Mode (Split Screen) -->
-        <div id="secondary-chart-wrapper" class="secondary-chart-box hidden">
-            <div class="secondary-chart-bar">
-                <div class="sec-chart-info">
-                    <span id="sec-chart-badge" class="sec-badge">PE</span>
-                    <span id="sec-chart-title" class="sec-title">22700 PE</span>
-                    <span id="sec-chart-ltp" class="sec-ltp">₹--</span>
-                    <span id="sec-chart-signal" class="sec-signal">FLAT</span>
+                <!-- Expandable Mini-Ledger Drawer for CE -->
+                <div id="ce-log-drawer" class="station-log-drawer hidden">
+                    <div class="drawer-header">
+                        <span>CALL (CE) SESSION EXECUTION TRADES</span>
+                        <button id="ce-log-close" class="btn-drawer-close">✕</button>
+                    </div>
+                    <div id="ce-log-table-wrap" class="drawer-table-wrap">
+                        <div class="no-trades-msg">No trades on this session yet.</div>
+                    </div>
                 </div>
-                <button id="btn-close-dual" class="sec-close-btn" title="Close Dual View">✕</button>
             </div>
-            <div id="secondary-chart-container" class="secondary-chart-inner"></div>
-            <canvas id="secondary-smf-canvas"></canvas>
-        </div>
+        </section>
 
-
-
-        <!-- ── Replay Floating Control Dock ──────────────────────────────── -->
-        <div id="replay-bar" class="replay-dock hidden" role="toolbar" aria-label="Chart Replay Controls">
-            <div class="replay-drag-handle">
-                <span class="replay-pulse-dot"></span>
-                <span class="replay-title">REPLAY</span>
-            </div>
-
-            <div class="replay-btn-group">
-                <button id="rp-btn-start" class="rp-ctrl-btn" title="Jump to Start (Home)">⏮</button>
-                <button id="rp-btn-step-back" class="rp-ctrl-btn" title="Step Back 1 Candle (Left Arrow)">◀</button>
-                <button id="rp-btn-play" class="rp-ctrl-btn rp-play-btn" title="Play / Pause Replay (Space)">▶</button>
-                <button id="rp-btn-step-fwd" class="rp-ctrl-btn" title="Step Forward 1 Candle (Right Arrow)">▶|</button>
-                <button id="rp-btn-end" class="rp-ctrl-btn" title="Jump to Latest Candle (End)">⏭</button>
-            </div>
-
-            <div class="replay-timeline">
-                <input type="range" id="rp-scrubber" min="0" max="100" value="0" step="1" title="Drag to jump to specific candle" />
-                <div class="replay-time-display">
-                    <span id="rp-cur-time" class="rp-time-val">09:15</span>
-                    <span class="rp-divider">/</span>
-                    <span id="rp-total-time" class="rp-time-val">15:30</span>
-                    <span id="rp-bar-count" class="rp-pill">0 / 0</span>
+        <!-- ════════════════════════════════════════════════════════════════════ -->
+        <!-- STATION 2: PUT (PE) STATION                                         -->
+        <!-- ════════════════════════════════════════════════════════════════════ -->
+        <section id="station-pe" class="contract-station station-put" aria-label="PUT Option Station">
+            <!-- PE Station Header Bar -->
+            <div class="station-hdr">
+                <div class="station-meta-left">
+                    <span class="station-badge pe-badge">PUT (PE)</span>
+                    <span id="pe-symbol-text" class="station-symbol">22700 PE</span>
+                    <span id="pe-ltp" class="station-ltp">₹--</span>
+                    <span id="pe-chg" class="station-chg">--</span>
+                    <span id="pe-signal" class="station-signal flat">ANALYZING…</span>
+                </div>
+                <div class="station-tools-right">
+                    <button id="pe-btn-smf" class="tool-btn active" title="Toggle Smart Money Flow Cloud">⬡</button>
+                    <button id="pe-btn-price" class="tool-btn" title="Toggle Signal Price on Markers">🏷</button>
+                    <button id="pe-btn-target" class="tool-btn active" title="Toggle Max Target Lines">🎯</button>
+                    <button id="pe-btn-exit-engine" class="tool-btn active" title="Toggle SMF Dynamic Exit Engine">🛡️</button>
+                    <button id="pe-btn-fit" class="tool-btn" title="Fit Candles in View">⤢</button>
                 </div>
             </div>
 
-            <div class="replay-speed-wrap">
-                <span class="rp-label">Speed:</span>
-                <select id="rp-speed-select" class="rp-select">
-                    <option value="1200">0.5x</option>
-                    <option value="600" selected>1x</option>
-                    <option value="300">2x</option>
-                    <option value="120">5x</option>
-                    <option value="40">10x</option>
-                </select>
-            </div>
+            <!-- PE Station Control Bar (Independent Trading Controls & HUD) -->
+            <div class="station-controls pe-controls">
+                <div class="lot-stepper" title="Order Lot Size">
+                    <button id="pe-lot-minus" class="lot-btn">-</button>
+                    <span id="pe-lot-val" class="lot-num">1</span>
+                    <button id="pe-lot-plus" class="lot-btn">+</button>
+                </div>
 
-            <div class="replay-date-wrap">
-                <input type="date" id="rp-date-picker" class="rp-date-input" title="Historical Session Date" />
-                <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
-            </div>
-
-            <!-- Mode Toggle: Auto Backtest vs Manual Practice -->
-            <div class="rp-mode-switch" id="rp-mode-switch" title="Replay Mode: Auto-System Backtest vs Manual Paper Practice">
-                <button type="button" id="rp-mode-auto" class="rp-mode-btn active" title="Auto-System Backtest: Strategy enters & exits trades automatically">
-                    ⚡ Auto
+                <!-- Clean 1-Click Market Buy Button -->
+                <button id="pe-btn-buy" class="btn-station-buy pe-buy" title="1-Click Market Buy PUT (Instant Execution)">
+                    <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                    <span id="pe-buy-txt">BUY PE</span>
                 </button>
-                <button type="button" id="rp-mode-manual" class="rp-mode-btn" title="Manual Replay Trading: Use BUY / EXIT buttons to trade replay candles yourself">
-                    ✍️ Manual
+
+                <!-- TradingView-Style Interactive Limit Box Tool -->
+                <button id="pe-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
+                        <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
+                        <polyline points="4 15 10 9 14 13 20 7"></polyline>
+                        <polyline points="15 7 20 7 20 12"></polyline>
+                    </svg>
+                </button>
+
+                <!-- Active Position HUD for PE: POS, SL, T1, T2 -->
+                <div id="pe-pos-hud" class="station-pos-hud hidden" title="Active PE Position Overview">
+                    <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="pe-hud-pos" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="pe-hud-sl" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="pe-hud-t1" class="hud-num">₹--</span></div>
+                    <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="pe-hud-t2" class="hud-num">₹--</span></div>
+                </div>
+
+                <!-- Clean 1-Click Market Exit Button for PE -->
+                <button id="pe-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for PE">
+                    <span class="exit-txt">EXIT</span>
+                    <span id="pe-pos-pnl" class="exit-pnl">+₹0.00</span>
                 </button>
             </div>
 
-            <!-- Report Button -->
-            <button type="button" id="rp-btn-scorecard" class="rp-scorecard-btn" title="View Full Accuracy Scorecard & Trades Ledger">
-                📊 Report
-            </button>
-
-            <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
-        </div>
-
-        <!-- Pre-market / No-contract Overlay -->
-        <div id="chart-overlay" class="visible">
-            <div class="overlay-icon">📈</div>
-            <div class="overlay-title">Search or Pick an Option from the Chain</div>
-            <div class="overlay-sub">
-                Click <strong>⚡ Option Chain</strong> below or search for any contract. Live SMF Cloud chart will appear immediately.
+            <!-- PE Station Chart Area with Canvas Ribbon -->
+            <div class="station-chart-box">
+                <div id="pe-chart-container" class="chart-container-inner"></div>
+                <canvas id="pe-smf-canvas" class="station-canvas"></canvas>
             </div>
-        </div>
+
+            <!-- PE Station Footer: Independent 1-Day Backtest & Expandable Ledger -->
+            <div class="station-footer pe-footer">
+                <div class="footer-strip-row">
+                    <div class="footer-left-info">
+                        <span class="footer-badge pe-footer-badge">📊 PE BACKTEST</span>
+                    </div>
+                    <div class="footer-metrics-grid">
+                        <div class="metric-item"><span class="m-lbl">TRADES</span><span id="pe-stat-trades" class="m-val">0</span></div>
+                        <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="pe-stat-winrate" class="m-val">--%</span></div>
+                        <div class="metric-item"><span class="m-lbl">NET PnL</span><span id="pe-stat-pnl" class="m-val highlight">+0.00R</span></div>
+                        <div class="metric-item"><span class="m-lbl">POINTS</span><span id="pe-stat-pts" class="m-val highlight">+0.0 pts</span></div>
+                        <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="pe-stat-cash" class="m-val highlight">+₹0.00</span></div>
+                    </div>
+                    <div class="footer-right-actions">
+                        <button id="pe-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse PE Trades Log">📋 Trades (<span id="pe-log-count">0</span>) ▾</button>
+                    </div>
+                </div>
+                <!-- Expandable Mini-Ledger Drawer for PE -->
+                <div id="pe-log-drawer" class="station-log-drawer hidden">
+                    <div class="drawer-header">
+                        <span>PUT (PE) SESSION EXECUTION TRADES</span>
+                        <button id="pe-log-close" class="btn-drawer-close">✕</button>
+                    </div>
+                    <div id="pe-log-table-wrap" class="drawer-table-wrap">
+                        <div class="no-trades-msg">No trades on this session yet.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
     </main>
 
-    <!-- ── Option Chain Panel (Below Chart on Mobile, Floating on Desktop) ── -->
+    <!-- ── Synchronized Replay Floating Control Dock ──────────────────────── -->
+    <div id="replay-bar" class="replay-dock hidden" role="toolbar" aria-label="Synchronized Dual Replay Controls">
+        <div class="replay-drag-handle">
+            <span class="replay-pulse-dot"></span>
+            <span class="replay-title">REPLAY (CE + PE)</span>
+        </div>
+
+        <div class="replay-btn-group">
+            <button id="rp-btn-start" class="rp-ctrl-btn" title="Jump to Start (Home)">⏮</button>
+            <button id="rp-btn-step-back" class="rp-ctrl-btn" title="Step Back 1 Candle (Left Arrow)">◀</button>
+            <button id="rp-btn-play" class="rp-ctrl-btn rp-play-btn" title="Play / Pause Replay (Space)">▶</button>
+            <button id="rp-btn-step-fwd" class="rp-ctrl-btn" title="Step Forward 1 Candle (Right Arrow)">▶|</button>
+            <button id="rp-btn-end" class="rp-ctrl-btn" title="Jump to Latest Candle (End)">⏭</button>
+        </div>
+
+        <div class="replay-timeline">
+            <input type="range" id="rp-scrubber" min="0" max="100" value="0" step="1" title="Drag to jump to specific candle" />
+            <div class="replay-time-display">
+                <span id="rp-cur-time" class="rp-time-val">09:15</span>
+                <span class="rp-divider">/</span>
+                <span id="rp-total-time" class="rp-time-val">15:30</span>
+                <span id="rp-bar-count" class="rp-pill">0 / 0</span>
+            </div>
+        </div>
+
+        <div class="replay-speed-wrap">
+            <span class="rp-label">Speed:</span>
+            <select id="rp-speed-select" class="rp-select">
+                <option value="1200">0.5x</option>
+                <option value="600" selected>1x</option>
+                <option value="300">2x</option>
+                <option value="120">5x</option>
+                <option value="40">10x</option>
+            </select>
+        </div>
+
+        <div class="replay-date-wrap">
+            <input type="date" id="rp-date-picker" class="rp-date-input" title="Historical Session Date" />
+            <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
+        </div>
+
+        <!-- Mode Toggle: Auto Backtest vs Manual Practice -->
+        <div class="rp-mode-switch" id="rp-mode-switch" title="Replay Mode: Auto-System Backtest vs Manual Paper Practice">
+            <button type="button" id="rp-mode-auto" class="rp-mode-btn active" title="Auto-System Backtest: Strategies enter & exit trades automatically">
+                ⚡ Auto
+            </button>
+            <button type="button" id="rp-mode-manual" class="rp-mode-btn" title="Manual Replay Trading: Use BUY / EXIT buttons to trade replay candles yourself">
+                ✍️ Manual
+            </button>
+        </div>
+
+        <!-- Report Button -->
+        <button type="button" id="rp-btn-scorecard" class="rp-scorecard-btn" title="View Full Combined Accuracy Scorecard & Trades Ledger">
+            📊 Report
+        </button>
+
+        <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
+    </div>
+
+    <!-- ── Option Chain Panel (Slide-up Drawer / Modal) ───────────────────── -->
     <section id="option-chain-panel" class="oc-panel collapsed" role="region" aria-label="Option Chain">
-            <div class="oc-header">
-                <div class="oc-title-block">
-                    <span class="oc-title">⚡ Option Chain</span>
-                    <select id="oc-underlying-select" class="oc-select" style="font-weight: 700; margin-left: 6px; padding: 2px 8px; border-radius: 4px; background: rgba(255,255,255,0.08); color: var(--gold, #f59e0b); border: 1px solid rgba(255,255,255,0.15);">
-                        <option value="NIFTY" selected>NIFTY 50</option>
-                        <option value="BANKNIFTY">BANK NIFTY</option>
-                        <option value="SENSEX">SENSEX</option>
-                        <option value="FINNIFTY">FINNIFTY</option>
-                        <option value="MIDCPNIFTY">MIDCAP NIFTY</option>
-                    </select>
-                    <span id="oc-spot-display" class="oc-spot-text">Spot: <strong id="oc-spot-val">--</strong></span>
+        <div class="oc-header">
+            <div class="oc-title-block">
+                <span class="oc-title">⚡ Option Chain</span>
+                <select id="oc-underlying-select" class="oc-select">
+                    <option value="NIFTY" selected>NIFTY 50</option>
+                    <option value="BANKNIFTY">BANK NIFTY</option>
+                    <option value="SENSEX">SENSEX</option>
+                    <option value="FINNIFTY">FINNIFTY</option>
+                    <option value="MIDCPNIFTY">MIDCAP NIFTY</option>
+                </select>
+                <span id="oc-spot-display" class="oc-spot-text">Spot: <strong id="oc-spot-val">--</strong></span>
+            </div>
+            <div class="oc-controls">
+                <div class="oc-control-item">
+                    <span class="oc-ctrl-label">Expiry:</span>
+                    <select id="oc-expiry-select" class="oc-select"></select>
                 </div>
-                <div class="oc-controls">
-                    <div class="oc-control-item">
-                        <span class="oc-ctrl-label">Expiry:</span>
-                        <select id="oc-expiry-select" class="oc-select"></select>
-                    </div>
-                    <button id="oc-range-toggle" class="oc-mini-btn" title="Toggle Range (±15 ATM or All Strikes)">±15 Strikes</button>
-                    <button id="oc-refresh-btn" class="oc-mini-btn" title="Refresh Live Prices">⟳</button>
-                    <button id="oc-close-btn" class="oc-close-btn" title="Close Option Chain">✕</button>
-                </div>
+                <button id="oc-range-toggle" class="oc-mini-btn" title="Toggle Range (±15 ATM or All Strikes)">±15 Strikes</button>
+                <button id="oc-refresh-btn" class="oc-mini-btn" title="Refresh Live Prices">⟳</button>
+                <button id="oc-close-btn" class="oc-close-btn" title="Close Option Chain">✕</button>
             </div>
+        </div>
 
-            <div class="oc-table-container">
-                <table class="oc-table">
-                    <thead>
-                        <tr class="oc-super-header">
-                            <th colspan="3" class="call-side-hdr">CALLS (CE)</th>
-                            <th class="strike-hdr">STRIKE</th>
-                            <th colspan="3" class="put-side-hdr">PUTS (PE)</th>
-                        </tr>
-                        <tr class="oc-sub-header">
-                            <th class="col-ltp call-ltp-hdr"><span class="desktop-hdr">LTP (₹)</span><span class="mobile-hdr">CALLS (CE)</span></th>
-                            <th class="col-sym">Contract</th>
-                            <th class="col-action">Chart</th>
-                            <th class="col-strike"><span class="desktop-hdr">Strike</span><span class="mobile-hdr">STRIKE</span></th>
-                            <th class="col-action">Chart</th>
-                            <th class="col-sym">Contract</th>
-                            <th class="col-ltp put-ltp-hdr"><span class="desktop-hdr">LTP (₹)</span><span class="mobile-hdr">PUTS (PE)</span></th>
-                        </tr>
-                    </thead>
-                    <tbody id="oc-tbody">
-                        <!-- Populated via contract.js -->
-                    </tbody>
-                </table>
-            </div>
+        <div class="oc-table-container">
+            <table class="oc-table">
+                <thead>
+                    <tr class="oc-super-header">
+                        <th colspan="3" class="call-side-hdr">CALLS (CE)</th>
+                        <th class="strike-hdr">STRIKE</th>
+                        <th colspan="3" class="put-side-hdr">PUTS (PE)</th>
+                    </tr>
+                    <tr class="oc-sub-header">
+                        <th class="col-ltp call-ltp-hdr">CALLS (CE)</th>
+                        <th class="col-sym">Contract</th>
+                        <th class="col-action">Select</th>
+                        <th class="col-strike">STRIKE</th>
+                        <th class="col-action">Select</th>
+                        <th class="col-sym">Contract</th>
+                        <th class="col-ltp put-ltp-hdr">PUTS (PE)</th>
+                    </tr>
+                </thead>
+                <tbody id="oc-tbody">
+                    <!-- Populated dynamically via contract.js -->
+                </tbody>
+            </table>
+        </div>
 
-            <div class="oc-footer">
-                <span class="oc-hint">⚡ Click any Call or Put row to chart instantly with SMF Cloud.</span>
-                <span id="oc-summary-text" class="oc-summary-text">Loading chain…</span>
-            </div>
+        <div class="oc-footer">
+            <span class="oc-hint">⚡ Click any strike row to chart BOTH CALL and PUT stations simultaneously.</span>
+            <span id="oc-summary-text" class="oc-summary-text">Loading chain…</span>
+        </div>
     </section>
 
-    <!-- ── SMF Dynamic Exit Footer Dock (Compact 2-Row Dock) ─────────────── -->
-    <div id="dynamic-exit-card" class="dynamic-exit-footer">
-        <!-- Row 1: Engine Controls & Live Position Monitor -->
-        <div class="de-footer-row de-row-live">
-            <div class="de-row-left">
-                <span class="de-pulse-dot"></span>
-                <span class="de-title">SMF DYNAMIC EXIT</span>
-                <select id="de-variant-select" class="de-select" title="Exit Engine Strategy Variant">
-                    <option value="V5" selected>V5 (Dynamic + Re-Entry)</option>
-                    <option value="V5_P1">V5_P1 (+25% Partial @ 1.5R)</option>
-                    <option value="V4">V4 (Adaptive + Climax)</option>
-                    <option value="V3">V3 (THS Adaptive Trail)</option>
-                    <option value="V2">V2 (Fixed Trail k=2.2)</option>
-                    <option value="V1">V1 (Relaxed Floor)</option>
-                    <option value="BASELINE">BASELINE (Fixed 1.6R)</option>
-                </select>
-                <span id="de-status-pill" class="de-pill flat">FLAT</span>
-            </div>
-
-            <div class="de-row-center">
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">ENTRY</span>
-                    <span id="de-live-entry" class="de-metric-val">₹--</span>
+    <!-- ── Full-Day Combined Accuracy & Trade Ledger Modal ────────────────── -->
+    <div id="backtest-report-modal" class="bt-modal-backdrop hidden" onclick="if(event.target===this)closeBacktestModal()">
+        <div class="bt-modal-card">
+            <div class="bt-modal-header">
+                <div class="bt-modal-title">
+                    <span class="bt-modal-icon">📊</span>
+                    <div>
+                        <h3 id="bt-modal-symbol">Parallel Contracts Backtest Scorecard</h3>
+                        <p class="bt-modal-sub" id="bt-modal-sub">Combined Session Accuracy & Unified Trade Ledger</p>
+                    </div>
                 </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">STOP / FLOOR</span>
-                    <span id="de-live-stop" class="de-metric-val danger">₹--</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">CHANDELIER</span>
-                    <span id="de-live-trail" class="de-metric-val warning">₹--</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">PEAK (MFE)</span>
-                    <span id="de-live-mfe" class="de-metric-val success">+0.0R</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">HEALTH</span>
-                    <span id="de-live-ths" class="de-metric-val">--</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">LIVE P&L</span>
-                    <span id="de-live-pnl" class="de-metric-val highlight">+0.0R</span>
+                <div class="bt-modal-header-actions">
+                    <button type="button" id="bt-btn-fastforward" class="bt-btn-action" title="Jump to End of Day & Calculate Full Session for Both Contracts">⚡ Full Day</button>
+                    <button type="button" id="bt-btn-close" class="bt-modal-close" onclick="closeBacktestModal()">✕</button>
                 </div>
             </div>
 
-            <div class="de-row-right">
-                <button id="de-btn-toggle-log" class="de-btn-toggle-log" title="View Detailed Trades Log">📋 <span id="de-trades-count">0</span></button>
-                <button id="de-card-close" class="de-footer-close-btn" title="Hide Dynamic Exit Bar">✕</button>
-            </div>
-        </div>
-
-        <!-- Row 2: 1-Day Session Backtest Summary & Trades Ticker -->
-        <div class="de-footer-row de-row-backtest">
-            <div class="de-row-left">
-                <span class="de-section-badge">📊 1-DAY BACKTEST</span>
-            </div>
-
-            <div class="de-row-center">
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">TRADES</span>
-                    <span id="de-sum-trades" class="de-metric-val">0</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">WIN RATE</span>
-                    <span id="de-sum-winrate" class="de-metric-val">--%</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">NET PnL</span>
-                    <span id="de-sum-pnl-r" class="de-metric-val highlight">+0.00R</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">POINTS</span>
-                    <span id="de-sum-pts" class="de-metric-val highlight">+0.0 pts</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">CAPTURE</span>
-                    <span id="de-sum-capture" class="de-metric-val">--%</span>
-                </div>
-                <div class="de-metric-item">
-                    <span class="de-metric-lbl">GIVE-BACK</span>
-                    <span id="de-sum-giveback" class="de-metric-val">--%</span>
-                </div>
+            <!-- Filter Tabs to view All, CE only, or PE only -->
+            <div class="bt-filter-tabs">
+                <button type="button" id="bt-filter-all" class="bt-filter-tab active" onclick="setBacktestFilter('ALL')">
+                    🥞 All Contracts (<span id="bt-count-all">0</span>)
+                </button>
+                <button type="button" id="bt-filter-ce" class="bt-filter-tab" onclick="setBacktestFilter('CE')">
+                    🟢 CALL (CE) Only (<span id="bt-count-ce">0</span>)
+                </button>
+                <button type="button" id="bt-filter-pe" class="bt-filter-tab" onclick="setBacktestFilter('PE')">
+                    🔴 PUT (PE) Only (<span id="bt-count-pe">0</span>)
+                </button>
             </div>
 
-            <div class="de-row-right de-trades-ticker-wrap">
-                <div id="de-trades-ticker" class="de-trades-ticker">
-                    <span class="de-ticker-empty">No trades on this session</span>
+            <div class="bt-modal-body">
+                <!-- Accuracy & Performance KPI Cards -->
+                <div class="bt-kpi-grid">
+                    <div class="bt-kpi-card winrate-card">
+                        <span class="bt-kpi-lbl">WIN RATE</span>
+                        <span class="bt-kpi-val" id="bt-kpi-winrate">--%</span>
+                        <span class="bt-kpi-note" id="bt-kpi-wl">0W / 0L</span>
+                    </div>
+                    <div class="bt-kpi-card pnl-card">
+                        <span class="bt-kpi-lbl">NET CASH IN HAND</span>
+                        <span class="bt-kpi-val" id="bt-kpi-net-cash">₹0.00</span>
+                        <span class="bt-kpi-note" id="bt-kpi-pts">+0.0 pts</span>
+                    </div>
+                    <div class="bt-kpi-card">
+                        <span class="bt-kpi-lbl">GROSS GAIN</span>
+                        <span class="bt-kpi-val" id="bt-kpi-gross">₹0.00</span>
+                        <span class="bt-kpi-note" id="bt-kpi-lots-note">1 Lot Per Contract</span>
+                    </div>
+                    <div class="bt-kpi-card charges-card">
+                        <span class="bt-kpi-lbl">CHARGES & TAXES</span>
+                        <span class="bt-kpi-val" id="bt-kpi-charges">-₹0.00</span>
+                        <span class="bt-kpi-note">Brokerage + STT + GST</span>
+                    </div>
+                    <div class="bt-kpi-card">
+                        <span class="bt-kpi-lbl">TOTAL TRADES</span>
+                        <span class="bt-kpi-val" id="bt-kpi-trades">0</span>
+                        <span class="bt-kpi-note" id="bt-kpi-breakdown">0 CE · 0 PE</span>
+                    </div>
+                    <div class="bt-kpi-card">
+                        <span class="bt-kpi-lbl">CAPTURE RATIO</span>
+                        <span class="bt-kpi-val" id="bt-kpi-capture">--%</span>
+                        <span class="bt-kpi-note" id="bt-kpi-giveback">Giveback: --%</span>
+                    </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Popover detailed trades log (positioned above footer when opened) -->
-        <div id="de-trades-popover" class="de-trades-popover hidden">
-            <div class="de-popover-header">
-                <span>SESSION TRADES EXECUTION LOG</span>
-                <button id="de-popover-close" class="de-btn-mini">✕</button>
-            </div>
-            <div id="de-trades-list" class="de-trades-list">
-                <div class="de-no-trades">No trades on this session</div>
+                <!-- Complete Unified Trade Ledger Table -->
+                <div class="bt-table-wrap">
+                    <table class="bt-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Contract</th>
+                                <th>Side</th>
+                                <th>Entry Time</th>
+                                <th>Entry Price</th>
+                                <th>Exit Time</th>
+                                <th>Exit Price</th>
+                                <th>Exit Trigger</th>
+                                <th>Points</th>
+                                <th>Charges</th>
+                                <th>Net Cash</th>
+                                <th>Outcome</th>
+                            </tr>
+                        </thead>
+                        <tbody id="bt-table-body">
+                            <!-- Populated dynamically with CE & PE trades -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- ── Bottom Status Bar ──────────────────────────────────────────────── -->
-    <footer id="bottom-bar">
-
-        <div class="stat-group">
-            <div class="stat-item">
-                <div class="stat-label">Day Open</div>
-                <div class="stat-value" id="stat-open">——</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Session High</div>
-                <div class="stat-value" id="stat-high" style="color: var(--green)">——</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Session Low</div>
-                <div class="stat-value" id="stat-low" style="color: var(--pink)">——</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">LTP</div>
-                <div class="stat-value" id="stat-ltp">——</div>
-            </div>
-        </div>
-
-        <div class="stat-group">
-            <div class="stat-item">
-                <div class="stat-label">Candles</div>
-                <div class="stat-value" id="stat-candles">0</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Symbol</div>
-                <div class="stat-value" id="stat-symbol">——</div>
-            </div>
-        </div>
-
-        <!-- Trend Gauge -->
-        <div id="gauge-wrapper">
-            <span id="gauge-label">SMF Trend</span>
-            <div id="gauge-bar-container">
-                <div id="gauge-fill" style="width: 0%; background: var(--cyan);"></div>
-            </div>
-            <span id="gauge-pct" style="color: var(--text-secondary);">—</span>
-        </div>
-
-        <!-- Market Status -->
-        <div id="market-status-badge" class="pre-market">
-            <div id="conn-dot-bottom" style="width:6px;height:6px;border-radius:50%;background:currentColor;"></div>
-            <span id="market-status-label">Checking…</span>
-        </div>
-
-    </footer>
+    <!-- Hidden compatibility elements to support core scripts & shortcuts -->
+    <div id="search-wrapper" style="display:none;">
+        <input type="text" id="search-input" placeholder="Search contract…" />
+        <div id="search-dropdown"></div>
+    </div>
 
 </div><!-- /page-shell -->
 
-<!-- ── Full-Day System Accuracy & Trade Ledger Modal ───────────────────────── -->
-<div id="backtest-report-modal" class="bt-modal-backdrop hidden" onclick="if(event.target===this)closeBacktestModal()">
-    <div class="bt-modal-card">
-        <div class="bt-modal-header">
-            <div class="bt-modal-title">
-                <span class="bt-modal-icon">📊</span>
-                <div>
-                    <h3 id="bt-modal-symbol">NIFTY Option Backtest Scorecard</h3>
-                    <p class="bt-modal-sub" id="bt-modal-sub">Historical Session Accuracy & Trade Ledger</p>
-                </div>
-            </div>
-            <div class="bt-modal-header-actions">
-                <button type="button" id="bt-btn-fastforward" class="bt-btn-action" title="Jump to End of Day & Calculate Full Session">⚡ Full Day</button>
-                <button type="button" id="bt-btn-close" class="bt-modal-close" onclick="closeBacktestModal()">✕</button>
-            </div>
-        </div>
-
-        <div class="bt-modal-body">
-            <!-- Accuracy & Performance KPI Cards -->
-            <div class="bt-kpi-grid">
-                <div class="bt-kpi-card winrate-card">
-                    <span class="bt-kpi-lbl">WIN RATE</span>
-                    <span class="bt-kpi-val" id="bt-kpi-winrate">--%</span>
-                    <span class="bt-kpi-note" id="bt-kpi-wl">0W / 0L</span>
-                </div>
-                <div class="bt-kpi-card pnl-card">
-                    <span class="bt-kpi-lbl">NET CASH IN HAND</span>
-                    <span class="bt-kpi-val" id="bt-kpi-net-cash">₹0.00</span>
-                    <span class="bt-kpi-note" id="bt-kpi-pts">+0.0 pts</span>
-                </div>
-                <div class="bt-kpi-card">
-                    <span class="bt-kpi-lbl">GROSS GAIN</span>
-                    <span class="bt-kpi-val" id="bt-kpi-gross">₹0.00</span>
-                    <span class="bt-kpi-note">1 Lot (65 Qty)</span>
-                </div>
-                <div class="bt-kpi-card charges-card">
-                    <span class="bt-kpi-lbl">CHARGES & TAXES</span>
-                    <span class="bt-kpi-val" id="bt-kpi-charges">-₹0.00</span>
-                    <span class="bt-kpi-note">Brokerage + STT + GST</span>
-                </div>
-                <div class="bt-kpi-card">
-                    <span class="bt-kpi-lbl">TOTAL TRADES</span>
-                    <span class="bt-kpi-val" id="bt-kpi-trades">0</span>
-                    <span class="bt-kpi-note" id="bt-kpi-mode">⚡ Auto System</span>
-                </div>
-                <div class="bt-kpi-card">
-                    <span class="bt-kpi-lbl">CAPTURE RATIO</span>
-                    <span class="bt-kpi-val" id="bt-kpi-capture">--%</span>
-                    <span class="bt-kpi-note" id="bt-kpi-giveback">Giveback: --%</span>
-                </div>
-            </div>
-
-            <!-- Complete Trade Ledger Table -->
-            <div class="bt-table-wrap">
-                <table class="bt-table">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Side</th>
-                            <th>Entry Time</th>
-                            <th>Entry Price</th>
-                            <th>Exit Time</th>
-                            <th>Exit Price</th>
-                            <th>Exit Trigger</th>
-                            <th>Points</th>
-                            <th>Charges</th>
-                            <th>Net Cash</th>
-                            <th>Outcome</th>
-                        </tr>
-                    </thead>
-                    <tbody id="bt-table-body">
-                        <!-- Populated dynamically -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- LightweightCharts library (same copy as main dashboard) -->
+<!-- LightweightCharts library -->
 <script src="/static/lightweight-charts.standalone.production.js"></script>
 
-<!-- Contract Analysis Controller -->
-<script src="/static/contract.js?v=20261025_1605"></script>
+<!-- Parallel Option Stations Controller -->
+<script src="/static/contract.js?v=20261025_1645"></script>
 
 </body>
 </html>

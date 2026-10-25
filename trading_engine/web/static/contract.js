@@ -103,22 +103,14 @@ const SMF = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
-    initChart();
+    await initParallelStations();
     initSearch();
     await initSessionDateSelector();
     await initExpirySelector();
     initOptionChain();
     initKeyboardShortcuts();
-    initTfControls();
-    initSMFToggle();
-    initSMFPriceToggle();
-    initTargetToggle();
-    initFitButton();
     initReplayController();
-    initDynamicExitController();
     initTradingTerminal();
-    initAtmPairPill();
-    initDualViewController();
     checkMarketStatus();
     setInterval(checkMarketStatus, 30_000);
 
@@ -128,7 +120,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (paramSym) {
         selectContract({ symbol: paramSym, display_name: paramSym });
     } else {
-        // Fetch option chain to auto-chart ATM strike
         await fetchOptionChain();
     }
 });
@@ -661,34 +652,42 @@ function updateExpiryBadge(expStr) {
     }
 }
 
+function toggleOptionChain() {
+    const panel = document.getElementById('option-chain-panel');
+    const toggleBtn = document.getElementById('btn-master-chain') || document.getElementById('btn-toggle-oc');
+    if (!panel) return;
+    MasterState.optionChainOpen = !MasterState.optionChainOpen;
+    C.optionChainOpen = MasterState.optionChainOpen;
+    if (toggleBtn) toggleBtn.classList.toggle('active', MasterState.optionChainOpen);
+    panel.classList.toggle('collapsed', !MasterState.optionChainOpen);
+    if (MasterState.optionChainOpen) {
+        fetchOptionChain();
+        if (window.innerWidth <= 900) {
+            setTimeout(() => {
+                panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 50);
+        }
+    }
+}
+window.toggleOptionChain = toggleOptionChain;
+
 function initOptionChain() {
-    const toggleBtn = document.getElementById('btn-toggle-oc');
+    const toggleBtn = document.getElementById('btn-master-chain') || document.getElementById('btn-toggle-oc');
     const closeBtn = document.getElementById('oc-close-btn');
     const rangeBtn = document.getElementById('oc-range-toggle');
     const refreshBtn = document.getElementById('oc-refresh-btn');
     const panel = document.getElementById('option-chain-panel');
 
     if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-            C.optionChainOpen = !C.optionChainOpen;
-            toggleBtn.classList.toggle('active', C.optionChainOpen);
-            panel.classList.toggle('collapsed', !C.optionChainOpen);
-            if (C.optionChainOpen) {
-                fetchOptionChain();
-                if (window.innerWidth <= 900) {
-                    setTimeout(() => {
-                        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 50);
-                }
-            }
-        });
+        toggleBtn.addEventListener('click', toggleOptionChain);
     }
 
     if (closeBtn) {
         closeBtn.addEventListener('click', () => {
+            MasterState.optionChainOpen = false;
             C.optionChainOpen = false;
             if (toggleBtn) toggleBtn.classList.remove('active');
-            panel.classList.add('collapsed');
+            if (panel) panel.classList.add('collapsed');
         });
     }
 
@@ -740,23 +739,27 @@ async function fetchOptionChain() {
             spotVal.textContent = `₹${Number(spotNum).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
         }
 
+        MasterState.optionChainData = data;
+        C.optionChainData = data;
+        if (data.atm_strike) {
+            MasterState.atmStrike = Number(data.atm_strike);
+        }
+
         renderOptionChainTable(data);
 
-        // If no contract is charted yet, automatically chart the ATM Call contract
-        if (!C.symbol && data.chain && data.chain.length > 0) {
+        // If no contract is charted yet, automatically chart the ATM strike pair
+        if (!Stations.CE.symbol && data.chain && data.chain.length > 0) {
             const atmRow = data.chain.find(i => i.is_atm) || data.chain[Math.floor(data.chain.length / 2)];
-            if (atmRow && atmRow.call && atmRow.call.symbol) {
-                selectContract({
-                    symbol: atmRow.call.symbol,
-                    display_name: atmRow.call.display_name || `${intOrRound(atmRow.strike)} CE`,
-                    expiry: data.expiry
-                });
+            if (atmRow) {
+                const strike = Number(atmRow.strike);
+                MasterState.currentStrike = strike;
+                loadStrikePair(strike, data.expiry);
             }
         }
 
         if (summary) {
             const count = data.chain ? data.chain.length : 0;
-            summary.textContent = `${count} strikes around ATM (${data.atm_strike})`;
+            summary.textContent = `${count} strikes around ATM (${data.atm_strike || MasterState.atmStrike})`;
         }
     } catch (e) {
         console.error('Failed to fetch option chain:', e);
@@ -873,57 +876,37 @@ function selectContract(contract) {
     C.symbol = symbol;
     C.displayName = contract.display_name || symbol;
 
-    // Update UI
-    document.getElementById('search-input').value = C.displayName;
-    document.getElementById('badge-symbol').textContent = C.displayName;
-    document.getElementById('badge-ltp').textContent = '——';
-    document.getElementById('badge-chg').textContent = '';
-    document.getElementById('stat-symbol').textContent = symbol;
+    const sInput = document.getElementById('search-input');
+    if (sInput) sInput.value = C.displayName;
+    const badgeSym = document.getElementById('badge-symbol');
+    if (badgeSym) badgeSym.textContent = C.displayName;
 
     if (contract.expiry) {
+        MasterState.selectedExpiry = contract.expiry;
         C.selectedExpiry = contract.expiry;
-        const hSel = document.getElementById('expiry-select');
+        const hSel = document.getElementById('master-expiry-select') || document.getElementById('expiry-select');
         const ocSel = document.getElementById('oc-expiry-select');
         if (hSel) hSel.value = contract.expiry;
         if (ocSel) ocSel.value = contract.expiry;
-        updateExpiryBadge(contract.expiry);
     }
-    if (C.optionChainData) {
-        renderOptionChainTable(C.optionChainData);
-    }
-
-    // Update ATM Pair Pill & Dual View
-    updateAtmPairPill();
-    refreshSecondaryContract();
 
     // Auto-close Option Chain drawer on contract select so user gets full chart view
     const ocPanel = document.getElementById('option-chain-panel');
-    const toggleBtn = document.getElementById('btn-toggle-oc');
-    if (ocPanel && C.optionChainOpen) {
-        C.optionChainOpen = false;
+    const toggleBtn = document.getElementById('btn-master-chain') || document.getElementById('btn-toggle-oc');
+    if (ocPanel && MasterState.optionChainOpen) {
+        MasterState.optionChainOpen = false;
         if (toggleBtn) toggleBtn.classList.remove('active');
         ocPanel.classList.add('collapsed');
     }
 
-    hideOverlay();
-    showLoading(true);
+    // Extract strike number
+    const match = symbol.match(/(\d{4,6})(CE|PE)/i) || (contract.display_name && contract.display_name.match(/(\d{4,6})/));
+    let strike = MasterState.currentStrike;
+    if (match) {
+        strike = Number(match[1]);
+    }
 
-    // Disconnect old WS
-    disconnectContractWS();
-
-    // Reset chart
-    clearChart();
-
-    const isToday = !C.selectedSessionDate || C.selectedSessionDate === 'today';
-    loadContractCandles(symbol, C.selectedSessionDate || 'today').then(() => {
-        showLoading(false);
-        // Then connect WebSocket for live stream if viewing today
-        if (isToday) {
-            connectContractWS(symbol);
-        } else if (C.rawCandles && C.rawCandles.length > 0) {
-            startReplay();
-        }
-    });
+    loadStrikePair(strike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4139,6 +4122,7 @@ function checkMarketStatus() {
 
     const badge = document.getElementById('market-status-badge');
     const label = document.getElementById('market-status-label');
+    if (!badge || !label) return;
 
     if (!isWeekday) {
         badge.className = 'closed';
@@ -4218,7 +4202,7 @@ const Replay = {
 };
 
 function initReplayController() {
-    const toggleBtn = document.getElementById('btn-replay-toggle');
+    const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
     const dock = document.getElementById('replay-bar');
     const playBtn = document.getElementById('rp-btn-play');
     const startBtn = document.getElementById('rp-btn-start');
@@ -4233,7 +4217,7 @@ function initReplayController() {
 
     const modeAutoBtn = document.getElementById('rp-mode-auto');
     const modeManualBtn = document.getElementById('rp-mode-manual');
-    const scorecardBtn = document.getElementById('rp-btn-scorecard');
+    const scorecardBtn = document.getElementById('btn-master-report') || document.getElementById('rp-btn-scorecard');
     const ffBtn = document.getElementById('bt-btn-fastforward');
 
     if (toggleBtn) {
@@ -4591,35 +4575,51 @@ function renderReplayStep() {
         evaluateReplayCandleTrading(curCandle);
 
         // 3. Synchronize secondary contract & counterpart signal simultaneously
-        if (C.secondaryRawCandles && C.secondaryRawCandles.length > 0) {
-            const secSliced = C.secondaryRawCandles.filter(c => c.time <= curCandle.time);
-            if (secSliced.length > 0) {
-                const secAgg = aggregateCandles(secSliced, C.currentTf);
-                const secSmf = computeSMF(secAgg);
-                C.secondarySmfLastResult = secSmf;
-                if (C.secondaryCandleSeries) {
-                    const colored = secAgg.map((c, i) => ({
-                        ...c,
-                        color: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        borderColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        wickColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    }));
-                    C.secondaryCandleSeries.setData(colored);
-                    requestAnimationFrame(renderSecondarySMFCanvas);
-                }
+        if (Stations && Stations.PE && Stations.PE.rawCandles && Stations.PE.rawCandles.length > 0) {
+            const peSliced = Stations.PE.rawCandles.filter(c => c.time <= curCandle.time);
+            if (peSliced.length > 0 && Stations.PE.candleSeries) {
+                const peAgg = aggregateCandles(peSliced, MasterState.currentTf);
+                const peSmf = computeSMF(peAgg);
+                Stations.PE.smfResult = peSmf;
+                const colored = peAgg.map((c, i) => ({
+                    ...c,
+                    color: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    borderColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    wickColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                }));
+                Stations.PE.candleSeries.setData(colored);
 
-                const lastSec = secAgg[secAgg.length - 1];
-                const secLtpEl = document.getElementById('sec-chart-ltp');
-                if (secLtpEl) secLtpEl.textContent = `₹${lastSec.close.toFixed(2)}`;
-                const isBull = secSmf.lastSignal[secSmf.n - 1] === 1;
-                const secSigEl = document.getElementById('sec-chart-signal');
-                if (secSigEl) {
-                    secSigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
-                    secSigEl.style.color = isBull ? '#00f2a9' : '#ff4d6d';
+                const dePe = computeSMFDynamicExit(peAgg, peSmf, 'V5');
+                Stations.PE.dynamicExitResult = dePe;
+                if (dePe) {
+                    if (Stations.PE.dynamicTrailSeries && dePe.trailPoints) Stations.PE.dynamicTrailSeries.setData(dePe.trailPoints);
+                    if (Stations.PE.dynamicLadderSeries && dePe.ladderPoints) Stations.PE.dynamicLadderSeries.setData(dePe.ladderPoints);
+                    if (dePe.markers) Stations.PE.candleSeries.setMarkers(dePe.markers);
                 }
+                updateStationTopBar(Stations.PE, peAgg);
+                updateStationFooter(Stations.PE);
+                renderStationSMFCanvas(Stations.PE);
             }
         }
-        updateAtmPairPill();
+        if (Stations && Stations.CE && Stations.CE.rawCandles && Stations.CE.rawCandles.length > 0) {
+            const ceSliced = Stations.CE.rawCandles.filter(c => c.time <= curCandle.time);
+            if (ceSliced.length > 0 && Stations.CE.candleSeries) {
+                const ceAgg = aggregateCandles(ceSliced, MasterState.currentTf);
+                const ceSmf = computeSMF(ceAgg);
+                Stations.CE.smfResult = ceSmf;
+                const deCe = computeSMFDynamicExit(ceAgg, ceSmf, 'V5');
+                Stations.CE.dynamicExitResult = deCe;
+                if (deCe) {
+                    if (Stations.CE.dynamicTrailSeries && deCe.trailPoints) Stations.CE.dynamicTrailSeries.setData(deCe.trailPoints);
+                    if (Stations.CE.dynamicLadderSeries && deCe.ladderPoints) Stations.CE.dynamicLadderSeries.setData(deCe.ladderPoints);
+                    if (deCe.markers) Stations.CE.candleSeries.setMarkers(deCe.markers);
+                }
+                updateStationTopBar(Stations.CE, ceAgg);
+                updateStationFooter(Stations.CE);
+                renderStationSMFCanvas(Stations.CE);
+            }
+        }
+        updatePortfolioSummary();
     }
 }
 
@@ -4829,10 +4829,27 @@ function closeManualReplayPosition(exitPx, reason = 'MANUAL_EXIT') {
     if (curCandle) evaluateManualReplayTrading(curCandle);
 }
 
+function setBacktestFilter(filter) {
+    MasterState.btFilter = filter || 'ALL';
+    const btnAll = document.getElementById('bt-filter-all');
+    const btnCe = document.getElementById('bt-filter-ce');
+    const btnPe = document.getElementById('bt-filter-pe');
+
+    if (btnAll) btnAll.classList.toggle('active', MasterState.btFilter === 'ALL');
+    if (btnCe) btnCe.classList.toggle('active', MasterState.btFilter === 'CE');
+    if (btnPe) btnPe.classList.toggle('active', MasterState.btFilter === 'PE');
+
+    renderBacktestModalContent();
+}
+
 function openBacktestModal() {
     const modal = document.getElementById('backtest-report-modal');
     if (!modal) return;
+    renderBacktestModalContent();
+    modal.classList.remove('hidden');
+}
 
+function renderBacktestModalContent() {
     const symEl = document.getElementById('bt-modal-symbol');
     const subEl = document.getElementById('bt-modal-sub');
     const kpiWin = document.getElementById('bt-kpi-winrate');
@@ -4842,75 +4859,73 @@ function openBacktestModal() {
     const kpiGross = document.getElementById('bt-kpi-gross');
     const kpiCharges = document.getElementById('bt-kpi-charges');
     const kpiTrades = document.getElementById('bt-kpi-trades');
-    const kpiMode = document.getElementById('bt-kpi-mode');
     const kpiCapture = document.getElementById('bt-kpi-capture');
     const kpiGiveback = document.getElementById('bt-kpi-giveback');
+    const kpiBreakdown = document.getElementById('bt-kpi-breakdown');
     const tableBody = document.getElementById('bt-table-body');
 
-    if (symEl) symEl.textContent = `${C.symbol || 'Option Contract'} — Backtest Scorecard`;
-    if (subEl) subEl.textContent = `Session: ${C.selectedSessionDate || 'Replay'} | Mode: ${Replay.mode === 'auto' ? '⚡ Auto-System Dependent' : '✍️ Manual Replay Practice'}`;
-    if (kpiMode) kpiMode.textContent = Replay.mode === 'auto' ? '⚡ Auto System' : '✍️ Manual Practice';
+    const countAllEl = document.getElementById('bt-count-all');
+    const countCeEl = document.getElementById('bt-count-ce');
+    const countPeEl = document.getElementById('bt-count-pe');
 
-    let tradesList = [];
-    let captureRatio = 0;
-    let giveBack = 0;
+    // CE trades
+    const ceTrades = (Stations.CE.dynamicExitResult?.trades || []).map(t => ({
+        ...t,
+        contractType: 'CE',
+        side: 'BUY',
+        symbolName: Stations.CE.displayName || Stations.CE.symbol || 'CE',
+        grossRs: (t.pnlPts || 0) * (Stations.CE.lotUnits || 65),
+        charges: 55,
+        netCash: (t.pnlPts || 0) * (Stations.CE.lotUnits || 65) - 55,
+        isWin: (t.pnlPts || 0) >= 0,
+    }));
 
-    if (Replay.mode === 'auto') {
-        const de = C.dynamicExitLastResult;
-        if (de && de.trades) {
-            tradesList = de.trades.map(t => {
-                const grossRs = (t.pnlPts || 0) * 65;
-                const charges = 55;
-                const netCash = grossRs - charges;
-                return {
-                    num: t.tradeNum,
-                    side: 'BUY',
-                    entryTime: t.entryTime || '--',
-                    entryPrice: t.entryPrice,
-                    exitTime: t.exitTime || '--',
-                    exitPrice: t.exitPrice,
-                    exitReason: t.exitReason || t.reason || 'EXIT',
-                    pnlPts: t.pnlPts || 0,
-                    grossRs: grossRs,
-                    charges: charges,
-                    netCash: netCash,
-                    isWin: (t.pnlPts || 0) >= 0,
-                    t1Booked: t.t1Booked,
-                    target1: t.target1
-                };
-            });
-            if (de.summary) {
-                captureRatio = de.summary.captureRatio || 0;
-                giveBack = de.summary.giveBack || 0;
-            }
-        }
+    // PE trades
+    const peTrades = (Stations.PE.dynamicExitResult?.trades || []).map(t => ({
+        ...t,
+        contractType: 'PE',
+        side: 'BUY',
+        symbolName: Stations.PE.displayName || Stations.PE.symbol || 'PE',
+        grossRs: (t.pnlPts || 0) * (Stations.PE.lotUnits || 65),
+        charges: 55,
+        netCash: (t.pnlPts || 0) * (Stations.PE.lotUnits || 65) - 55,
+        isWin: (t.pnlPts || 0) >= 0,
+    }));
+
+    if (countAllEl) countAllEl.textContent = ceTrades.length + peTrades.length;
+    if (countCeEl) countCeEl.textContent = ceTrades.length;
+    if (countPeEl) countPeEl.textContent = peTrades.length;
+
+    let activeTradesList = [];
+    if (MasterState.btFilter === 'CE') {
+        activeTradesList = ceTrades;
+    } else if (MasterState.btFilter === 'PE') {
+        activeTradesList = peTrades;
     } else {
-        tradesList = Replay.manualTrades.map(t => ({
-            num: t.tradeNum,
-            side: t.side,
-            entryTime: t.entryTime,
-            entryPrice: t.entryPrice,
-            exitTime: t.exitTime,
-            exitPrice: t.exitPrice,
-            exitReason: t.exitReason,
-            pnlPts: t.pnlPts,
-            grossRs: t.grossRs,
-            charges: t.charges,
-            netCash: t.netCash,
-            isWin: t.pnlPts >= 0,
-            t1Booked: false,
-            target1: null
-        }));
+        // Combined chronologically by entryTime
+        activeTradesList = [...ceTrades, ...peTrades].sort((a, b) => (a.entryTime || '').localeCompare(b.entryTime || ''));
     }
 
-    const totalTrades = tradesList.length;
-    const winTrades = tradesList.filter(t => t.isWin).length;
+    if (symEl) {
+        if (MasterState.btFilter === 'CE') symEl.textContent = `${Stations.CE.displayName || 'CALL (CE)'} — Backtest Scorecard`;
+        else if (MasterState.btFilter === 'PE') symEl.textContent = `${Stations.PE.displayName || 'PUT (PE)'} — Backtest Scorecard`;
+        else symEl.textContent = `${MasterState.underlying} ${MasterState.currentStrike} (CE + PE) — Combined Scorecard`;
+    }
+
+    if (subEl) subEl.textContent = `Session: ${MasterState.selectedSessionDate || 'Replay'} | Filter: ${MasterState.btFilter} | Mode: ⚡ Auto-System Dependent`;
+
+    const totalTrades = activeTradesList.length;
+    const winTrades = activeTradesList.filter(t => t.isWin).length;
     const lossTrades = totalTrades - winTrades;
     const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
-    const totalPts = tradesList.reduce((acc, t) => acc + t.pnlPts, 0);
-    const totalGross = totalPts * 65;
-    const totalCharges = totalTrades * 55;
+    const totalPts = activeTradesList.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
+    const totalGross = activeTradesList.reduce((acc, t) => acc + (t.grossRs || 0), 0);
+    const totalCharges = activeTradesList.reduce((acc, t) => acc + (t.charges || 55), 0);
     const totalNetCash = totalGross - totalCharges;
+
+    const winningTrades = activeTradesList.filter(t => t.isWin);
+    const avgCapture = winningTrades.length > 0 ? (winningTrades.reduce((acc, t) => acc + (t.captureRatio || 0), 0) / winningTrades.length) * 100 : 0;
+    const avgGiveback = winningTrades.length > 0 ? (winningTrades.reduce((acc, t) => acc + (t.giveBack || 0), 0) / winningTrades.length) * 100 : 0;
 
     if (kpiWin) kpiWin.textContent = `${winRate.toFixed(0)}%`;
     if (kpiWl) kpiWl.textContent = `${winTrades}W / ${lossTrades}L`;
@@ -4929,48 +4944,54 @@ function openBacktestModal() {
     }
     if (kpiCharges) kpiCharges.textContent = `-₹${totalCharges.toFixed(0)}`;
     if (kpiTrades) kpiTrades.textContent = totalTrades;
-    if (kpiCapture) kpiCapture.textContent = `${captureRatio.toFixed(1)}%`;
-    if (kpiGiveback) kpiGiveback.textContent = `Giveback: ${giveBack.toFixed(1)}%`;
+    if (kpiBreakdown) kpiBreakdown.textContent = `${ceTrades.length} CE · ${peTrades.length} PE`;
+    if (kpiCapture) kpiCapture.textContent = `${avgCapture.toFixed(1)}%`;
+    if (kpiGiveback) kpiGiveback.textContent = `Giveback: ${avgGiveback.toFixed(1)}%`;
 
     if (tableBody) {
-        if (tradesList.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: #64748b; padding: 24px;">No trades executed yet. Step forward or click "⚡ Full Day" to compute backtest.</td></tr>`;
+        if (activeTradesList.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="12" style="text-align: center; color: #64748b; padding: 24px;">No trades executed for this filter yet. Step forward in Replay or click "⚡ Full Day" to compute backtest.</td></tr>`;
         } else {
-            tableBody.innerHTML = tradesList.map(t => {
-                const signPts = t.pnlPts >= 0 ? '+' : '';
-                const signNet = t.netCash >= 0 ? '+' : '';
+            tableBody.innerHTML = activeTradesList.map((t, idx) => {
+                const signPts = (t.pnlPts || 0) >= 0 ? '+' : '';
+                const signNet = (t.netCash || 0) >= 0 ? '+' : '';
+                const isCe = t.contractType === 'CE';
+                const badgeHtml = isCe
+                    ? `<span class="station-badge ce-badge">CE</span>`
+                    : `<span class="station-badge pe-badge">PE</span>`;
                 const exitPriceHtml = (t.t1Booked && t.target1)
                     ? `₹${t.target1.toFixed(2)} <span style="font-size:10px;color:#fbbf24;">(50%)</span><br><span style="color:#94a3b8;font-size:11px;">₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'} (50%)</span>`
                     : `₹${t.exitPrice ? t.exitPrice.toFixed(2) : '-'}`;
                 const exitReasonHtml = t.t1Booked
                     ? `<span style="color: #fbbf24; font-weight: 600;">🎯 T1 (50%)</span> + <span style="color: #94a3b8;">${t.exitReason} (50%)</span>`
-                    : `${t.exitReason}`;
+                    : `${t.exitReason || 'EXIT'}`;
+
                 return `
                     <tr>
-                        <td><strong>#${t.num}</strong></td>
-                        <td style="color: #34d399; font-weight: 700;">${t.side}</td>
-                        <td>${t.entryTime}</td>
-                        <td>₹${t.entryPrice.toFixed(2)}</td>
-                        <td>${t.exitTime}</td>
+                        <td><strong>#${idx + 1}</strong></td>
+                        <td>${badgeHtml} <span style="font-size:11px;color:#cbd5e1;">${t.symbolName || t.contractType}</span></td>
+                        <td style="color: #34d399; font-weight: 700;">BUY</td>
+                        <td>${t.entryTime || '--'}</td>
+                        <td>₹${(t.entryPrice || 0).toFixed(2)}</td>
+                        <td>${t.exitTime || '--'}</td>
                         <td>${exitPriceHtml}</td>
                         <td style="font-size: 11px;">${exitReasonHtml}</td>
-                        <td style="color: ${t.pnlPts >= 0 ? '#34d399' : '#f87171'}; font-weight: 700;">${signPts}${t.pnlPts.toFixed(2)}</td>
+                        <td style="color: ${(t.pnlPts || 0) >= 0 ? '#34d399' : '#f87171'}; font-weight: 700;">${signPts}${(t.pnlPts || 0).toFixed(2)}</td>
                         <td style="color: #f59e0b;">-₹${t.charges}</td>
-                        <td style="color: ${t.netCash >= 0 ? '#34d399' : '#f87171'}; font-weight: 800;">${signNet}₹${Math.round(t.netCash).toLocaleString('en-IN')}</td>
+                        <td style="color: ${(t.netCash || 0) >= 0 ? '#34d399' : '#f87171'}; font-weight: 800;">${signNet}₹${Math.round(t.netCash).toLocaleString('en-IN')}</td>
                         <td><span class="${t.isWin ? 'bt-pill-win' : 'bt-pill-loss'}">${t.isWin ? 'WIN' : 'LOSS'}</span></td>
                     </tr>
                 `;
             }).join('');
         }
     }
-
-    modal.classList.remove('hidden');
 }
 
 function closeBacktestModal() {
     const modal = document.getElementById('backtest-report-modal');
     if (modal) modal.classList.add('hidden');
 }
+window.setBacktestFilter = setBacktestFilter;
 window.openBacktestModal = openBacktestModal;
 window.closeBacktestModal = closeBacktestModal;
 
@@ -5987,253 +6008,136 @@ function initTradingTerminal() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ── HYBRID DUAL ATM STRIKE PAIR & SPLIT-SCREEN CONTROLLER ────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ── PARALLEL OPTION STATIONS ARCHITECTURE (CALL STATION + PUT STATION) ────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getOppositeContract(contract) {
-    if (!contract || !contract.symbol) return null;
-    const sym = contract.symbol;
-    const disp = contract.display_name || sym;
-    const isCe = /CE$/i.test(sym);
-    const isPe = /PE$/i.test(sym);
-    if (!isCe && !isPe) return null;
-
-    const oppSym = isCe ? sym.replace(/CE$/i, 'PE') : sym.replace(/PE$/i, 'CE');
-    const oppDisp = isCe ? disp.replace(/CE$/i, 'PE') : disp.replace(/PE$/i, 'CE');
-    return {
-        symbol: oppSym,
-        display_name: oppDisp,
-        expiry: contract.expiry || C.selectedExpiry
-    };
-}
-
-function getAtmPairContracts() {
-    let ceContract = null;
-    let peContract = null;
-    const currentSym = C.symbol || '';
-    const isCurrentCe = /CE$/i.test(currentSym);
-
-    if (C.optionChainData && Array.isArray(C.optionChainData.chain)) {
-        let matchRow = C.optionChainData.chain.find(r => 
-            (r.call && r.call.symbol === currentSym) || 
-            (r.put && r.put.symbol === currentSym)
-        );
-        if (!matchRow) {
-            matchRow = C.optionChainData.chain.find(r => r.is_atm) || C.optionChainData.chain[Math.floor(C.optionChainData.chain.length / 2)];
-        }
-        if (matchRow) {
-            if (matchRow.call && matchRow.call.symbol) {
-                ceContract = { ...matchRow.call, expiry: matchRow.call.expiry || C.selectedExpiry };
-            }
-            if (matchRow.put && matchRow.put.symbol) {
-                peContract = { ...matchRow.put, expiry: matchRow.put.expiry || C.selectedExpiry };
-            }
-        }
+const Stations = {
+    CE: {
+        type: 'CE',
+        symbol: null,
+        displayName: null,
+        chart: null,
+        candleSeries: null,
+        dynamicTrailSeries: null,
+        dynamicLadderSeries: null,
+        canvas: null,
+        container: null,
+        rawCandles: [],
+        smfResult: null,
+        dynamicExitResult: null,
+        ws: null,
+        wsPingInterval: null,
+        tradingLots: 1,
+        lotUnits: 65,
+        activePosition: null,
+        targetsEnabled: true,
+        smfEnabled: true,
+        showPrice: false,
+        dynamicExitEnabled: true,
+    },
+    PE: {
+        type: 'PE',
+        symbol: null,
+        displayName: null,
+        chart: null,
+        candleSeries: null,
+        dynamicTrailSeries: null,
+        dynamicLadderSeries: null,
+        canvas: null,
+        container: null,
+        rawCandles: [],
+        smfResult: null,
+        dynamicExitResult: null,
+        ws: null,
+        wsPingInterval: null,
+        tradingLots: 1,
+        lotUnits: 65,
+        activePosition: null,
+        targetsEnabled: true,
+        smfEnabled: true,
+        showPrice: false,
+        dynamicExitEnabled: true,
     }
+};
 
-    if (!ceContract || !peContract) {
-        if (isCurrentCe) {
-            ceContract = { symbol: currentSym, display_name: C.displayName || currentSym, expiry: C.selectedExpiry };
-            peContract = getOppositeContract(ceContract);
-        } else {
-            peContract = { symbol: currentSym, display_name: C.displayName || currentSym, expiry: C.selectedExpiry };
-            ceContract = getOppositeContract(peContract);
-        }
-    }
+const MasterState = {
+    underlying: 'NIFTY',
+    currentStrike: 22700,
+    atmStrike: 22700,
+    strikeStep: 50,
+    selectedExpiry: '',
+    selectedSessionDate: 'today',
+    availableSessionDates: [],
+    currentTf: 1,
+    optionChainOpen: false,
+    optionChainData: null,
+    optionChainFullRange: false,
+    tradingState: null,
+    btFilter: 'ALL',
+    combinedPortfolioPnL: 0,
+};
 
-    return { ce: ceContract, pe: peContract };
-}
+async function initParallelStations() {
+    createStationChart(Stations.CE, 'ce-chart-container', 'ce-smf-canvas');
+    createStationChart(Stations.PE, 'pe-chart-container', 'pe-smf-canvas');
 
-function updateAtmPairPill() {
-    const pair = getAtmPairContracts();
-    const isCurrentCe = /CE$/i.test(C.symbol || '');
+    C.chart = Stations.CE.chart;
+    C.candleSeries = Stations.CE.candleSeries;
+    C.secondaryChart = Stations.PE.chart;
+    C.secondaryCandleSeries = Stations.PE.candleSeries;
 
-    const btnCe = document.getElementById('pill-btn-ce');
-    const btnPe = document.getElementById('pill-btn-pe');
-    const ltpCeEl = document.getElementById('pill-ce-ltp');
-    const ltpPeEl = document.getElementById('pill-pe-ltp');
-    const radarCe = document.getElementById('pill-ce-radar');
-    const radarPe = document.getElementById('pill-pe-radar');
+    bindStationControls(Stations.CE);
+    bindStationControls(Stations.PE);
+    bindMasterHeaderControls();
 
-    if (btnCe) btnCe.classList.toggle('active', isCurrentCe);
-    if (btnPe) btnPe.classList.toggle('active', !isCurrentCe);
-
-    // Extract strike number
-    const strikeMatch = (C.symbol || '').match(/(\d{4,6})(CE|PE)$/i);
-    const strikeStr = strikeMatch ? strikeMatch[1] : '';
-
-    if (btnCe) {
-        const typeEl = btnCe.querySelector('.pill-type');
-        if (typeEl) typeEl.textContent = strikeStr ? `${strikeStr} CE` : 'CE';
-    }
-    if (btnPe) {
-        const typeEl = btnPe.querySelector('.pill-type');
-        if (typeEl) typeEl.textContent = strikeStr ? `${strikeStr} PE` : 'PE';
-    }
-
-    // Set prices
-    if (isCurrentCe) {
-        if (ltpCeEl && C.sessionClose != null) {
-            ltpCeEl.textContent = `₹${C.sessionClose.toFixed(1)}`;
-        }
-        if (ltpPeEl) {
-            if (C.dualMode && C.secondarySmfLastResult && C.secondaryRawCandles.length > 0) {
-                const lastPe = C.secondaryRawCandles[C.secondaryRawCandles.length - 1];
-                if (lastPe) ltpPeEl.textContent = `₹${lastPe.close.toFixed(1)}`;
-            } else if (pair.pe && pair.pe.ltp != null) {
-                ltpPeEl.textContent = `₹${Number(pair.pe.ltp).toFixed(1)}`;
-            }
-        }
-    } else {
-        if (ltpPeEl && C.sessionClose != null) {
-            ltpPeEl.textContent = `₹${C.sessionClose.toFixed(1)}`;
-        }
-        if (ltpCeEl) {
-            if (C.dualMode && C.secondarySmfLastResult && C.secondaryRawCandles.length > 0) {
-                const lastCe = C.secondaryRawCandles[C.secondaryRawCandles.length - 1];
-                if (lastCe) ltpCeEl.textContent = `₹${lastCe.close.toFixed(1)}`;
-            } else if (pair.ce && pair.ce.ltp != null) {
-                ltpCeEl.textContent = `₹${Number(pair.ce.ltp).toFixed(1)}`;
-            }
-        }
-    }
-
-    // Radar Signals (Bullish / Reversal alert)
-    const isPrimaryBull = C.smfLastResult && C.smfLastResult.lastSignal && C.smfLastResult.lastSignal[C.smfLastResult.n - 1] === 1;
-    let isSecondaryBull = false;
-    if (C.dualMode && C.secondarySmfLastResult && C.secondarySmfLastResult.lastSignal) {
-        isSecondaryBull = C.secondarySmfLastResult.lastSignal[C.secondarySmfLastResult.n - 1] === 1;
-    }
-
-    if (isCurrentCe) {
-        if (radarCe) radarCe.classList.toggle('hidden', !isPrimaryBull);
-        if (radarPe) radarPe.classList.toggle('hidden', !isSecondaryBull);
-    } else {
-        if (radarPe) radarPe.classList.toggle('hidden', !isPrimaryBull);
-        if (radarCe) radarCe.classList.toggle('hidden', !isSecondaryBull);
-    }
-}
-
-function updateAtmPairPillLiveLtp(ltp) {
-    if (ltp == null) return;
-    const isCurrentCe = /CE$/i.test(C.symbol || '');
-    const ltpEl = isCurrentCe ? document.getElementById('pill-ce-ltp') : document.getElementById('pill-pe-ltp');
-    if (ltpEl) {
-        ltpEl.textContent = `₹${ltp.toFixed(1)}`;
-    }
-}
-
-function initAtmPairPill() {
-    const btnCe = document.getElementById('pill-btn-ce');
-    const btnPe = document.getElementById('pill-btn-pe');
-    const btnDual = document.getElementById('btn-toggle-dual');
-
-    if (btnCe) {
-        btnCe.addEventListener('click', () => {
-            const isCurrentCe = /CE$/i.test(C.symbol || '');
-            if (isCurrentCe) return;
-            const pair = getAtmPairContracts();
-            if (pair.ce) {
-                selectContract(pair.ce);
-            }
+    let syncLock = false;
+    if (Stations.CE.chart && Stations.PE.chart) {
+        Stations.CE.chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+            if (syncLock || !range) return;
+            syncLock = true;
+            Stations.PE.chart.timeScale().setVisibleLogicalRange(range);
+            syncLock = false;
+            requestAnimationFrame(() => {
+                renderStationSMFCanvas(Stations.CE);
+                renderStationSMFCanvas(Stations.PE);
+            });
         });
-    }
-
-    if (btnPe) {
-        btnPe.addEventListener('click', () => {
-            const isCurrentPe = /PE$/i.test(C.symbol || '');
-            if (isCurrentPe) return;
-            const pair = getAtmPairContracts();
-            if (pair.pe) {
-                selectContract(pair.pe);
-            }
-        });
-    }
-
-    if (btnDual) {
-        btnDual.addEventListener('click', () => {
-            toggleDualView();
+        Stations.PE.chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+            if (syncLock || !range) return;
+            syncLock = true;
+            Stations.CE.chart.timeScale().setVisibleLogicalRange(range);
+            syncLock = false;
+            requestAnimationFrame(() => {
+                renderStationSMFCanvas(Stations.CE);
+                renderStationSMFCanvas(Stations.PE);
+            });
         });
     }
 }
 
-function initDualViewController() {
-    const btnClose = document.getElementById('btn-close-dual');
-    if (btnClose) {
-        btnClose.addEventListener('click', () => {
-            toggleDualView(false);
-        });
-    }
+function createStationChart(station, containerId, canvasId) {
+    const container = document.getElementById(containerId);
+    const canvas = document.getElementById(canvasId);
+    if (!container) return;
 
-    const secTitle = document.getElementById('sec-chart-title');
-    const secBadge = document.getElementById('sec-chart-badge');
-    const flipHandler = () => {
-        if (C.secondaryContract) {
-            selectContract(C.secondaryContract);
-        }
-    };
-    if (secTitle) secTitle.addEventListener('click', flipHandler);
-    if (secBadge) secBadge.addEventListener('click', flipHandler);
-}
+    station.container = container;
+    station.canvas = canvas;
 
-function toggleDualView(forceState) {
-    const nextState = forceState !== undefined ? !!forceState : !C.dualMode;
-    C.dualMode = nextState;
-
-    const chartArea = document.getElementById('chart-area');
-    const secWrapper = document.getElementById('secondary-chart-wrapper');
-    const btnDual = document.getElementById('btn-toggle-dual');
-
-    if (chartArea) chartArea.classList.toggle('dual-active', C.dualMode);
-    if (secWrapper) secWrapper.classList.toggle('hidden', !C.dualMode);
-    if (btnDual) btnDual.classList.toggle('active', C.dualMode);
-
-    // Sync primary chart container
-    const primaryContainer = document.getElementById('contract-chart-container');
-    if (C.chart && primaryContainer) {
-        setTimeout(() => {
-            const pw = primaryContainer.clientWidth;
-            const ph = primaryContainer.clientHeight;
-            if (pw > 0 && ph > 0) {
-                C.chart.applyOptions({ width: pw, height: ph });
-            }
-            requestAnimationFrame(renderSMFCanvas);
-        }, 50);
-    }
-
-    if (C.dualMode) {
-        ensureSecondaryChart();
-        refreshSecondaryContract();
-    } else {
-        disconnectSecondaryWS();
-        setTimeout(() => {
-            if (C.chart && primaryContainer) {
-                C.chart.applyOptions({ width: primaryContainer.clientWidth, height: primaryContainer.clientHeight });
-            }
-            requestAnimationFrame(renderSMFCanvas);
-        }, 100);
-    }
-}
-
-function ensureSecondaryChart() {
-    const secCont = document.getElementById('secondary-chart-container');
-    const secCanvas = document.getElementById('secondary-smf-canvas');
-    if (!secCont || C.secondaryChart) return;
-
-    C.secondaryChart = LightweightCharts.createChart(secCont, {
+    const chart = LightweightCharts.createChart(container, {
         layout: {
             background: { type: 'solid', color: '#070b14' },
             textColor: '#6a8fac',
             fontFamily: "'Inter', sans-serif",
-            fontSize: 10,
+            fontSize: 11,
         },
         grid: {
             vertLines: { color: 'rgba(0, 195, 255, 0.05)' },
             horzLines: { color: 'rgba(0, 195, 255, 0.05)' },
         },
         crosshair: {
-            vertLine: { color: 'rgba(0, 195, 255, 0.5)', width: 1, style: 2 },
-            horzLine: { color: 'rgba(0, 195, 255, 0.5)', width: 1, style: 2 },
+            vertLine: { color: station.type === 'CE' ? 'rgba(0, 242, 169, 0.5)' : 'rgba(255, 0, 93, 0.5)', width: 1, style: 2 },
+            horzLine: { color: station.type === 'CE' ? 'rgba(0, 242, 169, 0.5)' : 'rgba(255, 0, 93, 0.5)', width: 1, style: 2 },
         },
         rightPriceScale: {
             borderColor: 'rgba(0, 195, 255, 0.15)',
@@ -6253,21 +6157,17 @@ function ensureSecondaryChart() {
                 return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
             },
         },
-        handleScale: {
-            axisPressedMouseMove: { time: true, price: true },
-            axisDoubleClickReset: { time: true, price: true },
-            mouseWheel: true,
-            pinch: true,
+        localization: {
+            timeFormatter: (t) => {
+                const d = new Date(t * 1000);
+                return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            },
         },
-        handleScroll: {
-            mouseWheel: true,
-            pressedMouseMove: true,
-            horzTouchDrag: true,
-            vertTouchDrag: true,
-        },
+        handleScale: { axisPressedMouseMove: { time: true, price: true }, axisDoubleClickReset: { time: true, price: true }, mouseWheel: true, pinch: true },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
     });
 
-    C.secondaryCandleSeries = C.secondaryChart.addCandlestickSeries({
+    const candleSeries = chart.addCandlestickSeries({
         upColor: SMF.bullColor,
         downColor: SMF.bearColor,
         borderUpColor: SMF.bullColor,
@@ -6277,109 +6177,397 @@ function ensureSecondaryChart() {
         autoscaleInfoProvider: (original) => {
             const res = original();
             if (res && res.priceRange) {
-                return {
-                    priceRange: {
-                        minValue: Math.max(0, res.priceRange.minValue),
-                        maxValue: Math.max(1, res.priceRange.maxValue),
-                    },
-                };
+                return { priceRange: { minValue: Math.max(0, res.priceRange.minValue), maxValue: Math.max(1, res.priceRange.maxValue) } };
             }
             return res;
         },
     });
 
-    // Timescale lock-step sync between Primary and Secondary charts
-    let syncTimeScaleLock = false;
-    C.chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (syncTimeScaleLock || !C.secondaryChart || !range) return;
-        syncTimeScaleLock = true;
-        C.secondaryChart.timeScale().setVisibleLogicalRange(range);
-        syncTimeScaleLock = false;
-        requestAnimationFrame(renderSecondarySMFCanvas);
+    station.dynamicTrailSeries = chart.addLineSeries({
+        color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
     });
-    C.secondaryChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (syncTimeScaleLock || !C.chart || !range) return;
-        syncTimeScaleLock = true;
-        C.chart.timeScale().setVisibleLogicalRange(range);
-        syncTimeScaleLock = false;
-        requestAnimationFrame(renderSMFCanvas);
+    station.dynamicLadderSeries = chart.addLineSeries({
+        color: '#06b6d4', lineWidth: 1.5, lineStyle: 2, priceLineVisible: false, lastValueVisible: false,
     });
 
-    // Secondary Crosshair / canvas updates
-    C.secondaryChart.subscribeCrosshairMove(() => {
-        requestAnimationFrame(renderSecondarySMFCanvas);
+    station.chart = chart;
+    station.candleSeries = candleSeries;
+
+    chart.subscribeCrosshairMove(() => {
+        requestAnimationFrame(() => renderStationSMFCanvas(station));
     });
 
-    const syncSecCanvas = () => {
-        if (!C.secondaryChart || !secCont) return;
-        const sw = secCont.clientWidth;
-        const sh = secCont.clientHeight;
-        if (sw > 0 && sh > 0) {
-            C.secondaryChart.applyOptions({ width: sw, height: sh });
-            if (secCanvas) {
-                secCanvas.width = sw;
-                secCanvas.height = sh;
+    const syncCanvas = () => {
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w > 0 && h > 0) {
+            chart.applyOptions({ width: w, height: h });
+            if (canvas) {
+                canvas.width = w;
+                canvas.height = h;
             }
         }
-        requestAnimationFrame(renderSecondarySMFCanvas);
+        requestAnimationFrame(() => renderStationSMFCanvas(station));
     };
-    new ResizeObserver(syncSecCanvas).observe(secCont);
-    window.addEventListener('resize', syncSecCanvas);
-    syncSecCanvas();
+
+    new ResizeObserver(syncCanvas).observe(container);
+    window.addEventListener('resize', syncCanvas);
+    syncCanvas();
 }
 
-function refreshSecondaryContract() {
-    const pair = getAtmPairContracts();
-    const isPrimaryCe = /CE$/i.test(C.symbol || '');
-    const secContract = isPrimaryCe ? pair.pe : pair.ce;
-    if (!secContract || !secContract.symbol) return;
+function bindStationControls(station) {
+    const pfx = station.type.toLowerCase();
 
-    C.secondaryContract = secContract;
+    const lotMinus = document.getElementById(`${pfx}-lot-minus`);
+    const lotPlus = document.getElementById(`${pfx}-lot-plus`);
+    const lotVal = document.getElementById(`${pfx}-lot-val`);
 
-    const isSecPe = /PE$/i.test(secContract.symbol);
-    const badgeEl = document.getElementById('sec-chart-badge');
-    const titleEl = document.getElementById('sec-chart-title');
-    const ltpEl = document.getElementById('sec-chart-ltp');
-    const sigEl = document.getElementById('sec-chart-signal');
-
-    if (badgeEl) {
-        badgeEl.textContent = isSecPe ? 'PE' : 'CE';
-        badgeEl.style.color = isSecPe ? '#ff005d' : '#00f2a9';
-        badgeEl.style.borderColor = isSecPe ? 'rgba(255, 0, 93, 0.4)' : 'rgba(0, 242, 169, 0.4)';
-        badgeEl.style.background = isSecPe ? 'rgba(255, 0, 93, 0.2)' : 'rgba(0, 242, 169, 0.2)';
+    if (lotMinus) {
+        lotMinus.addEventListener('click', () => {
+            station.tradingLots = Math.max(1, station.tradingLots - 1);
+            if (lotVal) lotVal.textContent = station.tradingLots;
+        });
     }
-    if (titleEl) titleEl.textContent = secContract.display_name || secContract.symbol;
-    if (ltpEl) ltpEl.textContent = '₹--';
-    if (sigEl) {
-        sigEl.textContent = 'ANALYZING…';
-        sigEl.style.color = '#94a3b8';
+    if (lotPlus) {
+        lotPlus.addEventListener('click', () => {
+            station.tradingLots = Math.min(20, station.tradingLots + 1);
+            if (lotVal) lotVal.textContent = station.tradingLots;
+        });
     }
 
-    loadSecondaryCandles(secContract.symbol, C.selectedSessionDate || 'today');
+    const buyBtn = document.getElementById(`${pfx}-btn-buy`);
+    if (buyBtn) {
+        buyBtn.addEventListener('click', async () => {
+            if (!station.symbol) return;
+            const units = station.tradingLots * station.lotUnits;
+            const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
+            try {
+                const res = await fetch('/api/trade/order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        symbol: station.symbol,
+                        exchange: 'NFO',
+                        side: 'BUY',
+                        order_type: 'MARKET',
+                        quantity: units,
+                        product: 'MIS',
+                        validity: 'DAY',
+                        price: curPx,
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    flashExecutionAlert(`🟢 ${station.type} BUY EXECUTED`, `Bought ${units} qty @ ₹${curPx.toFixed(1)}`, 'success');
+                    await fetchTradeState();
+                } else {
+                    flashExecutionAlert(`❌ ORDER REJECTED`, data.detail || 'Trade failed', 'danger');
+                }
+            } catch (e) {
+                flashExecutionAlert(`❌ ERROR`, e.message, 'danger');
+            }
+        });
+    }
 
-    disconnectSecondaryWS();
-    const isToday = !C.selectedSessionDate || C.selectedSessionDate === 'today';
-    if (isToday) {
-        connectSecondaryWS(secContract.symbol);
+    const exitBtn = document.getElementById(`${pfx}-btn-exit`);
+    if (exitBtn) {
+        exitBtn.addEventListener('click', async () => {
+            if (!station.symbol) return;
+            try {
+                const res = await fetch('/api/trade/exit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ symbol: station.symbol })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    flashExecutionAlert(`🏁 ${station.type} POSITION CLOSED`, `Exited successfully`, 'success');
+                    await fetchTradeState();
+                } else {
+                    flashExecutionAlert(`❌ EXIT FAILED`, data.detail || 'Exit failed', 'danger');
+                }
+            } catch (e) {
+                flashExecutionAlert(`❌ EXIT ERROR`, e.message, 'danger');
+            }
+        });
+    }
+
+    const btnSmf = document.getElementById(`${pfx}-btn-smf`);
+    if (btnSmf) {
+        btnSmf.addEventListener('click', () => {
+            station.smfEnabled = !station.smfEnabled;
+            btnSmf.classList.toggle('active', station.smfEnabled);
+            renderStationSMFCanvas(station);
+        });
+    }
+
+    const btnPrice = document.getElementById(`${pfx}-btn-price`);
+    if (btnPrice) {
+        btnPrice.addEventListener('click', () => {
+            station.showPrice = !station.showPrice;
+            btnPrice.classList.toggle('active', station.showPrice);
+            if (station.rawCandles.length > 0) {
+                loadStationCandles(station, { symbol: station.symbol, display_name: station.displayName });
+            }
+        });
+    }
+
+    const btnTgt = document.getElementById(`${pfx}-btn-target`);
+    if (btnTgt) {
+        btnTgt.addEventListener('click', () => {
+            station.targetsEnabled = !station.targetsEnabled;
+            btnTgt.classList.toggle('active', station.targetsEnabled);
+        });
+    }
+
+    const btnExit = document.getElementById(`${pfx}-btn-exit-engine`);
+    if (btnExit) {
+        btnExit.addEventListener('click', () => {
+            station.dynamicExitEnabled = !station.dynamicExitEnabled;
+            btnExit.classList.toggle('active', station.dynamicExitEnabled);
+            if (station.rawCandles.length > 0) {
+                loadStationCandles(station, { symbol: station.symbol, display_name: station.displayName });
+            }
+        });
+    }
+
+    const btnFit = document.getElementById(`${pfx}-btn-fit`);
+    if (btnFit) {
+        btnFit.addEventListener('click', () => {
+            if (station.chart) station.chart.timeScale().fitContent();
+        });
+    }
+
+    const btnToggleLog = document.getElementById(`${pfx}-btn-toggle-log`);
+    const logDrawer = document.getElementById(`${pfx}-log-drawer`);
+    const logClose = document.getElementById(`${pfx}-log-close`);
+
+    if (btnToggleLog && logDrawer) {
+        btnToggleLog.addEventListener('click', () => {
+            logDrawer.classList.toggle('hidden');
+        });
+    }
+    if (logClose && logDrawer) {
+        logClose.addEventListener('click', () => {
+            logDrawer.classList.add('hidden');
+        });
     }
 }
 
-async function loadSecondaryCandles(symbol, optDate) {
-    if (!symbol) return;
+function bindMasterHeaderControls() {
+    const undSelect = document.getElementById('master-underlying-select') || document.getElementById('oc-underlying-select');
+    if (undSelect) {
+        undSelect.addEventListener('change', async (e) => {
+            MasterState.underlying = e.target.value;
+            C.underlying = e.target.value;
+            MasterState.strikeStep = (MasterState.underlying === 'NIFTY') ? 50 : 100;
+            if (['FINNIFTY', 'MIDCPNIFTY'].includes(MasterState.underlying)) MasterState.strikeStep = 25;
+            await initExpirySelector();
+            await fetchOptionChain();
+        });
+    }
+
+    const btnPrev = document.getElementById('btn-strike-prev');
+    const btnNext = document.getElementById('btn-strike-next');
+    if (btnPrev) {
+        btnPrev.addEventListener('click', () => stepStrike(-1));
+    }
+    if (btnNext) {
+        btnNext.addEventListener('click', () => stepStrike(+1));
+    }
+
+    const expSelect = document.getElementById('master-expiry-select');
+    if (expSelect) {
+        expSelect.addEventListener('change', (e) => {
+            MasterState.selectedExpiry = e.target.value;
+            C.selectedExpiry = e.target.value;
+            loadStrikePair(MasterState.currentStrike);
+        });
+    }
+
+    const tf1 = document.getElementById('tf-1m');
+    const tf5 = document.getElementById('tf-5m');
+    if (tf1) {
+        tf1.addEventListener('click', () => setMasterTimeframe(1));
+    }
+    if (tf5) {
+        tf5.addEventListener('click', () => setMasterTimeframe(5));
+    }
+
+    const dateSelect = document.getElementById('master-session-date-select');
+    if (dateSelect) {
+        dateSelect.addEventListener('change', (e) => {
+            MasterState.selectedSessionDate = e.target.value;
+            C.selectedSessionDate = e.target.value;
+            loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
+        });
+    }
+
+    const btnChain = document.getElementById('btn-master-chain');
+    if (btnChain) {
+        btnChain.addEventListener('click', toggleOptionChain);
+    }
+
+    const btnReplay = document.getElementById('btn-master-replay');
+    if (btnReplay) {
+        btnReplay.addEventListener('click', toggleReplay);
+    }
+
+    const btnReport = document.getElementById('btn-master-report');
+    if (btnReport) {
+        btnReport.addEventListener('click', openBacktestModal);
+    }
+
+    const btnKs = document.getElementById('btn-master-kill-switch');
+    if (btnKs) {
+        btnKs.addEventListener('click', async () => {
+            const isLocked = MasterState.tradingState?.is_kill_switch_active;
+            const endpoint = isLocked ? '/api/trade/kill_switch/unlock' : '/api/trade/kill_switch';
+            try {
+                const res = await fetch(endpoint, { method: 'POST' });
+                if (res.ok) await fetchTradeState();
+            } catch (e) {
+                console.warn('Kill switch error:', e);
+            }
+        });
+    }
+
+    const ffBtn = document.getElementById('bt-btn-fastforward');
+    if (ffBtn) {
+        ffBtn.addEventListener('click', () => {
+            if (Stations.CE.rawCandles.length > 0) {
+                const agg = aggregateCandles(Stations.CE.rawCandles, MasterState.currentTf);
+                const smf = computeSMF(agg);
+                Stations.CE.smfResult = smf;
+                Stations.CE.dynamicExitResult = computeSMFDynamicExit(agg, smf, 'V5');
+                updateStationFooter(Stations.CE);
+            }
+            if (Stations.PE.rawCandles.length > 0) {
+                const agg = aggregateCandles(Stations.PE.rawCandles, MasterState.currentTf);
+                const smf = computeSMF(agg);
+                Stations.PE.smfResult = smf;
+                Stations.PE.dynamicExitResult = computeSMFDynamicExit(agg, smf, 'V5');
+                updateStationFooter(Stations.PE);
+            }
+            updatePortfolioSummary();
+            renderBacktestModalContent();
+        });
+    }
+}
+
+function stepStrike(dir) {
+    const nextStrike = MasterState.currentStrike + (dir * MasterState.strikeStep);
+    loadStrikePair(nextStrike);
+}
+
+function setMasterTimeframe(tf) {
+    MasterState.currentTf = tf;
+    C.currentTf = tf;
+    const tf1 = document.getElementById('tf-1m');
+    const tf5 = document.getElementById('tf-5m');
+    if (tf1) tf1.classList.toggle('active', tf === 1);
+    if (tf5) tf5.classList.toggle('active', tf === 5);
+
+    if (Stations.CE.rawCandles.length > 0) {
+        loadStationCandles(Stations.CE, { symbol: Stations.CE.symbol, display_name: Stations.CE.displayName });
+    }
+    if (Stations.PE.rawCandles.length > 0) {
+        loadStationCandles(Stations.PE, { symbol: Stations.PE.symbol, display_name: Stations.PE.displayName });
+    }
+}
+
+async function loadStrikePair(strike, optExpiry, optDate) {
+    strike = Number(strike);
+    MasterState.currentStrike = strike;
+    const expiry = optExpiry || MasterState.selectedExpiry || '';
+    const date = optDate || MasterState.selectedSessionDate || 'today';
+
+    let ceContract = null;
+    let peContract = null;
+
+    if (MasterState.optionChainData && Array.isArray(MasterState.optionChainData.chain)) {
+        const row = MasterState.optionChainData.chain.find(r => Number(r.strike) === strike);
+        if (row) {
+            ceContract = row.call;
+            peContract = row.put;
+        }
+    }
+
+    if (!ceContract || !ceContract.symbol) {
+        ceContract = { symbol: `${MasterState.underlying}24OCT${strike}CE`, display_name: `${MasterState.underlying} ${strike} CE`, expiry };
+    }
+    if (!peContract || !peContract.symbol) {
+        peContract = { symbol: `${MasterState.underlying}24OCT${strike}PE`, display_name: `${MasterState.underlying} ${strike} PE`, expiry };
+    }
+
+    Stations.CE.symbol = ceContract.symbol;
+    Stations.CE.displayName = ceContract.display_name || `${strike} CE`;
+    Stations.PE.symbol = peContract.symbol;
+    Stations.PE.displayName = peContract.display_name || `${strike} PE`;
+
+    C.symbol = Stations.CE.symbol;
+    C.displayName = Stations.CE.displayName;
+    C.secondaryContract = Stations.PE;
+
+    const strikeVal = document.getElementById('cur-strike-val');
+    const strikeTag = document.getElementById('cur-strike-tag');
+    const btnPrev = document.getElementById('btn-strike-prev');
+    const btnNext = document.getElementById('btn-strike-next');
+    const ceSymEl = document.getElementById('ce-symbol-text');
+    const peSymEl = document.getElementById('pe-symbol-text');
+
+    if (strikeVal) strikeVal.textContent = strike;
+    if (strikeTag) {
+        const isAtm = strike === MasterState.atmStrike;
+        const diff = strike - MasterState.atmStrike;
+        strikeTag.textContent = isAtm ? 'ATM' : (diff > 0 ? `+${diff}` : `${diff}`);
+        strikeTag.className = isAtm ? 'strike-tag atm' : 'strike-tag';
+    }
+    if (btnPrev) btnPrev.textContent = `-${MasterState.strikeStep}`;
+    if (btnNext) btnNext.textContent = `+${MasterState.strikeStep}`;
+
+    if (ceSymEl) ceSymEl.textContent = Stations.CE.displayName;
+    if (peSymEl) peSymEl.textContent = Stations.PE.displayName;
+
+    await Promise.all([
+        loadStationCandles(Stations.CE, ceContract, date),
+        loadStationCandles(Stations.PE, peContract, date)
+    ]);
+
+    if (date === 'today') {
+        connectStationWS(Stations.CE);
+        connectStationWS(Stations.PE);
+    }
+
+    updatePortfolioSummary();
+}
+
+async function loadStationCandles(station, contract, optDate) {
+    if (!station || !contract || !contract.symbol) return;
     try {
-        const targetDate = optDate || C.selectedSessionDate || 'today';
-        const url = `/api/contracts/candles?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(targetDate)}`;
+        const targetDate = optDate || MasterState.selectedSessionDate || 'today';
+        const url = `/api/contracts/candles?symbol=${encodeURIComponent(contract.symbol)}&date=${encodeURIComponent(targetDate)}`;
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
         const candles = data.candles || [];
-        C.secondaryRawCandles = candles;
+        station.rawCandles = candles;
 
-        if (candles.length === 0 || !C.secondaryCandleSeries) return;
+        if (station.type === 'CE') {
+            C.rawCandles = candles;
+            Replay.fullCandles = candles;
+        } else {
+            C.secondaryRawCandles = candles;
+        }
 
-        const agg = aggregateCandles(candles, C.currentTf);
+        if (candles.length === 0 || !station.candleSeries) return;
+
+        const agg = aggregateCandles(candles, MasterState.currentTf);
         const smf = computeSMF(agg);
-        C.secondarySmfLastResult = smf;
+        station.smfResult = smf;
+
+        if (station.type === 'CE') C.smfLastResult = smf;
+        else C.secondarySmfLastResult = smf;
 
         const colored = agg.map((c, i) => ({
             ...c,
@@ -6387,44 +6575,216 @@ async function loadSecondaryCandles(symbol, optDate) {
             borderColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
             wickColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
         }));
-        C.secondaryCandleSeries.setData(colored);
+        station.candleSeries.setData(colored);
 
-        if (agg.length > 0) {
-            const lastC = agg[agg.length - 1];
-            const ltpEl = document.getElementById('sec-chart-ltp');
-            if (ltpEl) ltpEl.textContent = `₹${lastC.close.toFixed(2)}`;
-            const isBull = smf.lastSignal[smf.n - 1] === 1;
-            const sigEl = document.getElementById('sec-chart-signal');
-            if (sigEl) {
-                sigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
-                sigEl.style.color = isBull ? '#00f2a9' : '#ff4d6d';
+        let deResult = null;
+        if (station.dynamicExitEnabled) {
+            deResult = computeSMFDynamicExit(agg, smf, 'V5');
+            station.dynamicExitResult = deResult;
+            if (station.type === 'CE') C.dynamicExitLastResult = deResult;
+
+            if (deResult) {
+                if (station.dynamicTrailSeries && deResult.trailPoints) {
+                    station.dynamicTrailSeries.setData(deResult.trailPoints);
+                }
+                if (station.dynamicLadderSeries && deResult.ladderPoints) {
+                    station.dynamicLadderSeries.setData(deResult.ladderPoints);
+                }
             }
         }
 
-        requestAnimationFrame(renderSecondarySMFCanvas);
-        updateAtmPairPill();
+        const markers = [];
+        if (deResult && deResult.markers) {
+            markers.push(...deResult.markers);
+        } else if (smf && smf.smfMarkers) {
+            markers.push(...smf.smfMarkers);
+        }
+        station.candleSeries.setMarkers(markers);
+
+        updateStationTopBar(station, agg);
+        updateStationFooter(station);
+        renderStationSMFCanvas(station);
+
+        const curPx = agg[agg.length - 1]?.close || 0;
+        const buyTxt = document.getElementById(station.type === 'CE' ? 'ce-buy-txt' : 'pe-buy-txt');
+        if (buyTxt) buyTxt.textContent = `BUY ${station.type} @ ₹${curPx.toFixed(1)}`;
+
     } catch (e) {
-        console.warn('Failed to load secondary candles:', e);
+        console.warn(`Failed to load ${station.type} candles:`, e);
     }
 }
 
-function renderSecondarySMFCanvas() {
-    const canvas = document.getElementById('secondary-smf-canvas');
-    const secCont = document.getElementById('secondary-chart-container');
-    if (!canvas || !secCont || !C.secondaryChart || !C.secondaryCandleSeries) return;
+function updateStationTopBar(station, agg) {
+    if (!agg || agg.length === 0) return;
+    const lastC = agg[agg.length - 1];
+    const firstC = agg[0];
+    const prefix = station.type.toLowerCase();
 
+    const ltpEl = document.getElementById(`${prefix}-ltp`);
+    const chgEl = document.getElementById(`${prefix}-chg`);
+    const sigEl = document.getElementById(`${prefix}-signal`);
+
+    if (ltpEl) ltpEl.textContent = `₹${lastC.close.toFixed(2)}`;
+    if (chgEl && firstC) {
+        const diff = lastC.close - firstC.open;
+        const pct = (diff / firstC.open) * 100;
+        const sign = diff >= 0 ? '+' : '';
+        chgEl.textContent = `${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
+        chgEl.className = `station-chg ${diff >= 0 ? 'pos' : 'neg'}`;
+    }
+    if (sigEl && station.smfResult) {
+        const isBull = station.smfResult.lastSignal[station.smfResult.n - 1] === 1;
+        sigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
+        sigEl.className = `station-signal ${isBull ? 'bull' : 'bear'}`;
+    }
+}
+
+function updateStationFooter(station) {
+    const prefix = station.type.toLowerCase();
+    const de = station.dynamicExitResult;
+    const trades = de?.trades || [];
+    const summary = de?.summary || {};
+
+    const statTrades = document.getElementById(`${prefix}-stat-trades`);
+    const statWinrate = document.getElementById(`${prefix}-stat-winrate`);
+    const statPnl = document.getElementById(`${prefix}-stat-pnl`);
+    const statPts = document.getElementById(`${prefix}-stat-pts`);
+    const statCash = document.getElementById(`${prefix}-stat-cash`);
+    const logCount = document.getElementById(`${prefix}-log-count`);
+    const logWrap = document.getElementById(`${prefix}-log-table-wrap`);
+
+    const totalTrades = trades.length;
+    const winTrades = trades.filter(t => (t.pnlPts || 0) >= 0).length;
+    const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
+    const pts = trades.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
+    const gross = pts * (station.lotUnits || 65);
+    const charges = totalTrades * 55;
+    const netCash = gross - charges;
+    const pnlR = summary.netPnlR || 0;
+
+    const signPts = pts >= 0 ? '+' : '';
+    const signCash = netCash >= 0 ? '+' : '';
+    const signR = pnlR >= 0 ? '+' : '';
+
+    if (statTrades) statTrades.textContent = totalTrades;
+    if (statWinrate) statWinrate.textContent = totalTrades > 0 ? `${winRate.toFixed(0)}%` : '--%';
+    if (statPnl) {
+        statPnl.textContent = `${signR}${pnlR.toFixed(2)}R`;
+        statPnl.className = `m-val highlight ${pnlR >= 0 ? 'pos' : 'neg'}`;
+    }
+    if (statPts) {
+        statPts.textContent = `${signPts}${pts.toFixed(1)} pts`;
+        statPts.className = `m-val highlight ${pts >= 0 ? 'pos' : 'neg'}`;
+    }
+    if (statCash) {
+        statCash.textContent = `${signCash}₹${Math.round(netCash).toLocaleString('en-IN')}`;
+        statCash.className = `m-val highlight ${netCash >= 0 ? 'pos' : 'neg'}`;
+    }
+    if (logCount) logCount.textContent = totalTrades;
+
+    if (logWrap) {
+        if (totalTrades === 0) {
+            logWrap.innerHTML = `<div class="no-trades-msg">No trades on this session yet.</div>`;
+        } else {
+            logWrap.innerHTML = `
+                <table class="bt-table mini-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Entry</th>
+                            <th>Entry Px</th>
+                            <th>Exit</th>
+                            <th>Exit Px</th>
+                            <th>Points</th>
+                            <th>Net Cash</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${trades.map(t => {
+                            const tSignPts = (t.pnlPts || 0) >= 0 ? '+' : '';
+                            const tGross = (t.pnlPts || 0) * (station.lotUnits || 65);
+                            const tNet = tGross - 55;
+                            const tSignNet = tNet >= 0 ? '+' : '';
+                            const isWin = (t.pnlPts || 0) >= 0;
+                            return `
+                                <tr>
+                                    <td>#${t.tradeNum}</td>
+                                    <td>${t.entryTime || '--'}</td>
+                                    <td>₹${(t.entryPrice || 0).toFixed(2)}</td>
+                                    <td>${t.exitTime || '--'}</td>
+                                    <td>₹${(t.exitPrice || 0).toFixed(2)}</td>
+                                    <td style="color:${isWin ? '#00f2a9' : '#ff005d'};font-weight:700;">${tSignPts}${(t.pnlPts || 0).toFixed(1)}</td>
+                                    <td style="color:${isWin ? '#00f2a9' : '#ff005d'};font-weight:800;">${tSignNet}₹${Math.round(tNet).toLocaleString('en-IN')}</td>
+                                    <td style="font-size:10px;color:#94a3b8;">${t.exitReason || 'EXIT'}</td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+    }
+}
+
+function updatePortfolioSummary() {
+    const ceDe = Stations.CE.dynamicExitResult;
+    const peDe = Stations.PE.dynamicExitResult;
+
+    const ceTrades = ceDe?.trades || [];
+    const peTrades = peDe?.trades || [];
+
+    const cePts = ceTrades.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
+    const pePts = peTrades.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
+
+    const ceNetCash = cePts * (Stations.CE.lotUnits || 65) - ceTrades.length * 55;
+    const peNetCash = pePts * (Stations.PE.lotUnits || 65) - peTrades.length * 55;
+
+    let liveCePnl = 0;
+    if (Stations.CE.activePosition && Stations.CE.rawCandles.length > 0) {
+        const curPx = Stations.CE.rawCandles[Stations.CE.rawCandles.length - 1].close;
+        liveCePnl = (curPx - Stations.CE.activePosition.entryPrice) * (Stations.CE.lotUnits || 65);
+    }
+    let livePePnl = 0;
+    if (Stations.PE.activePosition && Stations.PE.rawCandles.length > 0) {
+        const curPx = Stations.PE.rawCandles[Stations.PE.rawCandles.length - 1].close;
+        livePePnl = (curPx - Stations.PE.activePosition.entryPrice) * (Stations.PE.lotUnits || 65);
+    }
+
+    const totalCombinedCash = ceNetCash + peNetCash + liveCePnl + livePePnl;
+    MasterState.combinedPortfolioPnL = totalCombinedCash;
+
+    const pnlPill = document.getElementById('portfolio-pnl-pill');
+    const pnlVal = document.getElementById('val-portfolio-pnl');
+    const capVal = document.getElementById('val-portfolio-cap');
+
+    if (pnlVal) {
+        const sign = totalCombinedCash >= 0 ? '+' : '';
+        pnlVal.textContent = `${sign}₹${Math.round(totalCombinedCash).toLocaleString('en-IN')}`;
+    }
+    if (pnlPill) {
+        pnlPill.className = `portfolio-pnl-pill ${totalCombinedCash > 0 ? 'pnl-positive' : (totalCombinedCash < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
+    }
+    if (capVal && MasterState.tradingState) {
+        capVal.textContent = `${Math.round(MasterState.tradingState.capital || 100000) / 1000}k`;
+    }
+}
+
+function renderStationSMFCanvas(station) {
+    if (!station || !station.canvas || !station.chart || !station.candleSeries) return;
+    const canvas = station.canvas;
     const ctx = canvas.getContext('2d');
-    if (!C.secondarySmfLastResult) {
+    if (!station.smfResult || !station.smfEnabled) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         return;
     }
 
-    const smf = C.secondarySmfLastResult;
+    const smf = station.smfResult;
     const { n, upper, lower, bMain, lastSignal, candles } = smf;
     if (!n || n < 2) return;
 
-    const W = secCont.clientWidth || canvas.width;
-    const H = secCont.clientHeight || canvas.height;
+    const W = station.container ? station.container.clientWidth : canvas.width;
+    const H = station.container ? station.container.clientHeight : canvas.height;
 
     if (canvas.width !== W || canvas.height !== H) {
         canvas.width = W;
@@ -6436,11 +6796,11 @@ function renderSecondarySMFCanvas() {
     const points = [];
     for (let i = 0; i < n; i++) {
         const t = candles[i].time;
-        const coord = C.secondaryChart.timeScale().timeToCoordinate(t);
+        const coord = station.chart.timeScale().timeToCoordinate(t);
         if (coord == null || coord < -80 || coord > W + 80) continue;
-        const yU = C.secondaryCandleSeries.priceToCoordinate(upper[i]);
-        const yL = C.secondaryCandleSeries.priceToCoordinate(lower[i]);
-        const yB = C.secondaryCandleSeries.priceToCoordinate(bMain[i]);
+        const yU = station.candleSeries.priceToCoordinate(upper[i]);
+        const yL = station.candleSeries.priceToCoordinate(lower[i]);
+        const yB = station.candleSeries.priceToCoordinate(bMain[i]);
         if (yU == null || yL == null || yB == null) continue;
         points.push({ x: coord, yUpper: yU, yLower: yL, yBc: yB, regime: lastSignal[i] });
     }
@@ -6458,7 +6818,6 @@ function renderSecondarySMFCanvas() {
     }
     segs.push({ regime: points[points.length - 1].regime, pts: seg });
 
-    // Filled cloud ribbons
     for (const { regime, pts } of segs) {
         if (pts.length < 2) continue;
         const isBull = regime === 1;
@@ -6483,7 +6842,6 @@ function renderSecondarySMFCanvas() {
         ctx.restore();
     }
 
-    // Basis center line
     ctx.save();
     ctx.lineWidth = 1.5;
     for (const { regime, pts } of segs) {
@@ -6497,7 +6855,6 @@ function renderSecondarySMFCanvas() {
     }
     ctx.restore();
 
-    // Outer dashed bands
     ctx.save();
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
@@ -6517,30 +6874,32 @@ function renderSecondarySMFCanvas() {
     ctx.restore();
 }
 
-function connectSecondaryWS(symbol) {
-    if (!symbol) return;
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${window.location.host}/ws/contracts?symbol=${encodeURIComponent(symbol)}`;
+function connectStationWS(station) {
+    if (!station || !station.symbol) return;
+    disconnectStationWS(station);
 
-    C.secondaryWs = new WebSocket(url);
-    if (C.secondaryWsPingInterval) clearInterval(C.secondaryWsPingInterval);
-    C.secondaryWsPingInterval = setInterval(() => {
-        if (C.secondaryWs && C.secondaryWs.readyState === WebSocket.OPEN) {
-            C.secondaryWs.send(JSON.stringify({ type: 'PING' }));
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${window.location.host}/ws/contracts?symbol=${encodeURIComponent(station.symbol)}`;
+
+    station.ws = new WebSocket(url);
+    station.wsPingInterval = setInterval(() => {
+        if (station.ws && station.ws.readyState === WebSocket.OPEN) {
+            station.ws.send(JSON.stringify({ type: 'PING' }));
         }
     }, 5000);
 
-    C.secondaryWs.onmessage = (event) => {
+    station.ws.onmessage = (event) => {
         try {
             const data = JSON.parse(event.data);
             if (data.type === 'CONTRACT_TICK' && data.ltp != null) {
-                const ltpEl = document.getElementById('sec-chart-ltp');
+                const pfx = station.type.toLowerCase();
+                const ltpEl = document.getElementById(`${pfx}-ltp`);
                 if (ltpEl) ltpEl.textContent = `₹${data.ltp.toFixed(2)}`;
-                const isPrimaryCe = /CE$/i.test(C.symbol || '');
-                const pairLtpEl = isPrimaryCe ? document.getElementById('pill-pe-ltp') : document.getElementById('pill-ce-ltp');
-                if (pairLtpEl) pairLtpEl.textContent = `₹${data.ltp.toFixed(1)}`;
 
-                if (C.secondaryCandleSeries && data.forming_candle) {
+                const buyTxt = document.getElementById(`${pfx}-buy-txt`);
+                if (buyTxt) buyTxt.textContent = `BUY ${station.type} @ ₹${data.ltp.toFixed(1)}`;
+
+                if (station.candleSeries && data.forming_candle) {
                     const fc = data.forming_candle;
                     const oneMinCandle = {
                         time: Number(fc.time),
@@ -6549,27 +6908,33 @@ function connectSecondaryWS(symbol) {
                         low: Number(fc.low),
                         close: Number(fc.close),
                     };
-                    const existingIdx = C.secondaryRawCandles.findIndex(c => c.time === oneMinCandle.time);
+                    const existingIdx = station.rawCandles.findIndex(c => c.time === oneMinCandle.time);
                     if (existingIdx >= 0) {
-                        C.secondaryRawCandles[existingIdx] = oneMinCandle;
+                        station.rawCandles[existingIdx] = oneMinCandle;
                     } else {
-                        C.secondaryRawCandles.push(oneMinCandle);
+                        station.rawCandles.push(oneMinCandle);
                     }
-                    C.secondaryCandleSeries.update(oneMinCandle);
+                    station.candleSeries.update(oneMinCandle);
                 }
             }
         } catch (e) {
-            console.warn('Secondary WS parse error:', e);
+            console.warn(`${station.type} WS error:`, e);
         }
     };
 }
 
-function disconnectSecondaryWS() {
-    if (C.secondaryWsPingInterval) clearInterval(C.secondaryWsPingInterval);
-    if (C.secondaryWs) {
-        try {
-            C.secondaryWs.close();
-        } catch (e) {}
-        C.secondaryWs = null;
+function disconnectStationWS(station) {
+    if (station.wsPingInterval) clearInterval(station.wsPingInterval);
+    if (station.ws) {
+        try { station.ws.close(); } catch (e) {}
+        station.ws = null;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Backward Compatibility Handlers & Window Exports
+// ─────────────────────────────────────────────────────────────────────────────
+window.Stations = Stations;
+window.MasterState = MasterState;
+window.loadStrikePair = loadStrikePair;
+window.stepStrike = stepStrike;
