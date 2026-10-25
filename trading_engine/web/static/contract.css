@@ -3636,15 +3636,28 @@ kbd {
 .hdr-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
     min-width: 0;
     flex-wrap: nowrap !important;
 }
 
-.hdr-row-1, .hdr-row-2, .hdr-row-3 {
+.hdr-row-1 {
     height: 28px;
+    justify-content: flex-start;
+    gap: 6px;
+}
+
+.hdr-row-2 {
+    height: 28px;
+    justify-content: flex-start;
+    gap: 6px;
+}
+
+.hdr-row-3 {
+    height: 28px;
+    justify-content: flex-start;
+    gap: 8px;
 }
 
 .hdr-group-left {
@@ -3940,62 +3953,71 @@ kbd {
     box-shadow: 0 4px 18px rgba(255, 0, 93, 0.06);
 }
 
-/* Station Header Bar */
+/* Station Header Bar (Strictly 2 Distinct Full-Width Horizontal Rows) */
 .station-hdr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    display: flex !important;
+    flex-direction: column !important;
     padding: 6px 10px;
-    background: rgba(0, 0, 0, 0.25);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-    min-width: 0;
+    background: rgba(10, 16, 28, 0.9);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 4px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
-.station-meta-left {
+/* Row 1: Contract Name ONLY on Top */
+.station-hdr-row1 {
     display: flex;
     align-items: center;
-    gap: 7px;
-    min-width: 0;
-    flex-wrap: wrap;
+    width: 100%;
 }
 
-.station-badge {
-    font-size: 11px;
+.station-contract-name {
+    font-size: 11.5px;
     font-weight: 800;
-    padding: 3px 8px;
-    border-radius: 6px;
-    letter-spacing: 0.3px;
+    padding: 3px 10px;
+    border-radius: 5px;
+    letter-spacing: 0.5px;
     white-space: nowrap;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
+    text-transform: uppercase;
 }
 
-.ce-badge, .ce-badge-box {
+.station-contract-name.ce-badge {
     background: rgba(0, 242, 169, 0.16);
     color: #00f2a9;
     border: 1px solid rgba(0, 242, 169, 0.45);
     box-shadow: 0 0 10px rgba(0, 242, 169, 0.1);
 }
 
-.pe-badge, .pe-badge-box {
+.station-contract-name.pe-badge {
     background: rgba(255, 0, 93, 0.16);
     color: #ff005d;
     border: 1px solid rgba(255, 0, 93, 0.45);
     box-shadow: 0 0 10px rgba(255, 0, 93, 0.1);
 }
 
-.station-symbol {
-    font-weight: 800;
-    font-size: 13px;
-    color: #f1f5f9;
+/* Row 2: Price | Difference in Points | Trend Arrow (Red/Green) | Indicator Tool */
+.station-hdr-row2 {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.rate-cluster {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .station-ltp {
     font-family: 'JetBrains Mono', monospace;
     font-weight: 800;
-    font-size: 13px;
+    font-size: 13.5px;
     color: #ffffff;
     white-space: nowrap;
 }
@@ -4003,18 +4025,42 @@ kbd {
 .station-chg {
     font-size: 11px;
     font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
     white-space: nowrap;
 }
 .station-chg.pos { color: #00f2a9; }
 .station-chg.neg { color: #ff005d; }
 
-.station-signal {
-    font-size: 9.5px;
-    font-weight: 800;
-    padding: 1px 6px;
+.trend-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
     border-radius: 4px;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.trend-arrow.up {
+    color: #00f2a9;
+    background: rgba(0, 242, 169, 0.18);
+    border: 1px solid rgba(0, 242, 169, 0.45);
+    box-shadow: 0 0 6px rgba(0, 242, 169, 0.25);
+}
+
+.trend-arrow.down {
+    color: #ff005d;
+    background: rgba(255, 0, 93, 0.18);
+    border: 1px solid rgba(255, 0, 93, 0.45);
+    box-shadow: 0 0 6px rgba(255, 0, 93, 0.25);
+}
+
+.tools-cluster {
+    position: relative;
+    display: flex;
+    align-items: center;
 }
 
 .station-signal.bull {

@@ -1127,10 +1127,14 @@ function updateSessionStats(candles) {
 
 function updateSessionStatsDisplay(open, high, low, ltp) {
     const fmt = v => v != null ? v.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '——';
-    document.getElementById('stat-open').textContent = fmt(open);
-    document.getElementById('stat-high').textContent = fmt(high);
-    document.getElementById('stat-low').textContent  = fmt(low);
-    document.getElementById('stat-ltp').textContent  = fmt(ltp);
+    const elOpen = document.getElementById('stat-open');
+    if (elOpen) elOpen.textContent = fmt(open);
+    const elHigh = document.getElementById('stat-high');
+    if (elHigh) elHigh.textContent = fmt(high);
+    const elLow = document.getElementById('stat-low');
+    if (elLow) elLow.textContent  = fmt(low);
+    const elLtp = document.getElementById('stat-ltp');
+    if (elLtp) elLtp.textContent  = fmt(ltp);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2363,14 +2367,15 @@ function applySMFCloud(agg) {
     C.candleSeries.setData(coloredCandles);
 
     if (C.smfEnabled) {
-        C.smfBcSeries.setData(smf.bcPoints);
-        C.smfUpperSeries.setData(smf.upPoints);
-        C.smfLowerSeries.setData(smf.loPoints);
-        C.smfBoSeries.setData(smf.boPoints);
+        if (C.smfBcSeries) C.smfBcSeries.setData(smf.bcPoints);
+        if (C.smfUpperSeries) C.smfUpperSeries.setData(smf.upPoints);
+        if (C.smfLowerSeries) C.smfLowerSeries.setData(smf.loPoints);
+        if (C.smfBoSeries) C.smfBoSeries.setData(smf.boPoints);
     } else {
         if (C.smfBcSeries) C.smfBcSeries.setData([]);
         if (C.smfUpperSeries) C.smfUpperSeries.setData([]);
         if (C.smfLowerSeries) C.smfLowerSeries.setData([]);
+        if (C.smfBoSeries) C.smfBoSeries.setData([]);
     }
 
     // Maximum Target Dynamic Volatility Bands (Upper & Lower)
@@ -4373,11 +4378,9 @@ function toggleReplay() {
 }
 
 function startReplay() {
-    const baseCandles = (Stations.CE && Stations.CE.rawCandles && Stations.CE.rawCandles.length >= 5)
-        ? Stations.CE.rawCandles
-        : (Stations.PE && Stations.PE.rawCandles && Stations.PE.rawCandles.length >= 5)
-            ? Stations.PE.rawCandles
-            : (C.rawCandles && C.rawCandles.length >= 5 ? C.rawCandles : []);
+    const ceCandles = (Stations.CE && Stations.CE.rawCandles && Stations.CE.rawCandles.length >= 5) ? Stations.CE.rawCandles : [];
+    const peCandles = (Stations.PE && Stations.PE.rawCandles && Stations.PE.rawCandles.length >= 5) ? Stations.PE.rawCandles : [];
+    const baseCandles = ceCandles.length >= peCandles.length ? ceCandles : peCandles;
 
     if (!baseCandles || baseCandles.length < 5) {
         alert("Please select or load option contracts first before starting Bar Replay.");
@@ -4414,14 +4417,26 @@ function startReplay() {
     // Initialize datepicker with current session date
     const datePicker = document.getElementById('rp-date-picker');
     if (datePicker && Replay.fullCandles.length > 0) {
-        const firstTime = new Date(Replay.fullCandles[0].time * 1000);
-        const yyyy = firstTime.getFullYear();
-        const mm = String(firstTime.getMonth() + 1).padStart(2, '0');
-        const dd = String(firstTime.getDate()).padStart(2, '0');
-        datePicker.value = `${yyyy}-${mm}-${dd}`;
+        const sec = Number(Replay.fullCandles[0].time);
+        const firstTime = new Date(sec * 1000);
+        if (!isNaN(firstTime.getTime())) {
+            const yyyy = firstTime.getFullYear();
+            const mm = String(firstTime.getMonth() + 1).padStart(2, '0');
+            const dd = String(firstTime.getDate()).padStart(2, '0');
+            datePicker.value = `${yyyy}-${mm}-${dd}`;
+        }
     }
 
-    // Lock stable barSpacing and rightOffset so candles never stretch or squish on steps
+    ['CE', 'PE'].forEach(stKey => {
+        const station = Stations && Stations[stKey];
+        if (station && station.chart) {
+            station.chart.timeScale().applyOptions({
+                barSpacing: 8,
+                rightOffset: 5,
+            });
+        }
+    });
+
     if (C.chart) {
         C.chart.timeScale().applyOptions({
             barSpacing: 8,
@@ -4440,7 +4455,7 @@ function exitReplay() {
     const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.remove('active');
-    if (dock) dock.classList.add('hidden');
+    if (dock) dock.classList.remove('hidden');
 
     const modeSelect = document.getElementById('trade-mode-select');
     if (modeSelect && modeSelect.value === 'replay') {
@@ -4453,21 +4468,53 @@ function exitReplay() {
     }
 
     // Restore full datasets to both parallel stations
-    if (Stations.CE && Stations.CE.fullCandlesStore && Stations.CE.fullCandlesStore.length > 0) {
-        Stations.CE.rawCandles = [...Stations.CE.fullCandlesStore];
-        const ceAgg = aggregateCandles(Stations.CE.rawCandles, MasterState.currentTf);
-        updateStationTopBar(Stations.CE, ceAgg);
-        updateStationFooter(Stations.CE);
-        applyStationChart(Stations.CE);
-    }
-    if (Stations.PE && Stations.PE.fullCandlesStore && Stations.PE.fullCandlesStore.length > 0) {
-        Stations.PE.rawCandles = [...Stations.PE.fullCandlesStore];
-        const peAgg = aggregateCandles(Stations.PE.rawCandles, MasterState.currentTf);
-        updateStationTopBar(Stations.PE, peAgg);
-        updateStationFooter(Stations.PE);
-        applyStationChart(Stations.PE);
-    }
-    if (Replay.fullCandles.length > 0) {
+    ['CE', 'PE'].forEach(stKey => {
+        const station = Stations && Stations[stKey];
+        if (!station || !station.fullCandlesStore || station.fullCandlesStore.length === 0) return;
+        station.rawCandles = [...station.fullCandlesStore];
+        const agg = aggregateCandles(station.rawCandles, MasterState.currentTf);
+        const smf = computeSMF(agg);
+        station.smfResult = smf;
+        if (station.candleSeries) {
+            const colored = agg.map((c, i) => {
+                const isBull = (smf && smf.lastSignal && smf.lastSignal[i] === 1);
+                const col = isBull ? SMF.bullColor : SMF.bearColor;
+                return {
+                    ...c,
+                    color: col,
+                    borderColor: col,
+                    wickColor: col,
+                };
+            });
+            station.candleSeries.setData(colored);
+            let de = null;
+            if (station.dynamicExitEnabled) {
+                de = computeSMFDynamicExit(agg, smf, 'V5');
+                station.dynamicExitResult = de;
+                if (de) {
+                    if (station.dynamicTrailSeries && de.trailPoints) station.dynamicTrailSeries.setData(de.trailPoints);
+                    if (station.dynamicLadderSeries && de.ladderPoints) station.dynamicLadderSeries.setData(de.ladderPoints);
+                }
+            }
+            const markers = [];
+            if (de && de.markers) markers.push(...de.markers);
+            else if (smf && smf.smfMarkers) markers.push(...smf.smfMarkers);
+            station.candleSeries.setMarkers(markers);
+            updateStationTopBar(station, agg);
+            updateStationFooter(station);
+            renderStationSMFCanvas(station);
+            if (station.chart && colored.length > 0) {
+                const total = colored.length;
+                const visibleBars = Math.min(total, 65);
+                station.chart.timeScale().setVisibleLogicalRange({
+                    from: Math.max(0, total - visibleBars),
+                    to: total + 15
+                });
+            }
+        }
+    });
+
+    if (Replay.fullCandles && Replay.fullCandles.length > 0 && C.chart && C.candleSeries) {
         C.rawCandles = [...Replay.fullCandles];
         updateSessionStats(C.rawCandles);
         applyFullChart(C.rawCandles, true);
@@ -4551,136 +4598,142 @@ function onScrubberInput(e) {
     renderReplayStep();
 }
 
+function formatReplayTime(ts) {
+    if (!ts) return '--:--';
+    let sec = Number(ts);
+    if (isNaN(sec) || sec <= 0) {
+        if (typeof ts === 'string') {
+            const p = new Date(ts).getTime();
+            sec = isNaN(p) ? 0 : Math.floor(p / 1000);
+        } else if (ts && ts.year) {
+            sec = Math.floor(new Date(ts.year, (ts.month || 1) - 1, ts.day || 1).getTime() / 1000);
+        }
+    }
+    if (sec > 10000000000) sec = Math.floor(sec / 1000);
+    if (isNaN(sec) || sec <= 0) return '--:--';
+    const d = new Date(sec * 1000);
+    if (isNaN(d.getTime())) return '--:--';
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+}
+
 function renderReplayStep() {
     if (!Replay.fullCandles || Replay.fullCandles.length === 0) return;
     const totalBars = Replay.fullCandles.length;
     const curIdx = Math.min(Math.max(0, Replay.currentIndex), totalBars - 1);
 
-    // Slice candles up to current replay index
-    const sliced = Replay.fullCandles.slice(0, curIdx + 1);
-    C.rawCandles = sliced;
-
-    // Apply indicators & chart progressively WITHOUT refitting timescale zoom
-    applyFullChart(sliced, false);
-    updateSessionStats(sliced);
-
-    // Keep visible viewport steady: smoothly shift right only when bar nears right edge
-    if (C.chart) {
-        const range = C.chart.timeScale().getVisibleLogicalRange();
-        if (range) {
-            if (curIdx >= range.to - 1 || curIdx <= range.from) {
-                C.chart.timeScale().scrollToPosition(4, false);
-            }
-        }
-    }
-
-    // Update Scrubber and time text
-    const scrubber = document.getElementById('rp-scrubber');
-    if (scrubber) scrubber.value = curIdx;
-
     const curCandle = Replay.fullCandles[curIdx];
     const firstCandle = Replay.fullCandles[0];
     const lastCandle = Replay.fullCandles[totalBars - 1];
+    if (!curCandle) return;
 
-    const fmtTime = (ts) => {
-        const d = new Date(ts * 1000);
-        return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
-    };
+    const targetTime = Number(curCandle.time);
+
+    // Update scrubber and time displays
+    const scrubber = document.getElementById('rp-scrubber');
+    if (scrubber) scrubber.value = curIdx;
 
     const curTimeEl = document.getElementById('rp-cur-time');
     const totTimeEl = document.getElementById('rp-total-time');
     const barCountEl = document.getElementById('rp-bar-count');
 
-    if (curTimeEl && curCandle) {
-        const tStr = fmtTime(curCandle.time);
+    if (curTimeEl) {
+        const tStr = formatReplayTime(curCandle.time);
         if (tStr >= '09:15' && tStr < '09:25') {
             curTimeEl.innerHTML = `${tStr} <span style="font-size:10px;color:rgba(0,242,169,0.8);font-weight:700;letter-spacing:0.5px;">[WARMUP]</span>`;
         } else {
             curTimeEl.textContent = tStr;
         }
     }
-    if (totTimeEl && lastCandle) totTimeEl.textContent = fmtTime(lastCandle.time);
+    if (totTimeEl && lastCandle) totTimeEl.textContent = formatReplayTime(lastCandle.time);
     if (barCountEl) barCountEl.textContent = `${curIdx + 1} / ${totalBars}`;
 
-    // Update LTP & Change badge to reflect candle at current replay index
-    if (curCandle) {
-        const ltpEl = document.getElementById('badge-ltp');
-        if (ltpEl) ltpEl.textContent = `₹${curCandle.close.toFixed(2)}`;
-        const chgEl = document.getElementById('badge-chg');
-        if (chgEl && firstCandle) {
-            const chgAbs = curCandle.close - firstCandle.open;
-            const chgPct = (chgAbs / firstCandle.open) * 100;
-            chgEl.textContent = `${chgAbs >= 0 ? '+' : ''}${chgAbs.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
-            chgEl.className = chgAbs >= 0 ? 'pos' : 'neg';
-        }
-
-        // 1. Update Market Buy button premium
-        updateMarketBuyButton(curCandle.close);
-
-        // 2. Evaluate active trading position and SL / Target auto-triggers during replay
-        evaluateReplayCandleTrading(curCandle);
-
-        // 3. Synchronize secondary contract & counterpart signal simultaneously
-        if (Stations && Stations.PE) {
-            const peSource = Stations.PE.fullCandlesStore || Stations.PE.rawCandles;
-            if (peSource && peSource.length > 0) {
-                const peSliced = peSource.filter(c => c.time <= curCandle.time);
-                if (peSliced.length > 0 && Stations.PE.candleSeries) {
-                    const peAgg = aggregateCandles(peSliced, MasterState.currentTf);
-                    const peSmf = computeSMF(peAgg);
-                    Stations.PE.smfResult = peSmf;
-                    const colored = peAgg.map((c, i) => ({
-                        ...c,
-                        color: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        borderColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        wickColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    }));
-                    Stations.PE.candleSeries.setData(colored);
-
-                    const dePe = computeSMFDynamicExit(peAgg, peSmf, 'V5');
-                    Stations.PE.dynamicExitResult = dePe;
-                    if (dePe) {
-                        if (Stations.PE.dynamicTrailSeries && dePe.trailPoints) Stations.PE.dynamicTrailSeries.setData(dePe.trailPoints);
-                        if (Stations.PE.dynamicLadderSeries && dePe.ladderPoints) Stations.PE.dynamicLadderSeries.setData(dePe.ladderPoints);
-                        if (dePe.markers) Stations.PE.candleSeries.setMarkers(dePe.markers);
-                    }
-                    updateStationTopBar(Stations.PE, peAgg);
-                    updateStationFooter(Stations.PE);
-                    renderStationSMFCanvas(Stations.PE);
-                }
-            }
-        }
-        if (Stations && Stations.CE) {
-            const ceSource = Stations.CE.fullCandlesStore || Stations.CE.rawCandles;
-            if (ceSource && ceSource.length > 0) {
-                const ceSliced = ceSource.filter(c => c.time <= curCandle.time);
-                if (ceSliced.length > 0 && Stations.CE.candleSeries) {
-                    const ceAgg = aggregateCandles(ceSliced, MasterState.currentTf);
-                    const ceSmf = computeSMF(ceAgg);
-                    Stations.CE.smfResult = ceSmf;
-                    const colored = ceAgg.map((c, i) => ({
-                        ...c,
-                        color: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        borderColor: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                        wickColor: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    }));
-                    Stations.CE.candleSeries.setData(colored);
-
-                    const deCe = computeSMFDynamicExit(ceAgg, ceSmf, 'V5');
-                    Stations.CE.dynamicExitResult = deCe;
-                    if (deCe) {
-                        if (Stations.CE.dynamicTrailSeries && deCe.trailPoints) Stations.CE.dynamicTrailSeries.setData(deCe.trailPoints);
-                        if (Stations.CE.dynamicLadderSeries && deCe.ladderPoints) Stations.CE.dynamicLadderSeries.setData(deCe.ladderPoints);
-                        if (deCe.markers) Stations.CE.candleSeries.setMarkers(deCe.markers);
-                    }
-                    updateStationTopBar(Stations.CE, ceAgg);
-                    updateStationFooter(Stations.CE);
-                    renderStationSMFCanvas(Stations.CE);
-                }
-            }
-        }
-        updatePortfolioSummary();
+    // Update LTP & Change badge
+    const ltpEl = document.getElementById('badge-ltp');
+    if (ltpEl) ltpEl.textContent = `₹${curCandle.close.toFixed(2)}`;
+    const chgEl = document.getElementById('badge-chg');
+    if (chgEl && firstCandle) {
+        const chgAbs = curCandle.close - firstCandle.open;
+        const chgPct = (chgAbs / firstCandle.open) * 100;
+        chgEl.textContent = `${chgAbs >= 0 ? '+' : ''}${chgAbs.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
+        chgEl.className = chgAbs >= 0 ? 'pos' : 'neg';
     }
+
+    updateMarketBuyButton(curCandle.close);
+    evaluateReplayCandleTrading(curCandle);
+
+    // Update both parallel stations
+    ['CE', 'PE'].forEach(stKey => {
+        const station = Stations && Stations[stKey];
+        if (!station) return;
+        const src = station.fullCandlesStore || station.rawCandles;
+        if (!src || src.length === 0) return;
+
+        const sliced = src.filter(c => Number(c.time) <= targetTime);
+        if (sliced.length === 0) return;
+        station.rawCandles = sliced;
+
+        if (station.candleSeries) {
+            const agg = aggregateCandles(sliced, MasterState.currentTf);
+            const smf = computeSMF(agg);
+            station.smfResult = smf;
+            if (station.type === 'CE') C.smfLastResult = smf;
+            else C.secondarySmfLastResult = smf;
+
+            const colored = agg.map((c, i) => ({
+                ...c,
+                color: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                borderColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                wickColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+            }));
+            station.candleSeries.setData(colored);
+
+            let de = null;
+            if (station.dynamicExitEnabled) {
+                de = computeSMFDynamicExit(agg, smf, 'V5');
+                station.dynamicExitResult = de;
+                if (station.type === 'CE') C.dynamicExitLastResult = de;
+                if (de) {
+                    if (station.dynamicTrailSeries && de.trailPoints) station.dynamicTrailSeries.setData(de.trailPoints);
+                    if (station.dynamicLadderSeries && de.ladderPoints) station.dynamicLadderSeries.setData(de.ladderPoints);
+                }
+            }
+
+            const markers = [];
+            if (de && de.markers) markers.push(...de.markers);
+            else if (smf && smf.smfMarkers) markers.push(...smf.smfMarkers);
+            station.candleSeries.setMarkers(markers);
+
+            updateStationTopBar(station, agg);
+            updateStationFooter(station);
+            renderStationSMFCanvas(station);
+
+            // Dynamically auto-scroll chart and autoscale price scale
+            if (station.chart && colored.length > 0) {
+                const total = colored.length;
+                const visibleBars = Math.min(total, 65);
+                station.chart.timeScale().setVisibleLogicalRange({
+                    from: Math.max(0, total - visibleBars),
+                    to: total + 12
+                });
+            }
+        }
+    });
+
+    // Update legacy single chart if present
+    if (C.chart && C.candleSeries) {
+        const sliced = Replay.fullCandles.slice(0, curIdx + 1);
+        C.rawCandles = sliced;
+        applyFullChart(sliced, false);
+        updateSessionStats(sliced);
+        const range = C.chart.timeScale().getVisibleLogicalRange();
+        if (range && (curIdx >= range.to - 1 || curIdx <= range.from)) {
+            C.chart.timeScale().scrollToPosition(4, false);
+        }
+    }
+
+    updatePortfolioSummary();
 }
 
 function evaluateReplayCandleTrading(candle) {
@@ -6247,13 +6300,25 @@ function createStationChart(station, containerId, canvasId) {
             barSpacing: 8,
             minBarSpacing: 4,
             tickMarkFormatter: (t) => {
-                const d = new Date(t * 1000);
+                let sec = Number(t);
+                if (isNaN(sec) || sec <= 0) {
+                    if (typeof t === 'string') sec = Math.floor(new Date(t).getTime() / 1000);
+                    else if (t && t.year) sec = Math.floor(new Date(t.year, t.month - 1, t.day).getTime() / 1000);
+                }
+                const d = new Date(sec * 1000);
+                if (isNaN(d.getTime())) return '';
                 return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
             },
         },
         localization: {
             timeFormatter: (t) => {
-                const d = new Date(t * 1000);
+                let sec = Number(t);
+                if (isNaN(sec) || sec <= 0) {
+                    if (typeof t === 'string') sec = Math.floor(new Date(t).getTime() / 1000);
+                    else if (t && t.year) sec = Math.floor(new Date(t.year, t.month - 1, t.day).getTime() / 1000);
+                }
+                const d = new Date(sec * 1000);
+                if (isNaN(d.getTime())) return '';
                 return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
             },
         },
@@ -6645,8 +6710,10 @@ async function loadStationCandles(station, contract, optDate) {
         const res = await fetch(url);
         if (!res.ok) return;
         const data = await res.json();
-        const candles = data.candles || [];
+        const raw = data.candles || [];
+        const candles = formatCandles(raw);
         station.rawCandles = candles;
+        station.fullCandlesStore = [...candles];
 
         if (station.type === 'CE') {
             C.rawCandles = candles;
@@ -6699,6 +6766,15 @@ async function loadStationCandles(station, contract, optDate) {
         updateStationTopBar(station, agg);
         updateStationFooter(station);
         renderStationSMFCanvas(station);
+
+        if (station.chart && colored.length > 0) {
+            const total = colored.length;
+            const visibleBars = Math.min(total, 65);
+            station.chart.timeScale().setVisibleLogicalRange({
+                from: Math.max(0, total - visibleBars),
+                to: total + 15
+            });
+        }
 
         const buyTxt = document.getElementById(station.type === 'CE' ? 'ce-buy-txt' : 'pe-buy-txt');
         if (buyTxt) buyTxt.textContent = station.type;
