@@ -14,7 +14,7 @@
     <!-- ── Loading Top Bar ──────────────────────────────────────────────── -->
     <div id="loading-bar"></div>
 
-    <!-- ── Master Sticky Global Header (Exactly 3 Compact Rows) ──────────── -->
+    <!-- ── Master Sticky Global Header (Strictly 2 Compact Rows) ───────────── -->
     <header id="master-header">
         <!-- Row 1: Home, Underlying, Strike Stepper, Kill Switch -->
         <div class="hdr-row hdr-row-1">
@@ -41,26 +41,14 @@
             <button id="btn-master-kill-switch" class="btn-kill-switch hidden" title="Emergency Flatten & Kill Switch">🛑 KILL</button>
         </div>
 
-        <!-- Row 2: Expiry (Compact), Timeframe (1m/5m), Session Date (Compact) -->
+        <!-- Row 2: Timeframe (1m/5m Toggle), Session Date, Chain, Replay, Report, Portfolio -->
         <div class="hdr-row hdr-row-2">
-            <div class="expiry-select-wrap" title="Contract Expiry">
-                <select id="master-expiry-select" title="Contract Expiry">
-                    <option value="">Expiry</option>
-                </select>
-            </div>
-            <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
-                <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute">1m</button>
-                <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute">5m</button>
-            </div>
+            <button id="btn-timeframe-toggle" class="tf-toggle-btn" data-tf="1" title="Chart Timeframe: Click to switch (1m ⇄ 5m)">1m</button>
             <div class="session-date-wrap" title="Trading Session Day">
                 <select id="master-session-date-select" title="Trading Session Day">
                     <option value="today">Today</option>
                 </select>
             </div>
-        </div>
-
-        <!-- Row 3: Option Chain, Replay, Report Scorecard, Portfolio Balance -->
-        <div class="hdr-row hdr-row-3">
             <div class="hdr-btn-toolbar">
                 <button id="btn-master-chain" class="hdr-tb-btn chain-btn" title="Option Chain (⚡)">⚡ Chain</button>
                 <button id="btn-master-replay" class="hdr-tb-btn replay-btn" title="Bar Replay Simulator">⏪</button>
@@ -150,16 +138,11 @@
                 <canvas id="ce-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- CE Station Footer: Direct Metrics Grid (Cleaned: no redundant dropdown) -->
+            <!-- CE Station Footer: Single-Line Direct Metrics -->
             <div class="station-footer ce-footer">
-                <div class="footer-strip-row">
-                    <div class="footer-metrics-grid">
-                        <div class="metric-item"><span class="m-lbl">TRADES</span><span id="ce-stat-trades" class="m-val">0</span></div>
-                        <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="ce-stat-winrate" class="m-val">--%</span></div>
-                        <div class="metric-item"><span class="m-lbl">NET PnL</span><span id="ce-stat-pnl" class="m-val highlight">+0.00R</span></div>
-                        <div class="metric-item"><span class="m-lbl">POINTS</span><span id="ce-stat-pts" class="m-val highlight">+0.0 pts</span></div>
-                        <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="ce-stat-cash" class="m-val highlight">+₹0.00</span></div>
-                    </div>
+                <div class="station-footer-single-row">
+                    <span id="ce-stat-summary-rate" class="footer-stat-rate" title="Trades | Win Rate">0 | 0%</span>
+                    <span id="ce-stat-summary-cash" class="footer-stat-pnl highlight" title="Net Cash | Points PnL">+₹0.00 | +0.0 pt</span>
                 </div>
             </div>
         </section>
@@ -237,16 +220,11 @@
                 <canvas id="pe-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- PE Station Footer: Direct Metrics Grid (Cleaned: no redundant dropdown) -->
+            <!-- PE Station Footer: Single-Line Direct Metrics -->
             <div class="station-footer pe-footer">
-                <div class="footer-strip-row">
-                    <div class="footer-metrics-grid">
-                        <div class="metric-item"><span class="m-lbl">TRADES</span><span id="pe-stat-trades" class="m-val">0</span></div>
-                        <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="pe-stat-winrate" class="m-val">--%</span></div>
-                        <div class="metric-item"><span class="m-lbl">NET PnL</span><span id="pe-stat-pnl" class="m-val highlight">+0.00R</span></div>
-                        <div class="metric-item"><span class="m-lbl">POINTS</span><span id="pe-stat-pts" class="m-val highlight">+0.0 pts</span></div>
-                        <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="pe-stat-cash" class="m-val highlight">+₹0.00</span></div>
-                    </div>
+                <div class="station-footer-single-row">
+                    <span id="pe-stat-summary-rate" class="footer-stat-rate" title="Trades | Win Rate">0 | 0%</span>
+                    <span id="pe-stat-summary-cash" class="footer-stat-pnl highlight" title="Net Cash | Points PnL">+₹0.00 | +0.0 pt</span>
                 </div>
             </div>
         </section>

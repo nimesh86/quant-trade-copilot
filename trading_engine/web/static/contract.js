@@ -589,7 +589,7 @@ async function initSessionDateSelector() {
 async function initExpirySelector() {
     const headerSel = document.getElementById('master-expiry-select') || document.getElementById('expiry-select');
     const ocSel = document.getElementById('oc-expiry-select');
-    if (!headerSel) return;
+    if (!headerSel && !ocSel) return;
 
     try {
         const und = MasterState.currentUnderlying || C.underlying || 'NIFTY';
@@ -597,15 +597,17 @@ async function initExpirySelector() {
         const data = await res.json();
         const expiries = data.expiries || [];
 
-        headerSel.innerHTML = '<option value="">ALL EXP</option>';
+        if (headerSel) headerSel.innerHTML = '<option value="">ALL EXP</option>';
         if (ocSel) ocSel.innerHTML = '';
 
         expiries.forEach((exp) => {
             const compactText = formatExpiryDisplay(exp);
-            const opt1 = document.createElement('option');
-            opt1.value = exp.date;
-            opt1.textContent = compactText;
-            headerSel.appendChild(opt1);
+            if (headerSel) {
+                const opt1 = document.createElement('option');
+                opt1.value = exp.date;
+                opt1.textContent = compactText;
+                headerSel.appendChild(opt1);
+            }
 
             if (ocSel) {
                 const opt2 = document.createElement('option');
@@ -620,29 +622,31 @@ async function initExpirySelector() {
             const activeExp = expiries.find(e => e.days_to_expiry >= 0) || expiries[0];
             C.selectedExpiry = activeExp.date;
             MasterState.selectedExpiry = activeExp.date;
-            headerSel.value = activeExp.date;
+            if (headerSel) headerSel.value = activeExp.date;
             if (ocSel) ocSel.value = activeExp.date;
             updateExpiryBadge(activeExp.date);
         }
 
-        // Listener for master header select
-        headerSel.addEventListener('change', () => {
-            C.selectedExpiry = headerSel.value;
-            MasterState.selectedExpiry = headerSel.value;
-            if (ocSel) ocSel.value = headerSel.value;
-            updateExpiryBadge(headerSel.value);
-            loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
-            if (C.optionChainOpen || MasterState.optionChainOpen) {
-                fetchOptionChain();
-            }
-        });
+        // Listener for master header select if present
+        if (headerSel) {
+            headerSel.addEventListener('change', () => {
+                C.selectedExpiry = headerSel.value;
+                MasterState.selectedExpiry = headerSel.value;
+                if (ocSel) ocSel.value = headerSel.value;
+                updateExpiryBadge(headerSel.value);
+                loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
+                if (C.optionChainOpen || MasterState.optionChainOpen) {
+                    fetchOptionChain();
+                }
+            });
+        }
 
         // Listener for option chain modal select
         if (ocSel) {
             ocSel.addEventListener('change', () => {
                 C.selectedExpiry = ocSel.value;
                 MasterState.selectedExpiry = ocSel.value;
-                headerSel.value = ocSel.value;
+                if (headerSel) headerSel.value = ocSel.value;
                 updateExpiryBadge(ocSel.value);
                 fetchOptionChain();
                 loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
@@ -6581,6 +6585,15 @@ function bindMasterHeaderControls() {
         });
     }
 
+    const tfToggle = document.getElementById('btn-timeframe-toggle');
+    if (tfToggle) {
+        tfToggle.addEventListener('click', () => {
+            const current = MasterState.currentTf || 1;
+            const next = current === 1 ? 5 : 1;
+            setMasterTimeframe(next);
+        });
+    }
+
     const tf1 = document.getElementById('tf-1m');
     const tf5 = document.getElementById('tf-5m');
     if (tf1) {
@@ -6654,6 +6667,13 @@ function stepStrike(dir) {
 function setMasterTimeframe(tf) {
     MasterState.currentTf = tf;
     C.currentTf = tf;
+    const tfToggle = document.getElementById('btn-timeframe-toggle');
+    if (tfToggle) {
+        tfToggle.textContent = `${tf}m`;
+        tfToggle.setAttribute('data-tf', tf);
+        tfToggle.classList.toggle('tf-5m-active', tf === 5);
+        tfToggle.title = `Chart Timeframe: ${tf}m (Click to switch to ${tf === 1 ? '5m' : '1m'})`;
+    }
     const tf1 = document.getElementById('tf-1m');
     const tf5 = document.getElementById('tf-5m');
     if (tf1) tf1.classList.toggle('active', tf === 1);
@@ -6867,8 +6887,21 @@ function updateStationFooter(station) {
     const pnlR = summary.netPnlR || 0;
 
     const signPts = pts >= 0 ? '+' : '';
-    const signCash = netCash >= 0 ? '+' : '';
+    const signCash = netCash >= 0 ? '+' : '-';
     const signR = pnlR >= 0 ? '+' : '';
+
+    // Single-Line Footer Metrics (Trades | Win Rate without labels, Net Cash | Points gained)
+    const summaryRateEl = document.getElementById(`${prefix}-stat-summary-rate`);
+    const summaryCashEl = document.getElementById(`${prefix}-stat-summary-cash`);
+    if (summaryRateEl) {
+        summaryRateEl.textContent = `${totalTrades} | ${totalTrades > 0 ? `${winRate.toFixed(0)}%` : '0%'}`;
+    }
+    if (summaryCashEl) {
+        const cashFormatted = `${signCash}₹${Math.abs(netCash).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const ptsFormatted = `${signPts}${pts.toFixed(1)} pt`;
+        summaryCashEl.textContent = `${cashFormatted} | ${ptsFormatted}`;
+        summaryCashEl.className = `footer-stat-pnl highlight ${netCash >= 0 ? 'pos' : 'neg'}`;
+    }
 
     if (statTrades) statTrades.textContent = totalTrades;
     if (statWinrate) statWinrate.textContent = totalTrades > 0 ? `${winRate.toFixed(0)}%` : '--%';
