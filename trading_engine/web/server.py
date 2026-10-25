@@ -2332,7 +2332,12 @@ async def get_broker_vault_status():
     b_key = get_secret("BREEZE_API_KEY")
     b_sec = get_secret("BREEZE_API_SECRET")
     b_tok = get_secret("BREEZE_SESSION_TOKEN")
+    b_uid = get_secret("BREEZE_USER_ID")
+    b_pwd = get_secret("BREEZE_PASSWORD")
+    b_totp = get_secret("BREEZE_TOTP_KEY")
+
     breeze_configured = bool(b_key and b_sec and b_tok and len(b_key.strip()) > 3 and len(b_tok.strip()) > 3)
+    breeze_autologin_ready = bool(b_key and b_sec and b_uid and b_pwd and b_totp and len(b_key.strip()) > 3 and len(b_totp.strip()) > 5)
 
     return {
         "status": "ok",
@@ -2344,9 +2349,12 @@ async def get_broker_vault_status():
         },
         "breeze": {
             "configured": breeze_configured,
+            "autologin_ready": breeze_autologin_ready,
             "api_key_set": bool(b_key and len(b_key.strip()) > 0),
             "api_secret_set": bool(b_sec and len(b_sec.strip()) > 0),
-            "session_token_set": bool(b_tok and len(b_tok.strip()) > 0)
+            "session_token_set": bool(b_tok and len(b_tok.strip()) > 0),
+            "user_id_set": bool(b_uid and len(b_uid.strip()) > 0),
+            "totp_key_set": bool(b_totp and len(b_totp.strip()) > 0)
         }
     }
 
@@ -2415,6 +2423,65 @@ async def update_breeze_vault_credentials(payload: Dict[str, Any] = Body(...)):
         "status": "success",
         "message": "ICICI Direct Breeze credentials encrypted and saved to KeyVault. Live client reloaded."
     }
+
+
+@app.post("/api/vault/breeze-autologin-credentials")
+async def update_breeze_autologin_vault_credentials(payload: Dict[str, Any] = Body(...)):
+    """
+    Encrypts and persists full Zero-Touch ICICI Direct Breeze credentials (API Key, Secret, User ID, Password, TOTP Secret)
+    into the KeyVault. Optionally triggers immediate auto-login.
+    """
+    api_key = str(payload.get("api_key", "")).strip()
+    api_secret = str(payload.get("api_secret", "")).strip()
+    user_id = str(payload.get("user_id", "")).strip()
+    password = str(payload.get("password", "")).strip()
+    totp_key = str(payload.get("totp_key", "")).strip().replace(" ", "").upper()
+    trigger_now = bool(payload.get("trigger_now", True))
+
+    from trading_engine.core.keyvault import set_secret
+    if api_key: set_secret("BREEZE_API_KEY", api_key)
+    if api_secret: set_secret("BREEZE_API_SECRET", api_secret)
+    if user_id: set_secret("BREEZE_USER_ID", user_id)
+    if password: set_secret("BREEZE_PASSWORD", password)
+    if totp_key: set_secret("BREEZE_TOTP_KEY", totp_key)
+
+    result = {
+        "status": "success",
+        "message": "Breeze Zero-Touch credentials encrypted and stored in KeyVault."
+    }
+
+    if trigger_now:
+        import asyncio
+        from trading_engine.adapters.breeze_autologin import BreezeAutoLogin
+        auto = BreezeAutoLogin()
+        prereq = auto.check_prerequisites()
+        if prereq["success"]:
+            loop = asyncio.get_event_loop()
+            login_res = await loop.run_in_executor(None, auto.execute_login)
+            result["auto_login"] = login_res
+        else:
+            result["auto_login"] = prereq
+
+    return result
+
+
+@app.post("/api/broker/breeze/auto-login")
+async def trigger_breeze_auto_login():
+    """
+    Triggers the 100% Zero-Touch TOTP Playwright Auto-Login sequence.
+    """
+    import asyncio
+    from trading_engine.adapters.breeze_autologin import BreezeAutoLogin
+
+    auto = BreezeAutoLogin()
+    prereq = auto.check_prerequisites()
+    if not prereq["success"]:
+        return JSONResponse(status_code=400, content=prereq)
+
+    loop = asyncio.get_event_loop()
+    res = await loop.run_in_executor(None, auto.execute_login)
+    status_code = 200 if res.get("success") else 500
+    return JSONResponse(status_code=status_code, content=res)
 
 
 @app.api_route("/api/broker/breeze/callback", methods=["GET", "POST"])

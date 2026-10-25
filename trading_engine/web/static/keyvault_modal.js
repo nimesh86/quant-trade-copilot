@@ -22,7 +22,7 @@
         if (modal) {
             modal.style.display = "none";
             // Clean inputs to avoid any secret lingering in DOM
-            ["vault-api-key", "vault-access-token", "vault-breeze-key", "vault-breeze-secret", "vault-breeze-token"].forEach(id => {
+            ["vault-api-key", "vault-access-token", "vault-breeze-key", "vault-breeze-secret", "vault-breeze-token", "vault-breeze-uid", "vault-breeze-pwd", "vault-breeze-totp"].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.value = "";
             });
@@ -109,7 +109,9 @@
 
             if (text) {
                 const brokerLabel = active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite";
-                if (isCurrentConfigured) {
+                if (active === "breeze" && data.breeze?.autologin_ready) {
+                    text.innerHTML = `● Active Broker: <strong>${brokerLabel}</strong> <span style="color:#34d399;">(✨ 100% Zero-Touch Auto-Login Ready)</span>`;
+                } else if (isCurrentConfigured) {
                     text.textContent = `● Active Broker: ${brokerLabel} (Configured & Live in KeyVault)`;
                 } else {
                     text.textContent = `● Active Broker: ${brokerLabel} (Requires Daily Token / Credentials)`;
@@ -172,33 +174,49 @@
     window.submitBreezeVault = async function () {
         const keyInp = document.getElementById("vault-breeze-key");
         const secInp = document.getElementById("vault-breeze-secret");
-        const tokInp = document.getElementById("vault-breeze-token");
+        const uidInp = document.getElementById("vault-breeze-uid");
+        const pwdInp = document.getElementById("vault-breeze-pwd");
+        const totpInp = document.getElementById("vault-breeze-totp");
         const submitBtn = document.getElementById("vault-breeze-submit-btn");
 
         const apiKey = keyInp ? keyInp.value.trim() : "";
         const apiSecret = secInp ? secInp.value.trim() : "";
-        const sessionToken = tokInp ? tokInp.value.trim() : "";
+        const userId = uidInp ? uidInp.value.trim() : "";
+        const password = pwdInp ? pwdInp.value.trim() : "";
+        const totpKey = totpInp ? totpInp.value.trim() : "";
 
-        if (!apiKey || !apiSecret || !sessionToken) {
-            showAlert("Please provide Breeze API Key, Secret Key, and Daily Session Token.", "error");
+        if (!apiKey || !apiSecret) {
+            showAlert("Please provide at least Breeze API Key and Secret Key.", "error");
             return;
         }
 
         if (submitBtn) submitBtn.disabled = true;
+        showAlert("⏳ Encrypting credentials into KeyVault...", "success");
 
         try {
-            const res = await fetch("/api/vault/breeze-credentials", {
+            const res = await fetch("/api/vault/breeze-autologin-credentials", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ api_key: apiKey, api_secret: apiSecret, session_token: sessionToken }),
+                body: JSON.stringify({
+                    api_key: apiKey,
+                    api_secret: apiSecret,
+                    user_id: userId,
+                    password: password,
+                    totp_key: totpKey,
+                    trigger_now: Boolean(userId && password && totpKey)
+                }),
             });
             const result = await res.json();
 
             if (res.ok && result.status === "success") {
-                showAlert("✅ ICICI Direct Breeze credentials encrypted & saved! Live client reloaded.", "success");
-                if (keyInp) keyInp.value = "";
-                if (secInp) secInp.value = "";
-                if (tokInp) tokInp.value = "";
+                const auto = result.auto_login;
+                if (auto && auto.success) {
+                    showAlert("✅ 100% Zero-Touch Auto-Login Successful! Breeze session active.", "success");
+                } else if (auto && !auto.success) {
+                    showAlert(`⚠️ Credentials saved, but auto-login test note: ${auto.error || "Check details"}`, "error");
+                } else {
+                    showAlert("✅ Breeze credentials encrypted & saved to KeyVault!", "success");
+                }
                 checkVaultStatus();
             } else {
                 showAlert(`❌ Failed: ${result.message || "Could not save credentials"}`, "error");
@@ -207,6 +225,33 @@
             showAlert(`❌ Network error while saving Breeze credentials: ${e.message}`, "error");
         } finally {
             if (submitBtn) submitBtn.disabled = false;
+        }
+    };
+
+    window.triggerBreezeAutoLogin = async function () {
+        const btn = document.getElementById("vault-breeze-autologin-btn");
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = `<span>⏳ Authenticating via TOTP...</span>`;
+        }
+        showAlert("⏳ Launching headless Playwright & generating live 6-digit TOTP...", "success");
+
+        try {
+            const res = await fetch("/api/broker/breeze/auto-login", { method: "POST" });
+            const result = await res.json();
+            if (res.ok && result.success) {
+                showAlert("🎉 100% Zero-Touch Auto-Login Succeeded! Daily Breeze session active.", "success");
+                checkVaultStatus();
+            } else {
+                showAlert(`❌ Auto-Login Failed: ${result.error || "Please check credentials and TOTP secret"}`, "error");
+            }
+        } catch (e) {
+            showAlert(`❌ Auto-Login network error: ${e.message}`, "error");
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = `<span>⚡ Test Auto-Login Now</span>`;
+            }
         }
     };
 

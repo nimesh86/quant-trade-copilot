@@ -507,6 +507,10 @@
         <!-- ── TAB 2: ICICI Direct Breeze Form ──────────────────────────── -->
         <div id="tab-content-breeze" style="display:none;">
           <form id="vault-breeze-form" autocomplete="off" onsubmit="event.preventDefault(); submitBreezeVault();">
+            <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 14px; font-size: 12px; color: #a7f3d0; line-height: 1.5;">
+              ✨ <strong>100% Zero-Touch Daily Auto-Login</strong>: Fill your ICICI credentials & TOTP key once. The production server automatically authenticates every morning at <strong>08:30 AM IST</strong> using headless Playwright + TOTP!
+            </div>
+
             <div class="vault-form-group">
               <label for="vault-breeze-key">Breeze App Key (API Key)</label>
               <div class="vault-input-wrap">
@@ -524,18 +528,36 @@
             </div>
 
             <div class="vault-form-group">
-              <label for="vault-breeze-token">Daily Session Token</label>
+              <label for="vault-breeze-uid">ICICI Direct User ID</label>
               <div class="vault-input-wrap">
-                <input type="password" id="vault-breeze-token" placeholder="Enter today's Breeze session token…" required autocomplete="new-password" />
-                <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-token', this)">👁️</button>
+                <input type="text" id="vault-breeze-uid" placeholder="Enter ICICI Direct Login ID (e.g. N12345)…" autocomplete="off" />
               </div>
-              <span class="vault-hint">Obtain your daily session token by logging into api.icicidirect.com/apiuser/login.</span>
             </div>
 
-            <div class="vault-form-actions">
+            <div class="vault-form-group">
+              <label for="vault-breeze-pwd">ICICI Direct Password</label>
+              <div class="vault-input-wrap">
+                <input type="password" id="vault-breeze-pwd" placeholder="Enter ICICI Direct login password…" autocomplete="new-password" />
+                <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-pwd', this)">👁️</button>
+              </div>
+            </div>
+
+            <div class="vault-form-group">
+              <label for="vault-breeze-totp">TOTP Secret Key (Base32 2FA Key)</label>
+              <div class="vault-input-wrap">
+                <input type="password" id="vault-breeze-totp" placeholder="Enter Base32 TOTP secret from Authenticator setup…" autocomplete="new-password" />
+                <button type="button" class="vault-eye-btn" onclick="togglePasswordVisibility('vault-breeze-totp', this)">👁️</button>
+              </div>
+              <span class="vault-hint">Base32 key from ICICI Direct 2FA setup. Used to dynamically compute 6-digit TOTP codes zero-touch.</span>
+            </div>
+
+            <div class="vault-form-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
               <button type="button" class="vault-cancel-btn" onclick="closeVaultModal()">Cancel</button>
+              <button type="button" id="vault-breeze-autologin-btn" class="vault-submit-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);" onclick="triggerBreezeAutoLogin()">
+                <span>⚡ Test Auto-Login Now</span>
+              </button>
               <button type="submit" id="vault-breeze-submit-btn" class="vault-submit-btn">
-                <span>🔒 Save Breeze Credentials</span>
+                <span>🔒 Save Credentials</span>
               </button>
             </div>
           </form>
@@ -546,7 +568,7 @@
   </div>
 
   <!-- KeyVault Modal Controller -->
-  <script src="/static/keyvault_modal.js?v=1.0"></script>
+  <script src="/static/keyvault_modal.js?v=20261025_0835"></script>
 
   <!-- Client Logic with Cache-Busting -->
   <script src="/static/app.js?v=8.0"></script>
