@@ -4402,6 +4402,8 @@ function startReplay() {
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.add('active');
     if (dock) dock.classList.remove('hidden');
+    document.body.classList.add('replay-mode-active');
+    updateKillSwitchVisibility();
 
     // Default starting point: 15-20 bars into the session so SMF has initial buffer
     const defaultStart = Math.min(20, Math.max(5, Math.floor(Replay.fullCandles.length * 0.15)));
@@ -4455,7 +4457,9 @@ function exitReplay() {
     const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.remove('active');
-    if (dock) dock.classList.remove('hidden');
+    if (dock) dock.classList.add('hidden');
+    document.body.classList.remove('replay-mode-active');
+    updateKillSwitchVisibility();
 
     const modeSelect = document.getElementById('trade-mode-select');
     if (modeSelect && modeSelect.value === 'replay') {
@@ -5156,6 +5160,44 @@ async function fetchTradeState() {
     }
 }
 
+function updateKillSwitchVisibility(state) {
+    const ksBtn = document.getElementById('btn-master-kill-switch') || document.getElementById('btn-kill-switch');
+    if (!ksBtn) return;
+
+    // Rule 1: No need the kill switch button on replay mode
+    if (Replay && Replay.active) {
+        ksBtn.classList.add('hidden');
+        return;
+    }
+
+    // Rule 2: Only required in paper test on live feed or live trade on live feed (selectedSessionDate === 'today')
+    const isLiveFeed = (MasterState.selectedSessionDate === 'today' || C.selectedSessionDate === 'today');
+    if (!isLiveFeed) {
+        ksBtn.classList.add('hidden');
+        return;
+    }
+
+    // Rule 3: Make it disappear if there is no trade is running
+    const tradeState = state || MasterState.tradingState || C.tradingState;
+    const hasLiveActivePos = tradeState && (tradeState.active_position != null || (tradeState.active_trades && tradeState.active_trades.length > 0));
+    const hasStationPos = (Stations && Stations.CE && Stations.CE.activePosition) || (Stations && Stations.PE && Stations.PE.activePosition);
+
+    if (hasLiveActivePos || hasStationPos) {
+        ksBtn.classList.remove('hidden');
+        if (tradeState && tradeState.is_kill_switch_active) {
+            ksBtn.textContent = '🔒 LOCKED';
+            ksBtn.classList.add('locked');
+            ksBtn.title = 'Kill Switch ACTIVE (Locked). Click to Unlock.';
+        } else {
+            ksBtn.textContent = '🛑 KILL';
+            ksBtn.classList.remove('locked');
+            ksBtn.title = 'Emergency Flatten & Kill Switch';
+        }
+    } else {
+        ksBtn.classList.add('hidden');
+    }
+}
+
 function updateTradingUI(state) {
     if (!state) return;
 
@@ -5185,19 +5227,8 @@ function updateTradingUI(state) {
         modeSelect.value = currentMode;
     }
 
-    // 4. Kill Switch Button (Icon Only)
-    const ksBtn = document.getElementById('btn-kill-switch');
-    if (ksBtn) {
-        if (state.is_kill_switch_active) {
-            ksBtn.classList.add('locked');
-            ksBtn.innerHTML = `<span class="kill-icon">🔒</span>`;
-            ksBtn.title = 'Kill Switch ACTIVE (Locked). Click to Unlock.';
-        } else {
-            ksBtn.classList.remove('locked');
-            ksBtn.innerHTML = `<span class="kill-icon">🛑</span>`;
-            ksBtn.title = 'Emergency Flatten & Kill Switch';
-        }
-    }
+    // 4. Kill Switch Button & Visibility
+    updateKillSwitchVisibility(state);
 
     // 5. Update Single Clean Market Buy Button with live premium
     const curPx = (C.rawCandles.length > 0 ? C.rawCandles[C.rawCandles.length - 1].close : 0.0);

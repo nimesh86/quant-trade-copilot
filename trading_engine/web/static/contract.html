@@ -38,7 +38,7 @@
                 </div>
                 <button id="btn-strike-next" class="step-btn">+50</button>
             </div>
-            <button id="btn-master-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch">🛑</button>
+            <button id="btn-master-kill-switch" class="btn-kill-switch hidden" title="Emergency Flatten & Kill Switch">🛑 KILL</button>
         </div>
 
         <!-- Row 2: Expiry (Compact), Timeframe (1m/5m), Session Date (Compact) -->
@@ -81,16 +81,31 @@
         <!-- STATION 1: CALL (CE) STATION                                        -->
         <!-- ════════════════════════════════════════════════════════════════════ -->
         <section id="station-ce" class="contract-station station-call" aria-label="CALL Option Station">
-            <!-- CE Station Header Bar (Strictly 2 Rows Total: Row 1 = Contract Name, Row 2 = Rate | Points | Trend | Toolbar | Indicators) -->
+            <!-- CE Station Header Bar (Strictly 2 Rows Total: Row 1 = Contract Name with Trend + Indicators at top right, Row 2 = Rate | Points | Toolbar) -->
             <div class="station-hdr">
+                <!-- ROW 1: Contract Name on left with Trend inside, Indicators button at top right corner -->
                 <div class="station-hdr-row1">
-                    <span id="ce-symbol-text" class="station-contract-name ce-badge">NIFTY 27 OCT 22700 CE</span>
+                    <span class="station-contract-name ce-badge">
+                        <span id="ce-symbol-text">NIFTY 27 OCT 22700 CE</span>
+                        <span id="ce-trend-icon" class="trend-arrow up" title="SMF Trend">▲</span>
+                    </span>
+                    <div class="tools-cluster">
+                        <button id="ce-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                        <div id="ce-indicators-panel" class="station-indicators-popover hidden">
+                            <div class="popover-title">Indicators (CE)</div>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-price" /> <span>🏷 Signal Price</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- ROW 2: Price | Difference in Points | Toolbar (Lot Stepper, BUY CE, LIMIT) -->
                 <div class="station-hdr-row2">
                     <div class="rate-cluster">
                         <span id="ce-ltp" class="station-ltp">₹--</span>
                         <span id="ce-chg" class="station-chg">--</span>
-                        <span id="ce-trend-icon" class="trend-arrow up" title="SMF Trend">▲</span>
                     </div>
                     <div class="station-toolbar">
                         <div class="lot-stepper" title="Order Lot Size">
@@ -113,6 +128,7 @@
                                 <polyline points="4 15 10 9 14 13 20 7"></polyline>
                                 <polyline points="15 7 20 7 20 12"></polyline>
                             </svg>
+                            <span class="limit-txt">LIMIT</span>
                         </button>
                         <div id="ce-pos-hud" class="station-pos-hud hidden" title="Active CE Position Overview">
                             <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="ce-hud-pos" class="hud-num">₹--</span></div>
@@ -125,16 +141,6 @@
                             <span id="ce-pos-pnl" class="exit-pnl">+₹0.00</span>
                         </button>
                     </div>
-                    <div class="tools-cluster">
-                        <button id="ce-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
-                        <div id="ce-indicators-panel" class="station-indicators-popover hidden">
-                            <div class="popover-title">Indicators (CE)</div>
-                            <label class="popover-item"><input type="checkbox" id="ce-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
-                            <label class="popover-item"><input type="checkbox" id="ce-chk-price" /> <span>🏷 Signal Price</span></label>
-                            <label class="popover-item"><input type="checkbox" id="ce-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
-                            <label class="popover-item"><input type="checkbox" id="ce-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -144,7 +150,7 @@
                 <canvas id="ce-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- CE Station Footer: Direct Metrics Grid (No redundant badge) -->
+            <!-- CE Station Footer: Direct Metrics Grid (Cleaned: no redundant dropdown) -->
             <div class="station-footer ce-footer">
                 <div class="footer-strip-row">
                     <div class="footer-metrics-grid">
@@ -154,19 +160,6 @@
                         <div class="metric-item"><span class="m-lbl">POINTS</span><span id="ce-stat-pts" class="m-val highlight">+0.0 pts</span></div>
                         <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="ce-stat-cash" class="m-val highlight">+₹0.00</span></div>
                     </div>
-                    <div class="footer-right-actions">
-                        <button id="ce-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse CE Trades Log">📋 (<span id="ce-log-count">0</span>) ▾</button>
-                    </div>
-                </div>
-                <!-- Expandable Mini-Ledger Drawer for CE -->
-                <div id="ce-log-drawer" class="station-log-drawer hidden">
-                    <div class="drawer-header">
-                        <span>CALL (CE) SESSION EXECUTION TRADES</span>
-                        <button id="ce-log-close" class="btn-drawer-close">✕</button>
-                    </div>
-                    <div id="ce-log-table-wrap" class="drawer-table-wrap">
-                        <div class="no-trades-msg">No trades on this session yet.</div>
-                    </div>
                 </div>
             </div>
         </section>
@@ -175,16 +168,31 @@
         <!-- STATION 2: PUT (PE) STATION                                         -->
         <!-- ════════════════════════════════════════════════════════════════════ -->
         <section id="station-pe" class="contract-station station-put" aria-label="PUT Option Station">
-            <!-- PE Station Header Bar (Strictly 2 Rows Total: Row 1 = Contract Name, Row 2 = Rate | Points | Trend | Toolbar | Indicators) -->
+            <!-- PE Station Header Bar (Strictly 2 Rows Total: Row 1 = Contract Name with Trend + Indicators at top right, Row 2 = Rate | Points | Toolbar) -->
             <div class="station-hdr">
+                <!-- ROW 1: Contract Name on left with Trend inside, Indicators button at top right corner -->
                 <div class="station-hdr-row1">
-                    <span id="pe-symbol-text" class="station-contract-name pe-badge">NIFTY 27 OCT 22700 PE</span>
+                    <span class="station-contract-name pe-badge">
+                        <span id="pe-symbol-text">NIFTY 27 OCT 22700 PE</span>
+                        <span id="pe-trend-icon" class="trend-arrow down" title="SMF Trend">▼</span>
+                    </span>
+                    <div class="tools-cluster">
+                        <button id="pe-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                        <div id="pe-indicators-panel" class="station-indicators-popover hidden">
+                            <div class="popover-title">Indicators (PE)</div>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-price" /> <span>🏷 Signal Price</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                        </div>
+                    </div>
                 </div>
+
+                <!-- ROW 2: Price | Difference in Points | Toolbar (Lot Stepper, BUY PE, LIMIT) -->
                 <div class="station-hdr-row2">
                     <div class="rate-cluster">
                         <span id="pe-ltp" class="station-ltp">₹--</span>
                         <span id="pe-chg" class="station-chg">--</span>
-                        <span id="pe-trend-icon" class="trend-arrow down" title="SMF Trend">▼</span>
                     </div>
                     <div class="station-toolbar">
                         <div class="lot-stepper" title="Order Lot Size">
@@ -207,6 +215,7 @@
                                 <polyline points="4 15 10 9 14 13 20 7"></polyline>
                                 <polyline points="15 7 20 7 20 12"></polyline>
                             </svg>
+                            <span class="limit-txt">LIMIT</span>
                         </button>
                         <div id="pe-pos-hud" class="station-pos-hud hidden" title="Active PE Position Overview">
                             <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="pe-hud-pos" class="hud-num">₹--</span></div>
@@ -219,16 +228,6 @@
                             <span id="pe-pos-pnl" class="exit-pnl">+₹0.00</span>
                         </button>
                     </div>
-                    <div class="tools-cluster">
-                        <button id="pe-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
-                        <div id="pe-indicators-panel" class="station-indicators-popover hidden">
-                            <div class="popover-title">Indicators (PE)</div>
-                            <label class="popover-item"><input type="checkbox" id="pe-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
-                            <label class="popover-item"><input type="checkbox" id="pe-chk-price" /> <span>🏷 Signal Price</span></label>
-                            <label class="popover-item"><input type="checkbox" id="pe-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
-                            <label class="popover-item"><input type="checkbox" id="pe-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -238,7 +237,7 @@
                 <canvas id="pe-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- PE Station Footer: Direct Metrics Grid (No redundant badge) -->
+            <!-- PE Station Footer: Direct Metrics Grid (Cleaned: no redundant dropdown) -->
             <div class="station-footer pe-footer">
                 <div class="footer-strip-row">
                     <div class="footer-metrics-grid">
@@ -248,19 +247,6 @@
                         <div class="metric-item"><span class="m-lbl">POINTS</span><span id="pe-stat-pts" class="m-val highlight">+0.0 pts</span></div>
                         <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="pe-stat-cash" class="m-val highlight">+₹0.00</span></div>
                     </div>
-                    <div class="footer-right-actions">
-                        <button id="pe-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse PE Trades Log">📋 (<span id="pe-log-count">0</span>) ▾</button>
-                    </div>
-                </div>
-                <!-- Expandable Mini-Ledger Drawer for PE -->
-                <div id="pe-log-drawer" class="station-log-drawer hidden">
-                    <div class="drawer-header">
-                        <span>PUT (PE) SESSION EXECUTION TRADES</span>
-                        <button id="pe-log-close" class="btn-drawer-close">✕</button>
-                    </div>
-                    <div id="pe-log-table-wrap" class="drawer-table-wrap">
-                        <div class="no-trades-msg">No trades on this session yet.</div>
-                    </div>
                 </div>
             </div>
         </section>
@@ -269,61 +255,48 @@
 
     <!-- ── Synchronized Replay Floating Control Dock ──────────────────────── -->
     <div id="replay-bar" class="replay-dock hidden" role="toolbar" aria-label="Synchronized Dual Replay Controls">
-        <div class="replay-drag-handle">
-            <span class="replay-pulse-dot"></span>
-            <span class="replay-title">REPLAY (CE + PE)</span>
+        <!-- ROW 1: Timeline Slider & Timestamps + Close Button -->
+        <div class="rp-row rp-row-1">
+            <div class="replay-timeline">
+                <input type="range" id="rp-scrubber" min="0" max="100" value="0" step="1" title="Drag to jump to specific candle" />
+                <div class="replay-time-display">
+                    <span id="rp-cur-time" class="rp-time-val">09:15</span>
+                    <span class="rp-divider">/</span>
+                    <span id="rp-total-time" class="rp-time-val">15:30</span>
+                    <span id="rp-bar-count" class="rp-pill">0 / 0</span>
+                </div>
+            </div>
+            <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
         </div>
 
-        <div class="replay-btn-group">
-            <button id="rp-btn-start" class="rp-ctrl-btn" title="Jump to Start (Home)">⏮</button>
-            <button id="rp-btn-step-back" class="rp-ctrl-btn" title="Step Back 1 Candle (Left Arrow)">◀</button>
-            <button id="rp-btn-play" class="rp-ctrl-btn rp-play-btn" title="Play / Pause Replay (Space)">▶</button>
-            <button id="rp-btn-step-fwd" class="rp-ctrl-btn" title="Step Forward 1 Candle (Right Arrow)">▶|</button>
-            <button id="rp-btn-end" class="rp-ctrl-btn" title="Jump to Latest Candle (End)">⏭</button>
-        </div>
+        <!-- ROW 2: Step Back, Play, Step Fwd + Speed Select (no label) + Mode Toggle -->
+        <div class="rp-row rp-row-2">
+            <div class="replay-btn-group">
+                <button id="rp-btn-step-back" class="rp-ctrl-btn" title="Step Back 1 Candle (Left Arrow)">◀</button>
+                <button id="rp-btn-play" class="rp-ctrl-btn rp-play-btn" title="Play / Pause Replay (Space)">▶</button>
+                <button id="rp-btn-step-fwd" class="rp-ctrl-btn" title="Step Forward 1 Candle (Right Arrow)">▶|</button>
+            </div>
 
-        <div class="replay-timeline">
-            <input type="range" id="rp-scrubber" min="0" max="100" value="0" step="1" title="Drag to jump to specific candle" />
-            <div class="replay-time-display">
-                <span id="rp-cur-time" class="rp-time-val">09:15</span>
-                <span class="rp-divider">/</span>
-                <span id="rp-total-time" class="rp-time-val">15:30</span>
-                <span id="rp-bar-count" class="rp-pill">0 / 0</span>
+            <div class="replay-speed-wrap">
+                <select id="rp-speed-select" class="rp-select" title="Replay Speed">
+                    <option value="1200">0.5x</option>
+                    <option value="600" selected>1x</option>
+                    <option value="300">2x</option>
+                    <option value="120">5x</option>
+                    <option value="40">10x</option>
+                </select>
+            </div>
+
+            <!-- Mode Toggle: Auto Backtest vs Manual Practice -->
+            <div class="rp-mode-switch" id="rp-mode-switch" title="Replay Mode: Auto-System Backtest vs Manual Paper Practice">
+                <button type="button" id="rp-mode-auto" class="rp-mode-btn active" title="Auto-System Backtest">
+                    ⚡ Auto
+                </button>
+                <button type="button" id="rp-mode-manual" class="rp-mode-btn" title="Manual Replay Trading">
+                    ✍️ Manual
+                </button>
             </div>
         </div>
-
-        <div class="replay-speed-wrap">
-            <span class="rp-label">Speed:</span>
-            <select id="rp-speed-select" class="rp-select">
-                <option value="1200">0.5x</option>
-                <option value="600" selected>1x</option>
-                <option value="300">2x</option>
-                <option value="120">5x</option>
-                <option value="40">10x</option>
-            </select>
-        </div>
-
-        <div class="replay-date-wrap">
-            <input type="date" id="rp-date-picker" class="rp-date-input" title="Historical Session Date" />
-            <button id="rp-btn-load-date" class="rp-mini-btn" title="Load Historical Date">Load</button>
-        </div>
-
-        <!-- Mode Toggle: Auto Backtest vs Manual Practice -->
-        <div class="rp-mode-switch" id="rp-mode-switch" title="Replay Mode: Auto-System Backtest vs Manual Paper Practice">
-            <button type="button" id="rp-mode-auto" class="rp-mode-btn active" title="Auto-System Backtest: Strategies enter & exit trades automatically">
-                ⚡ Auto
-            </button>
-            <button type="button" id="rp-mode-manual" class="rp-mode-btn" title="Manual Replay Trading: Use BUY / EXIT buttons to trade replay candles yourself">
-                ✍️ Manual
-            </button>
-        </div>
-
-        <!-- Report Button -->
-        <button type="button" id="rp-btn-scorecard" class="rp-scorecard-btn" title="View Full Combined Accuracy Scorecard & Trades Ledger">
-            📊 Report
-        </button>
-
-        <button id="rp-btn-exit" class="rp-close-btn" title="Exit Replay (Esc)">✕</button>
     </div>
 
     <!-- ── Option Chain Panel (Slide-up Drawer / Modal) ───────────────────── -->
