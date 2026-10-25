@@ -3818,6 +3818,7 @@ kbd {
     display: flex;
     flex-direction: column;
     width: 100%;
+    flex-shrink: 0;
     border-radius: 10px;
     overflow: hidden;
     box-sizing: border-box;
