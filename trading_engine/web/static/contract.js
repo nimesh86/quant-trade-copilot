@@ -894,9 +894,7 @@ function selectContract(contract) {
 
     // Update ATM Pair Pill & Dual View
     updateAtmPairPill();
-    if (C.dualMode) {
-        refreshSecondaryContract();
-    }
+    refreshSecondaryContract();
 
     // Auto-close Option Chain drawer on contract select so user gets full chart view
     const ocPanel = document.getElementById('option-chain-panel');
@@ -4592,21 +4590,23 @@ function renderReplayStep() {
         // 2. Evaluate active trading position and SL / Target auto-triggers during replay
         evaluateReplayCandleTrading(curCandle);
 
-        // 3. Synchronize secondary chart in dual mode
-        if (C.dualMode && C.secondaryRawCandles && C.secondaryRawCandles.length > 0 && C.secondaryCandleSeries) {
+        // 3. Synchronize secondary contract & counterpart signal simultaneously
+        if (C.secondaryRawCandles && C.secondaryRawCandles.length > 0) {
             const secSliced = C.secondaryRawCandles.filter(c => c.time <= curCandle.time);
             if (secSliced.length > 0) {
                 const secAgg = aggregateCandles(secSliced, C.currentTf);
                 const secSmf = computeSMF(secAgg);
                 C.secondarySmfLastResult = secSmf;
-                const colored = secAgg.map((c, i) => ({
-                    ...c,
-                    color: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    borderColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    wickColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                }));
-                C.secondaryCandleSeries.setData(colored);
-                requestAnimationFrame(renderSecondarySMFCanvas);
+                if (C.secondaryCandleSeries) {
+                    const colored = secAgg.map((c, i) => ({
+                        ...c,
+                        color: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        borderColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        wickColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    }));
+                    C.secondaryCandleSeries.setData(colored);
+                    requestAnimationFrame(renderSecondarySMFCanvas);
+                }
 
                 const lastSec = secAgg[secAgg.length - 1];
                 const secLtpEl = document.getElementById('sec-chart-ltp');
