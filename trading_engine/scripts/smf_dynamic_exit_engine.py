@@ -308,10 +308,10 @@ def is_srr_setup(b: int, c_open: float, c_high: float, c_low: float, c_close: fl
     """
     Support Reversal Reclaim (SRR):
     Captures high-reward entries when price bounces off key base support
-    with wide runway (>= 22 pts) to overhead resistance.
+    with wide runway (>= 20 pts) to overhead resistance.
     """
-    if b < 26: return False, 0.0
-    in_srr_window = ("09:45" <= c_time <= "11:00") or ("13:15" <= c_time <= "14:30")
+    if b < 20: return False, 0.0
+    in_srr_window = ("09:35" <= c_time <= "11:00") or ("13:15" <= c_time <= "14:30")
     if not in_srr_window: return False, 0.0
 
     lows = cdata["lows"]
@@ -331,7 +331,7 @@ def is_srr_setup(b: int, c_open: float, c_high: float, c_low: float, c_close: fl
 
     res_ceiling = np.max(highs[:b])
     runway = res_ceiling - c_close
-    has_wide_runway = (runway >= max(22.0, 2.2 * atr))
+    has_wide_runway = (runway >= max(20.0, 2.0 * atr))
     if not has_wide_runway: return False, 0.0
 
     prev_2_high = max(highs[max(0, b - 2)], highs[max(0, b - 1)])

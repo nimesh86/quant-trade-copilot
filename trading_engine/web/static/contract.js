@@ -1991,12 +1991,12 @@ function computeSMF(candles) {
         // trigger an early high-reward SRR BUY entry!
         let isSRR = false;
         let srrDipLow = c.low;
-        if (i >= 26 && !inLongPosition) {
+        if (i >= 20 && !inLongPosition) {
             const d = new Date(c.time * 1000);
             const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
             const istM = (d.getUTCMinutes() + 30) % 60;
             const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
-            const inSrrWindow = (cTimeStr >= '09:45' && cTimeStr <= '11:00') || (cTimeStr >= '13:15' && cTimeStr <= '14:30');
+            const inSrrWindow = (cTimeStr >= '09:35' && cTimeStr <= '11:00') || (cTimeStr >= '13:15' && cTimeStr <= '14:30');
 
             if (inSrrWindow) {
                 let morningBase = Infinity;
@@ -2020,7 +2020,7 @@ function computeSMF(candles) {
                     if (highs[k] > resCeiling) resCeiling = highs[k];
                 }
                 const runway = resCeiling - c.close;
-                const hasWideRunway = (runway >= Math.max(22.0, 2.2 * atr[i]));
+                const hasWideRunway = (runway >= Math.max(20.0, 2.0 * atr[i]));
 
                 const prev2High = Math.max(highs[Math.max(0, i - 2)], highs[Math.max(0, i - 1)]);
                 const isReversal = (c.close > c.open) && (c.close > prev2High) && (rsi[i] >= 45.0);
@@ -2928,8 +2928,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         // 3. Check New Entry on SMF Switch Up OR Support Reversal Reclaim (SRR)
         let isSRRBar = false;
         let srrDipLowVal = c.low;
-        if (!activeTrade && i >= 26 && !dayHalted && dailyTradeCount < 4) {
-            const inSrrWindow = (cTime >= '09:45' && cTime <= '11:00') || (cTime >= '13:15' && cTime <= '14:30');
+        if (!activeTrade && i >= 20 && !dayHalted && dailyTradeCount < 4) {
+            const inSrrWindow = (cTime >= '09:35' && cTime <= '11:00') || (cTime >= '13:15' && cTime <= '14:30');
             if (inSrrWindow) {
                 let morningBase = Infinity;
                 const baseEnd = Math.min(26, i);
@@ -2950,7 +2950,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     if (candles[k].high > resCeiling) resCeiling = candles[k].high;
                 }
                 const runway = resCeiling - c.close;
-                const hasWideRunway = (runway >= Math.max(22.0, 2.2 * atr[i]));
+                const hasWideRunway = (runway >= Math.max(20.0, 2.0 * atr[i]));
 
                 const prev2High = Math.max(candles[Math.max(0, i - 2)].high, candles[Math.max(0, i - 1)].high);
                 const isReversal = (c.close > c.open) && (c.close > prev2High) && (rsi[i] >= 45.0);
