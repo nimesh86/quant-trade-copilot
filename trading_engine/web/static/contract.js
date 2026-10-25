@@ -1197,25 +1197,69 @@ function disconnectContractWS() {
 
 // ── ZERO-LATENCY LIVE TICK ORDER & TARGET EXECUTION ENGINE ─────────────────
 
+function dismissExecutionToast(toast) {
+    if (!toast || toast.classList.contains('toast-dismissing')) return;
+    toast.classList.add('toast-dismissing');
+    setTimeout(() => {
+        if (toast.parentElement) toast.remove();
+    }, 250);
+}
+
 function flashExecutionAlert(title, message, type = 'success') {
     let container = document.getElementById('execution-toast-container');
     if (!container) {
         container = document.createElement('div');
         container.id = 'execution-toast-container';
-        container.style.cssText = 'position:fixed;top:56px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:8px;pointer-events:none;';
         document.body.appendChild(container);
     }
+
+    // Limit to max 2 thin toasts simultaneously - dismiss oldest if 2 already exist
+    const existingToasts = container.querySelectorAll('.top-toast:not(.toast-dismissing)');
+    if (existingToasts.length >= 2) {
+        dismissExecutionToast(existingToasts[0]);
+    }
+
     const toast = document.createElement('div');
-    const color = type === 'success' ? '#00f2a9' : (type === 'danger' ? '#ff4d6d' : (type === 'warning' ? '#ffd166' : '#00e5ff'));
-    const bg = type === 'success' ? 'rgba(0, 242, 169, 0.18)' : (type === 'danger' ? 'rgba(255, 77, 109, 0.18)' : (type === 'warning' ? 'rgba(255, 209, 102, 0.18)' : 'rgba(0, 229, 255, 0.18)'));
-    toast.style.cssText = `background:${bg};backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid ${color};color:#fff;padding:10px 16px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,0.5), 0 0 12px ${color}44;pointer-events:auto;transition:opacity 0.3s ease, transform 0.3s ease;`;
-    toast.innerHTML = `<div style="font-weight:700;color:${color};margin-bottom:2px;">${title}</div><div style="font-size:12px;color:rgba(255,255,255,0.85);">${message}</div>`;
+    toast.className = `top-toast toast-${type}`;
+    toast.setAttribute('role', 'alert');
+
+    // Extract leading emoji/symbol for small icon
+    let icon = '';
+    let cleanTitle = title || '';
+    const emojiMatch = cleanTitle.match(/^([\uD800-\uDBFF][\uDC00-\uDFFF]|[\u2600-\u27BF]|\p{Extended_Pictographic})/u);
+    if (emojiMatch) {
+        icon = emojiMatch[0];
+        cleanTitle = cleanTitle.substring(emojiMatch[0].length).trim();
+    } else {
+        icon = type === 'danger' ? '🛑' : (type === 'warning' ? '⚠️' : (type === 'info' ? 'ℹ️' : '✓'));
+    }
+
+    const hasMsg = message && message.trim().length > 0;
+    toast.innerHTML = `
+        <div class="top-toast-main">
+            <span class="top-toast-icon">${icon}</span>
+            <span class="top-toast-title">${cleanTitle}</span>
+            ${hasMsg ? `<span class="top-toast-sep">•</span><span class="top-toast-msg">${message}</span>` : ''}
+        </div>
+        <button class="top-toast-close" type="button" aria-label="Close" title="Dismiss">×</button>
+    `;
+
+    const closeBtn = toast.querySelector('.top-toast-close');
+    let timer = null;
+    const dismiss = () => {
+        if (timer) clearTimeout(timer);
+        dismissExecutionToast(toast);
+    };
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dismiss();
+        });
+    }
+
     container.appendChild(toast);
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-10px)';
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
+    timer = setTimeout(dismiss, 4500);
 }
 
 function dispatchOrderExecutionEvent(payload) {
