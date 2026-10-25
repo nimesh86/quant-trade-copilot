@@ -144,94 +144,68 @@ class BreezeAutoLogin:
 
                 if not captured_session_token:
                     # 1. Fill User ID
-                    user_selectors = [
-                        "input[name*='user' i]",
-                        "input[id*='user' i]",
-                        "input[placeholder*='User' i]",
-                        "input[type='text']",
-                    ]
-                    user_filled = False
-                    for sel in user_selectors:
-                        if page.locator(sel).count() > 0 and page.locator(sel).first.is_visible():
-                            page.fill(sel, self.user_id)
-                            user_filled = True
-                            break
-
-                    if not user_filled:
-                        page.screenshot(path=str(screenshot_path))
-                        return {"success": False, "error": "Could not locate User ID input field on login page."}
+                    if page.locator("#txtuid").count() > 0 and page.locator("#txtuid").is_visible():
+                        page.fill("#txtuid", self.user_id)
+                    else:
+                        page.fill("input[name*='user' i], input[type='text']", self.user_id)
 
                     # 2. Fill Password
-                    pwd_selectors = [
-                        "input[type='password']",
-                        "input[name*='pass' i]",
-                        "input[id*='pass' i]",
-                    ]
-                    pwd_filled = False
-                    for sel in pwd_selectors:
-                        if page.locator(sel).count() > 0 and page.locator(sel).first.is_visible():
-                            page.fill(sel, self.password)
-                            pwd_filled = True
-                            break
+                    if page.locator("#txtPass").count() > 0 and page.locator("#txtPass").is_visible():
+                        page.fill("#txtPass", self.password)
+                    else:
+                        page.fill("input[type='password']", self.password)
 
-                    if not pwd_filled:
-                        page.screenshot(path=str(screenshot_path))
-                        return {"success": False, "error": "Could not locate Password input field on login page."}
+                    # 3. Check Terms and Conditions
+                    if page.locator("#chkssTnc").count() > 0:
+                        page.check("#chkssTnc")
 
-                    # 3. Click Login / Submit
-                    login_btn_selectors = [
-                        "button[type='submit']",
-                        "button:has-text('Login')",
-                        "input[type='submit']",
-                        "button:has-text('Sign In')",
-                    ]
-                    for btn_sel in login_btn_selectors:
-                        if page.locator(btn_sel).count() > 0 and page.locator(btn_sel).first.is_visible():
-                            page.click(btn_sel)
-                            break
+                    # 4. Click Login Button (#btnSubmit)
+                    if page.locator("#btnSubmit").count() > 0 and page.locator("#btnSubmit").is_visible():
+                        page.click("#btnSubmit")
+                    else:
+                        page.click("input[type='button'], button[type='submit']")
 
-                    page.wait_for_timeout(2000)
+                    page.wait_for_timeout(2500)
                     extract_token_from_url(page.url)
 
-                # 4. Handle TOTP Verification Step
+                # 5. Handle OTP / TOTP Verification Step
                 if not captured_session_token:
-                    totp_selectors = [
-                        "input[name*='totp' i]",
-                        "input[name*='otp' i]",
-                        "input[id*='totp' i]",
-                        "input[id*='otp' i]",
-                        "input[placeholder*='OTP' i]",
-                        "input[placeholder*='TOTP' i]",
-                        "input[type='text'][maxlength='6']",
-                        "input[type='number'][maxlength='6']",
-                    ]
-                    
                     totp_found = False
-                    # Wait up to 5s for OTP box
-                    for _ in range(5):
-                        for t_sel in totp_selectors:
-                            if page.locator(t_sel).count() > 0 and page.locator(t_sel).first.is_visible():
+                    current_code = self.generate_current_totp()
+
+                    # Wait up to 6s for OTP box(es)
+                    for _ in range(6):
+                        # Case A: 6 individual single-digit input boxes (ICICI Direct standard)
+                        otp_boxes = page.locator("#pnlOTP input[tg-nm='otp']").all()
+                        if not otp_boxes:
+                            otp_boxes = page.locator("#dvgetotp input[type='text']").all()
+
+                        if len(otp_boxes) >= 6:
+                            totp_found = True
+                            logger.info(f"Injecting dynamic 6-digit TOTP into 6 digit boxes...")
+                            for idx in range(6):
+                                otp_boxes[idx].fill(current_code[idx])
+                            # Click Submit (#Button1)
+                            if page.locator("#Button1").count() > 0:
+                                page.click("#Button1")
+                            elif page.locator("input[value='Submit'], button:has-text('Submit')").count() > 0:
+                                page.click("input[value='Submit'], button:has-text('Submit')")
+                            break
+
+                        # Case B: Single 6-digit input box
+                        single_box_sels = ["input[name*='totp' i]", "input[name*='otp' i]", "input[id*='otp' i]"]
+                        for s_sel in single_box_sels:
+                            if page.locator(s_sel).count() > 0 and page.locator(s_sel).first.is_visible():
                                 totp_found = True
-                                current_code = self.generate_current_totp()
-                                logger.info(f"Injecting dynamic 6-digit TOTP code...")
-                                page.fill(t_sel, current_code)
+                                logger.info(f"Injecting dynamic TOTP into single box...")
+                                page.fill(s_sel, current_code)
+                                if page.locator("button[type='submit'], input[type='button']").count() > 0:
+                                    page.click("button[type='submit'], input[type='button']")
                                 break
+
                         if totp_found:
                             break
                         page.wait_for_timeout(1000)
-
-                    if totp_found:
-                        # Click Verify / Submit OTP
-                        otp_submit_selectors = [
-                            "button:has-text('Submit')",
-                            "button:has-text('Verify')",
-                            "button:has-text('Proceed')",
-                            "button[type='submit']",
-                        ]
-                        for o_sel in otp_submit_selectors:
-                            if page.locator(o_sel).count() > 0 and page.locator(o_sel).first.is_visible():
-                                page.click(o_sel)
-                                break
 
                     # Wait for redirect to callback URL
                     start_time = time.time()
