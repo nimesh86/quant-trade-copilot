@@ -79,11 +79,13 @@ async def test_ui_e2e_complete_mobile_flow():
         await page.wait_for_timeout(500)
         assert 'has-pos' not in (await page.locator('#ce-toolbar').get_attribute('class'))
 
-        # 4. Test Station Limit Buttons Wiring (Defect Regression Trap)
+        # 4. Test Station Limit Buttons Wiring & Overlay
         await page.click('#ce-btn-limit')
         await page.wait_for_timeout(300)
         limit_btn_cls = await page.locator('#ce-btn-limit').get_attribute('class')
         assert 'active' in limit_btn_cls, "Clicking #ce-btn-limit must activate the limit tool!"
+        hb_count = await page.evaluate("() => window.Stations && window.Stations.CE && window.Stations.CE.limitToolHitBoxes ? window.Stations.CE.limitToolHitBoxes.length : 0")
+        assert hb_count > 0, "Station Limit tool must generate interactive hitboxes on the canvas!"
         # Toggle off
         await page.click('#ce-btn-limit')
         await page.wait_for_timeout(300)
@@ -111,8 +113,13 @@ async def test_ui_e2e_complete_mobile_flow():
         assert int(await page.locator('#cur-strike-val').text_content()) == strike_before
 
         # 7. Test Bar Replay Mode Segregation (Auto vs Manual)
+        await page.wait_for_function("() => window.Stations && window.Stations.CE && window.Stations.CE.rawCandles && window.Stations.CE.rawCandles.length >= 5", timeout=10000)
         await page.click('#btn-master-replay')
-        await page.wait_for_timeout(500)
+        await page.wait_for_selector('#replay-bar:not(.hidden)', timeout=5000)
+
+        # Verify next candle button has clean icon ⏭
+        assert await page.locator('#rp-btn-step-fwd').text_content() == "⏭"
+
         await page.click('#rp-mode-manual')
         await page.wait_for_timeout(300)
 

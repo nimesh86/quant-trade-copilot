@@ -4435,7 +4435,7 @@ function startReplay() {
     const baseCandles = ceCandles.length >= peCandles.length ? ceCandles : peCandles;
 
     if (!baseCandles || baseCandles.length < 5) {
-        alert("Please select or load option contracts first before starting Bar Replay.");
+        flashExecutionAlert('⚠️ NO CANDLES', 'Please select or load option contracts first before starting Bar Replay.', 'warning');
         return;
     }
 
@@ -6569,6 +6569,7 @@ function createStationChart(station, containerId, canvasId) {
     new ResizeObserver(syncCanvas).observe(container);
     window.addEventListener('resize', syncCanvas);
     syncCanvas();
+    initStationTradingMouse(station);
 }
 
 function bindStationControls(station) {
@@ -6582,12 +6583,29 @@ function bindStationControls(station) {
         lotMinus.addEventListener('click', () => {
             station.tradingLots = Math.max(1, station.tradingLots - 1);
             if (lotVal) lotVal.textContent = station.tradingLots;
+            updateStationFooter(station);
         });
     }
     if (lotPlus) {
         lotPlus.addEventListener('click', () => {
-            station.tradingLots = Math.min(20, station.tradingLots + 1);
+            station.tradingLots = Math.min(100, station.tradingLots + 1);
             if (lotVal) lotVal.textContent = station.tradingLots;
+            updateStationFooter(station);
+        });
+    }
+    if (lotVal) {
+        lotVal.style.cursor = 'pointer';
+        lotVal.title = 'Click to enter lots (1 - 100)';
+        lotVal.addEventListener('click', () => {
+            const input = prompt(`Enter lots for ${station.type} (1 - 100):`, station.tradingLots);
+            if (input !== null) {
+                const val = parseInt(input, 10);
+                if (!isNaN(val) && val >= 1 && val <= 100) {
+                    station.tradingLots = val;
+                    lotVal.textContent = val;
+                    updateStationFooter(station);
+                }
+            }
         });
     }
 
@@ -6719,14 +6737,17 @@ function bindStationControls(station) {
                 flashExecutionAlert('⚠️ NO CONTRACT', 'Please select an option contract from the chain first.', 'warning');
                 return;
             }
-            C.limitTool.active = !C.limitTool.active;
-            limitBtn.classList.toggle('active', C.limitTool.active);
-            if (C.limitTool.active) {
+            if (!station.limitTool) {
+                station.limitTool = { active: false, limitPrice: 100, targetPrice: 110, slPrice: 90 };
+            }
+            station.limitTool.active = !station.limitTool.active;
+            limitBtn.classList.toggle('active', station.limitTool.active);
+            if (station.limitTool.active) {
                 const curPx = (station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 100.0);
-                C.limitTool.limitPrice = Math.round(curPx * 20) / 20;
-                C.limitTool.targetPrice = Math.round((curPx + Math.max(6.0, curPx * 0.08)) * 20) / 20;
-                C.limitTool.slPrice = Math.round((curPx - Math.max(4.0, curPx * 0.05)) * 20) / 20;
-                flashExecutionAlert('📐 LIMIT TOOL ACTIVE', `Drag the Limit, Target, and SL lines directly on the ${station.type} chart.`, 'highlight');
+                station.limitTool.limitPrice = Math.round(curPx * 20) / 20;
+                station.limitTool.targetPrice = Math.round((curPx + Math.max(6.0, curPx * 0.08)) * 20) / 20;
+                station.limitTool.slPrice = Math.round((curPx - Math.max(4.0, curPx * 0.05)) * 20) / 20;
+                flashExecutionAlert('📐 LIMIT TOOL ACTIVE', `Drag the Limit, Target, or SL lines on the ${station.type} chart. Click anywhere to reposition.`, 'highlight');
             } else {
                 flashExecutionAlert('📐 LIMIT TOOL CLOSED', 'Interactive order box hidden.', 'info');
             }
@@ -7157,6 +7178,8 @@ function updateStationFooter(station) {
         summaryCashEl.className = `footer-stat-pnl highlight ${netCash >= 0 ? 'pos' : 'neg'}`;
     }
 
+    station.currentNetCash = netCash;
+
     if (statTrades) statTrades.textContent = totalTrades;
     if (statWinrate) statWinrate.textContent = totalTrades > 0 ? `${winRate.toFixed(0)}%` : '--%';
     if (statPnl) {
@@ -7216,33 +7239,28 @@ function updateStationFooter(station) {
             `;
         }
     }
+
+    updatePortfolioSummary();
 }
 
 function updatePortfolioSummary() {
-    const ceDe = Stations.CE.dynamicExitResult;
-    const peDe = Stations.PE.dynamicExitResult;
-
-    const ceTrades = ceDe?.trades || [];
-    const peTrades = peDe?.trades || [];
-
-    const cePts = ceTrades.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
-    const pePts = peTrades.reduce((acc, t) => acc + (t.pnlPts || 0), 0);
-
-    const ceNetCash = cePts * (Stations.CE.lotUnits || 65) - ceTrades.length * 55;
-    const peNetCash = pePts * (Stations.PE.lotUnits || 65) - peTrades.length * 55;
+    const ceCash = (Stations.CE && Stations.CE.currentNetCash != null) ? Stations.CE.currentNetCash : 0;
+    const peCash = (Stations.PE && Stations.PE.currentNetCash != null) ? Stations.PE.currentNetCash : 0;
 
     let liveCePnl = 0;
     if (Stations.CE.activePosition && Stations.CE.rawCandles.length > 0) {
         const curPx = Stations.CE.rawCandles[Stations.CE.rawCandles.length - 1].close;
-        liveCePnl = (curPx - Stations.CE.activePosition.entryPrice) * (Stations.CE.lotUnits || 65);
+        const lots = Stations.CE.activePosition.lots || Stations.CE.tradingLots || 1;
+        liveCePnl = (curPx - Stations.CE.activePosition.entryPrice) * (lots * (Stations.CE.lotUnits || 65));
     }
     let livePePnl = 0;
     if (Stations.PE.activePosition && Stations.PE.rawCandles.length > 0) {
         const curPx = Stations.PE.rawCandles[Stations.PE.rawCandles.length - 1].close;
-        livePePnl = (curPx - Stations.PE.activePosition.entryPrice) * (Stations.PE.lotUnits || 65);
+        const lots = Stations.PE.activePosition.lots || Stations.PE.tradingLots || 1;
+        livePePnl = (curPx - Stations.PE.activePosition.entryPrice) * (lots * (Stations.PE.lotUnits || 65));
     }
 
-    const totalCombinedCash = ceNetCash + peNetCash + liveCePnl + livePePnl;
+    const totalCombinedCash = ceCash + peCash + liveCePnl + livePePnl;
     MasterState.combinedPortfolioPnL = totalCombinedCash;
 
     const pnlPill = document.getElementById('portfolio-pnl-pill');
@@ -7250,14 +7268,393 @@ function updatePortfolioSummary() {
     const capVal = document.getElementById('val-portfolio-cap');
 
     if (pnlVal) {
-        const sign = totalCombinedCash >= 0 ? '+' : '';
-        pnlVal.textContent = `${sign}₹${Math.round(totalCombinedCash).toLocaleString('en-IN')}`;
+        const sign = totalCombinedCash >= 0 ? '+' : '-';
+        pnlVal.textContent = `${sign}₹${Math.abs(Math.round(totalCombinedCash)).toLocaleString('en-IN')}`;
     }
     if (pnlPill) {
         pnlPill.className = `portfolio-pnl-pill ${totalCombinedCash > 0 ? 'pnl-positive' : (totalCombinedCash < 0 ? 'pnl-negative' : 'pnl-neutral')}`;
     }
     if (capVal && MasterState.tradingState) {
-        capVal.textContent = `${Math.round(MasterState.tradingState.capital || 100000) / 1000}k`;
+        const baseCap = MasterState.tradingState.capital || 100000;
+        capVal.textContent = `${Math.round(baseCap) / 1000}k`;
+    }
+}
+
+// ── Interactive Station Limit Order Dragging & Overlay ────────────────────────
+
+function initStationTradingMouse(station) {
+    if (!station || !station.container || station._tradingMouseInitialized) return;
+    station._tradingMouseInitialized = true;
+    station.limitToolHitBoxes = [];
+
+    const container = station.container;
+    let isDragging = false;
+    let dragType = null;
+
+    container.addEventListener('mousemove', (e) => {
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        if (isDragging && dragType && station.candleSeries && station.limitTool) {
+            const price = station.candleSeries.coordinateToPrice(mouseY);
+            if (price != null && price > 0) {
+                const tickPx = Math.round(price * 20) / 20;
+                if (dragType === 'limit_drag') {
+                    const delta = tickPx - station.limitTool.limitPrice;
+                    station.limitTool.limitPrice = tickPx;
+                    station.limitTool.targetPrice = Math.round((station.limitTool.targetPrice + delta) * 20) / 20;
+                    station.limitTool.slPrice = Math.round((station.limitTool.slPrice + delta) * 20) / 20;
+                } else if (dragType === 'target_drag') {
+                    station.limitTool.targetPrice = Math.max(station.limitTool.limitPrice + 0.5, tickPx);
+                } else if (dragType === 'sl_drag') {
+                    station.limitTool.slPrice = Math.min(station.limitTool.limitPrice - 0.5, tickPx);
+                }
+                renderStationSMFCanvas(station);
+            }
+            return;
+        }
+
+        const hitBoxes = station.limitToolHitBoxes || [];
+        let hit = null;
+        for (const hb of hitBoxes) {
+            if (hb.type.includes('place') || hb.type.includes('cancel')) {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    hit = hb;
+                    break;
+                }
+            } else if (hb.type.includes('drag')) {
+                const isLineNear = hb.lineY != null ? Math.abs(mouseY - hb.lineY) <= 8 : Math.abs(mouseY - hb.y) <= 8;
+                const isInsideRect = (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h);
+                if (isLineNear || isInsideRect) {
+                    hit = hb;
+                    break;
+                }
+            }
+        }
+
+        if (hit) {
+            if (hit.type.includes('place') || hit.type.includes('cancel')) {
+                container.style.cursor = 'pointer';
+            } else {
+                container.style.cursor = 'ns-resize';
+            }
+        } else if (station.limitTool && station.limitTool.active) {
+            container.style.cursor = 'crosshair';
+        } else {
+            container.style.cursor = '';
+        }
+    });
+
+    container.addEventListener('mousedown', (e) => {
+        const rect = container.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const hitBoxes = station.limitToolHitBoxes || [];
+        for (const hb of hitBoxes) {
+            if (hb.type === 'limit_place') {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    executeStationLimitOrder(station);
+                    return;
+                }
+            } else if (hb.type === 'limit_cancel') {
+                if (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    station.limitTool.active = false;
+                    document.getElementById(`${station.type.toLowerCase()}-btn-limit`)?.classList.remove('active');
+                    renderStationSMFCanvas(station);
+                    return;
+                }
+            } else if (hb.type.includes('drag')) {
+                const isLineNear = hb.lineY != null ? Math.abs(mouseY - hb.lineY) <= 8 : Math.abs(mouseY - hb.y) <= 8;
+                const isInsideRect = (mouseX >= hb.x && mouseX <= hb.x + hb.w && mouseY >= hb.y && mouseY <= hb.y + hb.h);
+                if (isLineNear || isInsideRect) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    isDragging = true;
+                    dragType = hb.type;
+                    if (station.chart) station.chart.applyOptions({ handleScroll: false, handleScale: false });
+                    return;
+                }
+            }
+        }
+
+        // If limit tool active and user clicks on chart area: reposition box there without panning chart!
+        if (station.limitTool && station.limitTool.active && station.candleSeries) {
+            const price = station.candleSeries.coordinateToPrice(mouseY);
+            if (price != null && price > 0) {
+                e.stopPropagation();
+                e.preventDefault();
+                if (station.chart) station.chart.applyOptions({ handleScroll: false, handleScale: false });
+                const newLim = Math.round(price * 20) / 20;
+                const curLim = station.limitTool.limitPrice || newLim;
+                const dTarget = Math.max(4.0, (station.limitTool.targetPrice || curLim + 6) - curLim);
+                const dSL = Math.max(3.0, curLim - (station.limitTool.slPrice || curLim - 4));
+                station.limitTool.limitPrice = newLim;
+                station.limitTool.targetPrice = Math.round((newLim + dTarget) * 20) / 20;
+                station.limitTool.slPrice = Math.round((newLim - dSL) * 20) / 20;
+                renderStationSMFCanvas(station);
+                isDragging = true;
+                dragType = 'limit_drag';
+            }
+        }
+    });
+
+    const stopDrag = () => {
+        if (isDragging) {
+            isDragging = false;
+            dragType = null;
+            if (station.chart) station.chart.applyOptions({ handleScroll: true, handleScale: true });
+        }
+    };
+
+    window.addEventListener('mouseup', stopDrag);
+    container.addEventListener('mouseleave', stopDrag);
+}
+
+function renderStationTradingOverlay(station, ctx, W, H) {
+    if (!station || !station.candleSeries || !station.chart) return;
+    station.limitToolHitBoxes = [];
+
+    if (!station.limitTool || !station.limitTool.active) return;
+
+    const lim = station.limitTool.limitPrice;
+    const tgt = station.limitTool.targetPrice;
+    const sl = station.limitTool.slPrice;
+    const units = (station.tradingLots || 1) * (station.lotUnits || 65);
+
+    const yLim = Math.round(station.candleSeries.priceToCoordinate(lim));
+    const yTgt = Math.round(station.candleSeries.priceToCoordinate(tgt));
+    const ySL = Math.round(station.candleSeries.priceToCoordinate(sl));
+
+    if (yLim == null || yTgt == null || ySL == null || isNaN(yLim)) return;
+
+    const priceScaleWidth = 60;
+    const chartPlotRight = Math.round(W - priceScaleWidth);
+
+    const lastCandle = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1] : null;
+    const curCandleX = lastCandle
+        ? Math.max(0, Math.min(chartPlotRight - 30, Math.round(station.chart.timeScale().timeToCoordinate(lastCandle.time) || 0)))
+        : Math.max(0, chartPlotRight - 150);
+
+    ctx.save();
+
+    // Box Geometry
+    const boxW = Math.min(240, Math.max(160, chartPlotRight - 50));
+    const boxX = Math.max(8, Math.min(chartPlotRight - boxW - 8, curCandleX - 30));
+
+    // A. Target (Profit) Green Zone
+    const profitTop = Math.min(yLim, yTgt);
+    const profitH = Math.max(3, Math.abs(yTgt - yLim));
+
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+    ctx.fillRect(boxX, profitTop, boxW, profitH);
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boxX, profitTop, boxW, profitH);
+
+    // B. Stop Loss (Risk) Red Zone
+    const riskTop = Math.min(yLim, ySL);
+    const riskH = Math.max(3, Math.abs(ySL - yLim));
+
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+    ctx.fillRect(boxX, riskTop, boxW, riskH);
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boxX, riskTop, boxW, riskH);
+
+    // C. Middle Entry Line
+    ctx.beginPath();
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 2;
+    ctx.moveTo(boxX, yLim);
+    ctx.lineTo(boxX + boxW, yLim);
+    ctx.stroke();
+
+    // Center Grab Handles ⚪
+    ctx.beginPath();
+    ctx.arc(boxX + boxW / 2, yTgt, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#10b981';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(boxX + boxW / 2, yLim, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#00e5ff';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(boxX + boxW / 2, ySL, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Metrics calculations
+    const tgtPts = tgt - lim;
+    const tgtRs = tgtPts * units;
+    const slPts = lim - sl;
+    const slRs = slPts * units;
+    const rr = slPts > 0 ? (tgtPts / slPts).toFixed(2) : '--';
+
+    // Target text
+    ctx.font = 'bold 10px Inter, -apple-system, sans-serif';
+    ctx.fillStyle = '#10b981';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const tgtYText = (yLim - yTgt > 22) ? (yTgt + 10) : (yTgt - 8);
+    ctx.fillText(`🎯 TGT ₹${tgt.toFixed(1)} (+${tgtPts.toFixed(1)}p | +₹${Math.round(tgtRs).toLocaleString('en-IN')})`, boxX + 6, tgtYText);
+
+    // SL text
+    ctx.fillStyle = '#ef4444';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const slYText = (ySL - yLim > 22) ? (ySL - 10) : (ySL + 8);
+    ctx.fillText(`🛑 SL ₹${sl.toFixed(1)} (-${slPts.toFixed(1)}p | -₹${Math.round(slRs).toLocaleString('en-IN')})`, boxX + 6, slYText);
+
+    // Floating Central Badge (Limit, RR, BUY LIMIT, Cancel)
+    const limText = `📥 ₹${lim.toFixed(1)}`;
+    const rrText = `1:${rr}`;
+    const placeText = `✔ BUY ${station.tradingLots || 1}L`;
+    const cancelText = `✕`;
+
+    const limW = Math.ceil(ctx.measureText(limText).width);
+    const rrW = Math.ceil(ctx.measureText(rrText).width);
+    const placeW = Math.ceil(ctx.measureText(placeText).width);
+    const cancelW = Math.ceil(ctx.measureText(cancelText).width);
+
+    const badgeW = limW + rrW + placeW + cancelW + 36;
+    const badgeH = 24;
+    const badgeX = Math.round(boxX + (boxW - badgeW) / 2);
+    const badgeY = Math.round(yLim - badgeH / 2);
+
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+    else ctx.rect(badgeX, badgeY, badgeW, badgeH);
+    ctx.fillStyle = '#080e1a';
+    ctx.fill();
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    // Texts
+    ctx.fillStyle = '#00e5ff';
+    ctx.fillText(limText, badgeX + 6, yLim);
+
+    ctx.fillStyle = '#ffd166';
+    ctx.fillText(rrText, badgeX + 6 + limW + 8, yLim);
+
+    // Place Button
+    const placeX = badgeX + 6 + limW + 8 + rrW + 8;
+    const placeBtnW = placeW + 10;
+    const placeBtnH = 18;
+    const placeBtnY = Math.round(yLim - placeBtnH / 2);
+
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') ctx.roundRect(placeX, placeBtnY, placeBtnW, placeBtnH, 3);
+    else ctx.rect(placeX, placeBtnY, placeBtnW, placeBtnH);
+    ctx.fillStyle = '#00f2a9';
+    ctx.fill();
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 9px Inter, sans-serif';
+    ctx.fillText(placeText, placeX + 5, yLim);
+
+    // Cancel Button
+    const cancelX = placeX + placeBtnW + 5;
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(cancelText, cancelX + 2, yLim);
+
+    // Record Hit Boxes
+    station.limitToolHitBoxes.push({
+        type: 'target_drag',
+        x: boxX,
+        y: profitTop,
+        w: boxW,
+        h: profitH,
+        lineY: yTgt
+    });
+    station.limitToolHitBoxes.push({
+        type: 'sl_drag',
+        x: boxX,
+        y: riskTop,
+        w: boxW,
+        h: riskH,
+        lineY: ySL
+    });
+    station.limitToolHitBoxes.push({
+        type: 'limit_drag',
+        x: boxX,
+        y: yLim - 8,
+        w: boxW,
+        h: 16,
+        lineY: yLim
+    });
+    station.limitToolHitBoxes.push({
+        type: 'limit_place',
+        x: placeX,
+        y: placeBtnY,
+        w: placeBtnW,
+        h: placeBtnH
+    });
+    station.limitToolHitBoxes.push({
+        type: 'limit_cancel',
+        x: cancelX,
+        y: placeBtnY,
+        w: cancelW + 6,
+        h: placeBtnH
+    });
+
+    ctx.restore();
+}
+
+async function executeStationLimitOrder(station) {
+    if (!station || !station.symbol || !station.limitTool) return;
+    const limitPx = station.limitTool.limitPrice;
+    const sl = station.limitTool.slPrice;
+    const t1 = station.limitTool.targetPrice;
+    const lots = station.tradingLots || 1;
+    const curPx = (station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : limitPx);
+
+    try {
+        const res = await fetch('/api/trade/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: station.symbol,
+                side: 'BUY',
+                order_type: 'LIMIT',
+                lots: lots,
+                limit_price: limitPx,
+                current_market_price: curPx,
+                sl: sl,
+                target1: t1,
+                trailing_mode: 'be_lock'
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            flashExecutionAlert('❌ LIMIT FAILED', data.detail || 'Limit order failed.', 'danger');
+        } else {
+            flashExecutionAlert('📥 LIMIT ORDER PLACED', `Limit Buy @ ₹${limitPx.toFixed(1)} (${lots} lots | SL ₹${sl.toFixed(1)} | Tgt ₹${t1.toFixed(1)})`, 'success');
+            station.limitTool.active = false;
+            document.getElementById(`${station.type.toLowerCase()}-btn-limit`)?.classList.remove('active');
+            renderStationSMFCanvas(station);
+            await fetchTradeState();
+        }
+    } catch (e) {
+        flashExecutionAlert('❌ ORDER ERROR', e.message, 'danger');
     }
 }
 
@@ -7265,15 +7662,6 @@ function renderStationSMFCanvas(station) {
     if (!station || !station.canvas || !station.chart || !station.candleSeries) return;
     const canvas = station.canvas;
     const ctx = canvas.getContext('2d');
-    if (!station.smfResult || !station.smfEnabled) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        return;
-    }
-
-    const smf = station.smfResult;
-    const { n, upper, lower, bMain, lastSignal, candles } = smf;
-    if (!n || n < 2) return;
-
     const W = station.container ? station.container.clientWidth : canvas.width;
     const H = station.container ? station.container.clientHeight : canvas.height;
 
@@ -7284,85 +7672,96 @@ function renderStationSMFCanvas(station) {
 
     ctx.clearRect(0, 0, W, H);
 
-    const points = [];
-    for (let i = 0; i < n; i++) {
-        const t = candles[i].time;
-        const coord = station.chart.timeScale().timeToCoordinate(t);
-        if (coord == null || coord < -80 || coord > W + 80) continue;
-        const yU = station.candleSeries.priceToCoordinate(upper[i]);
-        const yL = station.candleSeries.priceToCoordinate(lower[i]);
-        const yB = station.candleSeries.priceToCoordinate(bMain[i]);
-        if (yU == null || yL == null || yB == null) continue;
-        points.push({ x: coord, yUpper: yU, yLower: yL, yBc: yB, regime: lastSignal[i] });
-    }
-    if (points.length < 2) return;
+    // 1. Draw SMF Ribbon
+    if (station.smfResult && station.smfEnabled) {
+        const smf = station.smfResult;
+        const { n, upper, lower, bMain, lastSignal, candles } = smf;
+        if (n && n >= 2) {
+            const points = [];
+            for (let i = 0; i < n; i++) {
+                const t = candles[i].time;
+                const coord = station.chart.timeScale().timeToCoordinate(t);
+                if (coord == null || coord < -80 || coord > W + 80) continue;
+                const yU = station.candleSeries.priceToCoordinate(upper[i]);
+                const yL = station.candleSeries.priceToCoordinate(lower[i]);
+                const yB = station.candleSeries.priceToCoordinate(bMain[i]);
+                if (yU == null || yL == null || yB == null) continue;
+                points.push({ x: coord, yUpper: yU, yLower: yL, yBc: yB, regime: lastSignal[i] });
+            }
 
-    const segs = [];
-    let seg = [points[0]];
-    for (let i = 1; i < points.length; i++) {
-        if (points[i].regime !== points[i - 1].regime) {
-            segs.push({ regime: points[i - 1].regime, pts: seg });
-            seg = [points[i - 1], points[i]];
-        } else {
-            seg.push(points[i]);
+            if (points.length >= 2) {
+                const segs = [];
+                let seg = [points[0]];
+                for (let i = 1; i < points.length; i++) {
+                    if (points[i].regime !== points[i - 1].regime) {
+                        segs.push({ regime: points[i - 1].regime, pts: seg });
+                        seg = [points[i - 1], points[i]];
+                    } else {
+                        seg.push(points[i]);
+                    }
+                }
+                segs.push({ regime: points[points.length - 1].regime, pts: seg });
+
+                for (const { regime, pts } of segs) {
+                    if (pts.length < 2) continue;
+                    const isBull = regime === 1;
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(pts[0].x, pts[0].yUpper);
+                    for (const p of pts) ctx.lineTo(p.x, p.yUpper);
+                    for (let j = pts.length - 1; j >= 0; j--) ctx.lineTo(pts[j].x, pts[j].yLower);
+                    ctx.closePath();
+
+                    const grad = ctx.createLinearGradient(0, 0, 0, H);
+                    if (isBull) {
+                        grad.addColorStop(0, 'rgba(0, 200, 255, 0.22)');
+                        grad.addColorStop(1, 'rgba(0, 200, 255, 0.04)');
+                    } else {
+                        grad.addColorStop(0, 'rgba(255, 0, 93, 0.04)');
+                        grad.addColorStop(1, 'rgba(255, 0, 93, 0.22)');
+                    }
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+                    ctx.restore();
+                }
+
+                ctx.save();
+                ctx.lineWidth = 1.5;
+                for (const { regime, pts } of segs) {
+                    ctx.strokeStyle = regime === 1 ? 'rgba(0, 200, 255, 0.55)' : 'rgba(255, 0, 93, 0.55)';
+                    ctx.beginPath();
+                    for (let i = 0; i < pts.length; i++) {
+                        if (i === 0) ctx.moveTo(pts[i].x, pts[i].yBc);
+                        else ctx.lineTo(pts[i].x, pts[i].yBc);
+                    }
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                ctx.save();
+                ctx.setLineDash([4, 4]);
+                ctx.lineWidth = 1;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    if (i === 0) ctx.moveTo(points[i].x, points[i].yUpper);
+                    else ctx.lineTo(points[i].x, points[i].yUpper);
+                }
+                ctx.stroke();
+                ctx.beginPath();
+                for (let i = 0; i < points.length; i++) {
+                    if (i === 0) ctx.moveTo(points[i].x, points[i].yLower);
+                    else ctx.lineTo(points[i].x, points[i].yLower);
+                }
+                ctx.stroke();
+                ctx.restore();
+            }
         }
     }
-    segs.push({ regime: points[points.length - 1].regime, pts: seg });
 
-    for (const { regime, pts } of segs) {
-        if (pts.length < 2) continue;
-        const isBull = regime === 1;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].yUpper);
-        for (const p of pts) ctx.lineTo(p.x, p.yUpper);
-        for (let j = pts.length - 1; j >= 0; j--) ctx.lineTo(pts[j].x, pts[j].yLower);
-        ctx.closePath();
-
-        const grad = ctx.createLinearGradient(0, 0, 0, H);
-        if (isBull) {
-            grad.addColorStop(0, 'rgba(0, 200, 255, 0.22)');
-            grad.addColorStop(1, 'rgba(0, 200, 255, 0.04)');
-        } else {
-            grad.addColorStop(0, 'rgba(255, 0, 93, 0.04)');
-            grad.addColorStop(1, 'rgba(255, 0, 93, 0.22)');
-        }
-        ctx.fillStyle = grad;
-        ctx.fill();
-        ctx.restore();
-    }
-
-    ctx.save();
-    ctx.lineWidth = 1.5;
-    for (const { regime, pts } of segs) {
-        ctx.strokeStyle = regime === 1 ? 'rgba(0, 200, 255, 0.55)' : 'rgba(255, 0, 93, 0.55)';
-        ctx.beginPath();
-        for (let i = 0; i < pts.length; i++) {
-            if (i === 0) ctx.moveTo(pts[i].x, pts[i].yBc);
-            else ctx.lineTo(pts[i].x, pts[i].yBc);
-        }
-        ctx.stroke();
-    }
-    ctx.restore();
-
-    ctx.save();
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.beginPath();
-    for (let i = 0; i < points.length; i++) {
-        if (i === 0) ctx.moveTo(points[i].x, points[i].yUpper);
-        else ctx.lineTo(points[i].x, points[i].yUpper);
-    }
-    ctx.stroke();
-    ctx.beginPath();
-    for (let i = 0; i < points.length; i++) {
-        if (i === 0) ctx.moveTo(points[i].x, points[i].yLower);
-        else ctx.lineTo(points[i].x, points[i].yLower);
-    }
-    ctx.stroke();
-    ctx.restore();
+    // 2. Draw Interactive Limit Order Long Position Box & Handles
+    renderStationTradingOverlay(station, ctx, W, H);
 }
 
 function connectStationWS(station) {

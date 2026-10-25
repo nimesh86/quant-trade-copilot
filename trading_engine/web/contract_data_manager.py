@@ -952,17 +952,15 @@ def fetch_contract_candles(
         except Exception:
             pass
 
-    explicit_date_requested = bool(target_date)
-    if target_date == "today":
-        active_date = today_str
-    elif target_date:
+    explicit_date_requested = bool(target_date and str(target_date).lower() != "today" and str(target_date) != today_str)
+    if explicit_date_requested:
         active_date = target_date
     else:
         active_date = None
     is_last_day = False
 
-    # If target_date is not specified and it's a weekday, check if today has candles in DB
-    if not active_date and not is_weekend and db_engine is not None:
+    # If target_date is not an explicit past date and it's a weekday, check if today has candles in DB
+    if not explicit_date_requested and not is_weekend and db_engine is not None:
         try:
             from sqlalchemy import text
             with db_engine.connect() as conn:
@@ -978,7 +976,7 @@ def fetch_contract_candles(
         except Exception as e:
             print(f"ContractDataManager: error checking today's candles: {e}", flush=True)
 
-    # Only fall back to latest trading day if NO explicit date was requested
+    # Only fall back to latest trading day if NO explicit past date was requested
     if not explicit_date_requested and not active_date and db_engine is not None:
         try:
             from sqlalchemy import text
@@ -1036,6 +1034,42 @@ def fetch_contract_candles(
             candles = _fetch_from_kite(trading_symbol, db_engine)
             if not candles:
                 candles = _fetch_from_breeze(trading_symbol)
+
+    # 4. Fallback if today still has 0 candles (e.g. pre-market or weekend)
+    if not candles and not explicit_date_requested and db_engine is not None:
+        try:
+            from sqlalchemy import text
+            import pandas as pd
+            with db_engine.connect() as conn:
+                q_max = text("""
+                    SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
+                    FROM minute_candles WHERE symbol = :sym
+                """)
+                max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
+                if not max_d:
+                    q_max2 = text("""
+                        SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
+                        FROM option_minute_candles WHERE symbol = :sym
+                    """)
+                    max_d = conn.execute(q_max2, {"sym": trading_symbol}).scalar()
+                if max_d:
+                    fallback_date = str(max_d)
+                    for tbl in ["minute_candles", "option_minute_candles"]:
+                        sql = text(f"""
+                            SELECT timestamp, open, high, low, close, volume
+                            FROM {tbl}
+                            WHERE symbol = :sym
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                            ORDER BY timestamp ASC
+                        """)
+                        df = pd.read_sql(sql, conn, params={"sym": trading_symbol, "d": fallback_date})
+                        if not df.empty:
+                            candles = _df_to_candle_list(df)
+                            active_date = fallback_date
+                            is_last_day = True
+                            break
+        except Exception as e:
+            print(f"ContractDataManager: fallback fetch error for {trading_symbol}: {e}", flush=True)
 
     market_status = "OPEN" if is_market_open() else "CLOSED"
     return {

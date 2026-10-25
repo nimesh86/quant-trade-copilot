@@ -1968,7 +1968,9 @@ body.replay-mode-active #stations-stream {
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
     color: #e2e8f0;
-    font-size: 12px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1;
     cursor: pointer;
     transition: all 0.15s ease;
 }
