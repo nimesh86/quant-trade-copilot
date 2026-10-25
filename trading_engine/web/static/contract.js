@@ -475,7 +475,7 @@ function closeSearch() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function initSessionDateSelector() {
-    const sel = document.getElementById('session-date-select');
+    const sel = document.getElementById('master-session-date-select') || document.getElementById('session-date-select');
     if (!sel) return;
 
     try {
@@ -487,10 +487,23 @@ async function initSessionDateSelector() {
 
         sel.innerHTML = '';
 
-        // 1. Today (Live Feed) option
+        // Check if today is weekend or outside market hours
+        const istNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+        const day = istNow.getDay(); // 0=Sun, 6=Sat
+        const mins = istNow.getHours() * 60 + istNow.getMinutes();
+        const isWeekend = (day === 0 || day === 6);
+        const isMarketHours = !isWeekend && (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30);
+
+        // 1. Today option with accurate status
         const todayOpt = document.createElement('option');
         todayOpt.value = 'today';
-        todayOpt.textContent = `${todayStr} (Today · Live)`;
+        if (isWeekend) {
+            todayOpt.textContent = `${todayStr} (Weekend — Closed)`;
+        } else if (!isMarketHours) {
+            todayOpt.textContent = `${todayStr} (Closed · Market Closed)`;
+        } else {
+            todayOpt.textContent = `${todayStr} (Today · Live)`;
+        }
         sel.appendChild(todayOpt);
 
         // 2. Historical dates for Replay
@@ -502,70 +515,29 @@ async function initSessionDateSelector() {
             sel.appendChild(opt);
         });
 
-        sel.value = 'today';
-        C.selectedSessionDate = 'today';
+        // If today is a weekend or market is closed and we have past dates, default to most recent trading date
+        let initialDate = 'today';
+        if ((isWeekend || !isMarketHours) && dates.length > 0) {
+            initialDate = dates[0];
+        }
+
+        sel.value = initialDate;
+        C.selectedSessionDate = initialDate;
+        MasterState.selectedSessionDate = initialDate;
 
         sel.addEventListener('change', async (e) => {
             const chosen = e.target.value;
             C.selectedSessionDate = chosen;
+            MasterState.selectedSessionDate = chosen;
 
             if (chosen === 'today') {
-                // Exit replay and switch to today's live feed
-                if (Replay.active) {
-                    exitReplay();
-                }
-                const modeSelect = document.getElementById('trade-mode-select');
-                if (modeSelect && modeSelect.value === 'replay') {
-                    modeSelect.value = 'paper';
-                    try {
-                        await fetch('/api/trade/mode', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ mode: 'paper' })
-                        });
-                    } catch (err) {}
-                }
+                if (Replay.active) exitReplay();
                 showLoading(true);
-                disconnectContractWS();
-                if (C.symbol) {
-                    await loadContractCandles(C.symbol, 'today');
-                    connectContractWS(C.symbol);
-                }
+                await loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, 'today');
                 showLoading(false);
             } else {
-                // Historical Replay session
-                disconnectContractWS();
                 showLoading(true);
-                if (C.symbol) {
-                    await loadContractCandles(C.symbol, chosen);
-                    const modeSelect = document.getElementById('trade-mode-select');
-                    if (modeSelect) {
-                        modeSelect.value = 'replay';
-                        try {
-                            await fetch('/api/trade/mode', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ mode: 'replay' })
-                            });
-                        } catch (err) {}
-                    }
-                    if (C.rawCandles && C.rawCandles.length > 0) {
-                        const rpDatePicker = document.getElementById('rp-date-picker');
-                        if (rpDatePicker) rpDatePicker.value = chosen;
-                        if (Replay.active) {
-                            pauseReplay();
-                            Replay.fullCandles = [...C.rawCandles];
-                            const scrubber = document.getElementById('rp-scrubber');
-                            if (scrubber) {
-                                scrubber.min = 5;
-                                scrubber.max = Replay.fullCandles.length - 1;
-                            }
-                            jumpToEnd();
-                        } else {
-                            startReplay();
-                        }
-                    }
-                }
+                await loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, chosen);
                 showLoading(false);
             }
         });
@@ -575,17 +547,18 @@ async function initSessionDateSelector() {
 }
 
 async function initExpirySelector() {
-    const headerSel = document.getElementById('expiry-select');
+    const headerSel = document.getElementById('master-expiry-select') || document.getElementById('expiry-select');
     const ocSel = document.getElementById('oc-expiry-select');
-    if (!headerSel || !ocSel) return;
+    if (!headerSel) return;
 
     try {
-        const res = await fetch(`/api/contracts/expiries?underlying=${encodeURIComponent(C.underlying)}`);
+        const und = MasterState.currentUnderlying || C.underlying || 'NIFTY';
+        const res = await fetch(`/api/contracts/expiries?underlying=${encodeURIComponent(und)}`);
         const data = await res.json();
         const expiries = data.expiries || [];
 
         headerSel.innerHTML = '<option value="">All Expiries</option>';
-        ocSel.innerHTML = '';
+        if (ocSel) ocSel.innerHTML = '';
 
         expiries.forEach((exp) => {
             const opt1 = document.createElement('option');
@@ -593,42 +566,47 @@ async function initExpirySelector() {
             opt1.textContent = exp.display;
             headerSel.appendChild(opt1);
 
-            const opt2 = document.createElement('option');
-            opt2.value = exp.date;
-            opt2.textContent = exp.display;
-            ocSel.appendChild(opt2);
+            if (ocSel) {
+                const opt2 = document.createElement('option');
+                opt2.value = exp.date;
+                opt2.textContent = exp.display;
+                ocSel.appendChild(opt2);
+            }
         });
 
         // Set default to first active upcoming expiry (e.g. 27 Oct 2026)
         if (expiries.length > 0) {
             const activeExp = expiries.find(e => e.days_to_expiry >= 0) || expiries[0];
             C.selectedExpiry = activeExp.date;
-            headerSel.value = C.selectedExpiry;
-            ocSel.value = C.selectedExpiry;
+            MasterState.selectedExpiry = activeExp.date;
+            headerSel.value = activeExp.date;
+            if (ocSel) ocSel.value = activeExp.date;
             updateExpiryBadge(activeExp.date);
         }
 
-        // Listener for header select
+        // Listener for master header select
         headerSel.addEventListener('change', () => {
             C.selectedExpiry = headerSel.value;
-            ocSel.value = C.selectedExpiry;
-            updateExpiryBadge(C.selectedExpiry);
-            const input = document.getElementById('search-input');
-            if (input && input.value.trim()) {
-                runSearch(input.value);
-            }
-            if (C.optionChainOpen) {
+            MasterState.selectedExpiry = headerSel.value;
+            if (ocSel) ocSel.value = headerSel.value;
+            updateExpiryBadge(headerSel.value);
+            loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
+            if (C.optionChainOpen || MasterState.optionChainOpen) {
                 fetchOptionChain();
             }
         });
 
         // Listener for option chain modal select
-        ocSel.addEventListener('change', () => {
-            C.selectedExpiry = ocSel.value;
-            headerSel.value = C.selectedExpiry;
-            updateExpiryBadge(C.selectedExpiry);
-            fetchOptionChain();
-        });
+        if (ocSel) {
+            ocSel.addEventListener('change', () => {
+                C.selectedExpiry = ocSel.value;
+                MasterState.selectedExpiry = ocSel.value;
+                headerSel.value = ocSel.value;
+                updateExpiryBadge(ocSel.value);
+                fetchOptionChain();
+                loadStrikePair(MasterState.currentStrike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
+            });
+        }
 
     } catch (e) {
         console.error('Failed to load expiries:', e);
@@ -5141,6 +5119,40 @@ function updateTradingUI(state) {
         const posHud = document.getElementById('active-pos-hud');
         if (posHud) posHud.classList.add('hidden');
     }
+
+    // 8. Update Station CE and Station PE Exit Buttons & HUDs
+    ['ce', 'pe'].forEach((pfx) => {
+        const station = pfx === 'ce' ? Stations.CE : Stations.PE;
+        const sExitBtn = document.getElementById(`${pfx}-btn-exit`);
+        const sPosPnlSub = document.getElementById(`${pfx}-pos-pnl`);
+        const sPosHud = document.getElementById(`${pfx}-pos-hud`);
+        const sHudValPos = document.getElementById(`${pfx}-hud-pos`);
+        const sHudValSl = document.getElementById(`${pfx}-hud-sl`);
+        const sHudValT1 = document.getElementById(`${pfx}-hud-t1`);
+        const sHudValT2 = document.getElementById(`${pfx}-hud-t2`);
+
+        const pos = state.active_position;
+        if (pos && station.symbol && pos.symbol === station.symbol) {
+            if (sExitBtn) sExitBtn.classList.remove('hidden');
+            if (sPosHud) sPosHud.classList.remove('hidden');
+
+            const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
+            if (curPx > 0 && pos.entry_price > 0) {
+                const pts = curPx - pos.entry_price;
+                pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
+            }
+            const pnl = pos.unrealized_pnl || 0.0;
+            const sign = pnl >= 0 ? '+' : '';
+            if (sPosPnlSub) sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
+            if (sHudValPos) sHudValPos.textContent = `₹${pos.entry_price.toFixed(1)}`;
+            if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || 0).toFixed(1)}`;
+            if (sHudValT1) sHudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
+            if (sHudValT2) sHudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
+        } else {
+            if (sExitBtn) sExitBtn.classList.add('hidden');
+            if (sPosHud) sPosHud.classList.add('hidden');
+        }
+    });
 }
 
 // ── TradingView-Style Interactive Limit Order & Target/SL Canvas Overlay ───────
@@ -6292,49 +6304,55 @@ function bindStationControls(station) {
         });
     }
 
-    const btnSmf = document.getElementById(`${pfx}-btn-smf`);
-    if (btnSmf) {
-        btnSmf.addEventListener('click', () => {
-            station.smfEnabled = !station.smfEnabled;
-            btnSmf.classList.toggle('active', station.smfEnabled);
+    // 🎛️ Single Indicators Popover Trigger
+    const btnIndicators = document.getElementById(`${pfx}-btn-indicators`);
+    const indicatorsPanel = document.getElementById(`${pfx}-indicators-panel`);
+
+    if (btnIndicators && indicatorsPanel) {
+        btnIndicators.addEventListener('click', (e) => {
+            e.stopPropagation();
+            indicatorsPanel.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!indicatorsPanel.contains(e.target) && !btnIndicators.contains(e.target)) {
+                indicatorsPanel.classList.add('hidden');
+            }
+        });
+    }
+
+    const chkSmf = document.getElementById(`${pfx}-chk-smf`);
+    if (chkSmf) {
+        chkSmf.addEventListener('change', () => {
+            station.smfEnabled = chkSmf.checked;
             renderStationSMFCanvas(station);
         });
     }
 
-    const btnPrice = document.getElementById(`${pfx}-btn-price`);
-    if (btnPrice) {
-        btnPrice.addEventListener('click', () => {
-            station.showPrice = !station.showPrice;
-            btnPrice.classList.toggle('active', station.showPrice);
+    const chkPrice = document.getElementById(`${pfx}-chk-price`);
+    if (chkPrice) {
+        chkPrice.addEventListener('change', () => {
+            station.showPrice = chkPrice.checked;
             if (station.rawCandles.length > 0) {
                 loadStationCandles(station, { symbol: station.symbol, display_name: station.displayName });
             }
         });
     }
 
-    const btnTgt = document.getElementById(`${pfx}-btn-target`);
-    if (btnTgt) {
-        btnTgt.addEventListener('click', () => {
-            station.targetsEnabled = !station.targetsEnabled;
-            btnTgt.classList.toggle('active', station.targetsEnabled);
+    const chkTgt = document.getElementById(`${pfx}-chk-target`);
+    if (chkTgt) {
+        chkTgt.addEventListener('change', () => {
+            station.targetsEnabled = chkTgt.checked;
+            renderStationSMFCanvas(station);
         });
     }
 
-    const btnExit = document.getElementById(`${pfx}-btn-exit-engine`);
-    if (btnExit) {
-        btnExit.addEventListener('click', () => {
-            station.dynamicExitEnabled = !station.dynamicExitEnabled;
-            btnExit.classList.toggle('active', station.dynamicExitEnabled);
+    const chkExit = document.getElementById(`${pfx}-chk-exit`);
+    if (chkExit) {
+        chkExit.addEventListener('change', () => {
+            station.dynamicExitEnabled = chkExit.checked;
             if (station.rawCandles.length > 0) {
                 loadStationCandles(station, { symbol: station.symbol, display_name: station.displayName });
             }
-        });
-    }
-
-    const btnFit = document.getElementById(`${pfx}-btn-fit`);
-    if (btnFit) {
-        btnFit.addEventListener('click', () => {
-            if (station.chart) station.chart.timeScale().fitContent();
         });
     }
 
@@ -6607,7 +6625,7 @@ async function loadStationCandles(station, contract, optDate) {
 
         const curPx = agg[agg.length - 1]?.close || 0;
         const buyTxt = document.getElementById(station.type === 'CE' ? 'ce-buy-txt' : 'pe-buy-txt');
-        if (buyTxt) buyTxt.textContent = `BUY ${station.type} @ ₹${curPx.toFixed(1)}`;
+        if (buyTxt) buyTxt.textContent = `${station.type} · ₹${curPx.toFixed(1)}`;
 
     } catch (e) {
         console.warn(`Failed to load ${station.type} candles:`, e);
@@ -6897,7 +6915,7 @@ function connectStationWS(station) {
                 if (ltpEl) ltpEl.textContent = `₹${data.ltp.toFixed(2)}`;
 
                 const buyTxt = document.getElementById(`${pfx}-buy-txt`);
-                if (buyTxt) buyTxt.textContent = `BUY ${station.type} @ ₹${data.ltp.toFixed(1)}`;
+                if (buyTxt) buyTxt.textContent = `${station.type} · ₹${data.ltp.toFixed(1)}`;
 
                 if (station.candleSeries && data.forming_candle) {
                     const fc = data.forming_candle;

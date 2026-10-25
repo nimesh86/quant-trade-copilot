@@ -3860,23 +3860,29 @@ kbd {
 }
 
 .station-badge {
-    font-size: 10px;
-    font-weight: 900;
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
 }
 
-.ce-badge {
-    background: rgba(0, 242, 169, 0.18);
+.ce-badge, .ce-badge-box {
+    background: rgba(0, 242, 169, 0.16);
     color: #00f2a9;
     border: 1px solid rgba(0, 242, 169, 0.45);
+    box-shadow: 0 0 10px rgba(0, 242, 169, 0.1);
 }
 
-.pe-badge {
-    background: rgba(255, 0, 93, 0.18);
+.pe-badge, .pe-badge-box {
+    background: rgba(255, 0, 93, 0.16);
     color: #ff005d;
     border: 1px solid rgba(255, 0, 93, 0.45);
+    box-shadow: 0 0 10px rgba(255, 0, 93, 0.1);
 }
 
 .station-symbol {
@@ -3890,11 +3896,13 @@ kbd {
     font-weight: 800;
     font-size: 13px;
     color: #ffffff;
+    white-space: nowrap;
 }
 
 .station-chg {
     font-size: 11px;
     font-weight: 700;
+    white-space: nowrap;
 }
 .station-chg.pos { color: #00f2a9; }
 .station-chg.neg { color: #ff005d; }
@@ -3905,6 +3913,7 @@ kbd {
     padding: 1px 6px;
     border-radius: 4px;
     letter-spacing: 0.3px;
+    white-space: nowrap;
 }
 
 .station-signal.bull {
@@ -3924,10 +3933,76 @@ kbd {
 }
 
 .station-tools-right {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;
     flex-shrink: 0;
+}
+
+.indicator-gear-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    color: #cbd5e1;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s ease;
+}
+.indicator-gear-btn:hover,
+.indicator-gear-btn.active {
+    background: rgba(0, 200, 255, 0.2);
+    border-color: var(--cyan);
+    color: #ffffff;
+}
+
+.station-indicators-popover {
+    position: absolute;
+    top: 34px;
+    right: 0;
+    width: 175px;
+    background: rgba(13, 22, 36, 0.98);
+    border: 1px solid rgba(0, 195, 255, 0.35);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 8px;
+    padding: 8px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.popover-title {
+    font-size: 10.5px;
+    font-weight: 800;
+    color: var(--cyan);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.popover-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #e2e8f0;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+}
+.popover-item input[type="checkbox"] {
+    accent-color: var(--cyan);
+    cursor: pointer;
 }
 
 .tool-btn {
@@ -4094,6 +4169,20 @@ kbd {
 .btn-station-exit:hover {
     background: #ef4444;
     color: #ffffff;
+}
+
+/* Strict Hidden Utility Overrides */
+.hidden {
+    display: none !important;
+}
+.btn-station-exit.hidden {
+    display: none !important;
+}
+.station-pos-hud.hidden {
+    display: none !important;
+}
+.station-indicators-popover.hidden {
+    display: none !important;
 }
 
 /* Station Chart Box */

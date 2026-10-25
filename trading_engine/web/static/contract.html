@@ -75,21 +75,18 @@
                     <span class="btn-txt">Chain</span>
                 </button>
 
-                <!-- Replay Simulator Toggle -->
-                <button id="btn-master-replay" class="hdr-btn replay-btn" title="Toggle Synchronized Bar Replay Simulator">
+                <!-- Replay Simulator Toggle (Icon Only) -->
+                <button id="btn-master-replay" class="hdr-btn replay-btn icon-only" title="Toggle Synchronized Bar Replay Simulator">
                     <span class="btn-icon">⏪</span>
-                    <span class="btn-txt">Replay</span>
                 </button>
 
-                <!-- Combined Backtest Scorecard & Ledger Modal Trigger -->
-                <button id="btn-master-report" class="hdr-btn report-btn" title="View Combined Session Accuracy Scorecard & Trade Ledger">
+                <!-- Combined Backtest Scorecard & Ledger Modal Trigger (Icon Only) -->
+                <button id="btn-master-report" class="hdr-btn report-btn icon-only" title="View Combined Session Accuracy Scorecard & Trade Ledger">
                     <span class="btn-icon">📊</span>
-                    <span class="btn-txt">Report</span>
                 </button>
 
                 <!-- Combined Portfolio PnL Pill (Aggregates CE + PE Realized + Unrealized) -->
-                <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Combined Portfolio Realized + Unrealized PnL / Balance">
-                    <span class="pnl-tag">PORTFOLIO</span>
+                <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Combined Realized + Unrealized PnL / Capital">
                     <span id="val-portfolio-pnl" class="pnl-num">+₹0.00</span>
                     <span class="pnl-sep">/</span>
                     <span id="val-portfolio-cap" class="cap-num">100k</span>
@@ -113,18 +110,21 @@
             <!-- CE Station Header Bar -->
             <div class="station-hdr">
                 <div class="station-meta-left">
-                    <span class="station-badge ce-badge">CALL (CE)</span>
-                    <span id="ce-symbol-text" class="station-symbol">22700 CE</span>
+                    <span id="ce-symbol-text" class="station-badge ce-badge-box">22700 CE</span>
                     <span id="ce-ltp" class="station-ltp">₹--</span>
                     <span id="ce-chg" class="station-chg">--</span>
                     <span id="ce-signal" class="station-signal flat">ANALYZING…</span>
                 </div>
                 <div class="station-tools-right">
-                    <button id="ce-btn-smf" class="tool-btn active" title="Toggle Smart Money Flow Cloud">⬡</button>
-                    <button id="ce-btn-price" class="tool-btn" title="Toggle Signal Price on Markers">🏷</button>
-                    <button id="ce-btn-target" class="tool-btn active" title="Toggle Max Target Lines">🎯</button>
-                    <button id="ce-btn-exit-engine" class="tool-btn active" title="Toggle SMF Dynamic Exit Engine">🛡️</button>
-                    <button id="ce-btn-fit" class="tool-btn" title="Fit Candles in View">⤢</button>
+                    <button id="ce-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                    <!-- Small Panel to Enable/Disable Indicators -->
+                    <div id="ce-indicators-panel" class="station-indicators-popover hidden">
+                        <div class="popover-title">Indicators (CE)</div>
+                        <label class="popover-item"><input type="checkbox" id="ce-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                        <label class="popover-item"><input type="checkbox" id="ce-chk-price" /> <span>🏷 Signal Price</span></label>
+                        <label class="popover-item"><input type="checkbox" id="ce-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                        <label class="popover-item"><input type="checkbox" id="ce-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                    </div>
                 </div>
             </div>
 
@@ -136,14 +136,14 @@
                     <button id="ce-lot-plus" class="lot-btn">+</button>
                 </div>
 
-                <!-- Clean 1-Click Market Buy Button -->
+                <!-- Clean 1-Click Market Buy Button (Icon + CE) -->
                 <button id="ce-btn-buy" class="btn-station-buy ce-buy" title="1-Click Market Buy CALL (Instant Execution)">
                     <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="9" cy="21" r="1"></circle>
                         <circle cx="20" cy="21" r="1"></circle>
                         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
                     </svg>
-                    <span id="ce-buy-txt">BUY CE</span>
+                    <span id="ce-buy-txt">CE</span>
                 </button>
 
                 <!-- TradingView-Style Interactive Limit Box Tool -->
@@ -214,18 +214,21 @@
             <!-- PE Station Header Bar -->
             <div class="station-hdr">
                 <div class="station-meta-left">
-                    <span class="station-badge pe-badge">PUT (PE)</span>
-                    <span id="pe-symbol-text" class="station-symbol">22700 PE</span>
+                    <span id="pe-symbol-text" class="station-badge pe-badge-box">22700 PE</span>
                     <span id="pe-ltp" class="station-ltp">₹--</span>
                     <span id="pe-chg" class="station-chg">--</span>
                     <span id="pe-signal" class="station-signal flat">ANALYZING…</span>
                 </div>
                 <div class="station-tools-right">
-                    <button id="pe-btn-smf" class="tool-btn active" title="Toggle Smart Money Flow Cloud">⬡</button>
-                    <button id="pe-btn-price" class="tool-btn" title="Toggle Signal Price on Markers">🏷</button>
-                    <button id="pe-btn-target" class="tool-btn active" title="Toggle Max Target Lines">🎯</button>
-                    <button id="pe-btn-exit-engine" class="tool-btn active" title="Toggle SMF Dynamic Exit Engine">🛡️</button>
-                    <button id="pe-btn-fit" class="tool-btn" title="Fit Candles in View">⤢</button>
+                    <button id="pe-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                    <!-- Small Panel to Enable/Disable Indicators -->
+                    <div id="pe-indicators-panel" class="station-indicators-popover hidden">
+                        <div class="popover-title">Indicators (PE)</div>
+                        <label class="popover-item"><input type="checkbox" id="pe-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                        <label class="popover-item"><input type="checkbox" id="pe-chk-price" /> <span>🏷 Signal Price</span></label>
+                        <label class="popover-item"><input type="checkbox" id="pe-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                        <label class="popover-item"><input type="checkbox" id="pe-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                    </div>
                 </div>
             </div>
 
@@ -237,14 +240,14 @@
                     <button id="pe-lot-plus" class="lot-btn">+</button>
                 </div>
 
-                <!-- Clean 1-Click Market Buy Button -->
+                <!-- Clean 1-Click Market Buy Button (Icon + PE) -->
                 <button id="pe-btn-buy" class="btn-station-buy pe-buy" title="1-Click Market Buy PUT (Instant Execution)">
                     <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="9" cy="21" r="1"></circle>
                         <circle cx="20" cy="21" r="1"></circle>
                         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
                     </svg>
-                    <span id="pe-buy-txt">BUY PE</span>
+                    <span id="pe-buy-txt">PE</span>
                 </button>
 
                 <!-- TradingView-Style Interactive Limit Box Tool -->
