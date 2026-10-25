@@ -106,8 +106,8 @@ class BreezeAutoLogin:
         logger.info(f"Initiating zero-touch Breeze login for user: {self.user_id}...")
 
         captured_session_token: Optional[str] = None
-        debug_dir = Path("/tmp/breeze_autologin")
-        debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_dir = Path(os.path.expanduser("~/.trading_assistant/debug"))
+        debug_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
         screenshot_path = debug_dir / "last_screen.png"
 
         with sync_playwright() as p:
