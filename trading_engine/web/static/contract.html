@@ -32,6 +32,24 @@
                     <span id="badge-target" class="badge-target-text" style="display:none;">🎯 --</span>
                 </div>
 
+                <!-- 2b. Dual ATM Strike Pair Pill (Instant 1-Tap Flip & Live Radar Alert) -->
+                <div id="atm-pair-pill" class="atm-pair-pill" title="ATM Strike Pair: 1-Tap Flip between CALL & PUT">
+                    <button id="pill-btn-ce" class="pair-pill-btn active" title="Switch to CALL (CE)">
+                        <span class="pill-type pill-ce">CE</span>
+                        <span id="pill-ce-ltp" class="pill-ltp">--</span>
+                        <span id="pill-ce-radar" class="pill-radar hidden">🎯 BUY</span>
+                    </button>
+                    <div class="pair-pill-divider"></div>
+                    <button id="pill-btn-pe" class="pair-pill-btn" title="Switch to PUT (PE)">
+                        <span class="pill-type pill-pe">PE</span>
+                        <span id="pill-pe-ltp" class="pill-ltp">--</span>
+                        <span id="pill-pe-radar" class="pill-radar hidden">🎯 BUY</span>
+                    </button>
+                    <button id="btn-toggle-dual" class="btn-dual-toggle" title="Toggle Split-Screen Dual Chart (CE + PE)">
+                        <span class="dual-icon">🥞</span>
+                    </button>
+                </div>
+
                 <!-- 3. Small Option Chain Button -->
                 <button id="btn-toggle-oc" class="oc-toggle-btn-small" title="Open Option Chain (⚡)">
                     <span class="oc-btn-icon">⚡</span>
@@ -169,8 +187,23 @@
 
     <!-- ── Chart Area ─────────────────────────────────────────────────────── -->
     <main id="chart-area">
-        <div id="contract-chart-container"></div>
+        <div id="contract-chart-container" class="chart-box"></div>
         <canvas id="contract-smf-canvas"></canvas>
+
+        <!-- Secondary Chart Container for Dual Mode (Split Screen) -->
+        <div id="secondary-chart-wrapper" class="secondary-chart-box hidden">
+            <div class="secondary-chart-bar">
+                <div class="sec-chart-info">
+                    <span id="sec-chart-badge" class="sec-badge">PE</span>
+                    <span id="sec-chart-title" class="sec-title">22700 PE</span>
+                    <span id="sec-chart-ltp" class="sec-ltp">₹--</span>
+                    <span id="sec-chart-signal" class="sec-signal">FLAT</span>
+                </div>
+                <button id="btn-close-dual" class="sec-close-btn" title="Close Dual View">✕</button>
+            </div>
+            <div id="secondary-chart-container" class="secondary-chart-inner"></div>
+            <canvas id="secondary-smf-canvas"></canvas>
+        </div>
 
 
 

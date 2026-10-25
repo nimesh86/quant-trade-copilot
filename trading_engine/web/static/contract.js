@@ -63,6 +63,14 @@ const C = {
     _tradingMouseInitialized: false,
     _canvasRenderPending: false,
     _executedTargets: new Set(),
+    dualMode: false,
+    secondaryChart: null,
+    secondaryCandleSeries: null,
+    secondaryRawCandles: [],
+    secondarySmfLastResult: null,
+    secondaryContract: null,
+    secondaryWs: null,
+    secondaryWsPingInterval: null,
 };
 
 // ── SMF Cloud Config (identical to main dashboard) ────────────────────────────
@@ -109,6 +117,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     initReplayController();
     initDynamicExitController();
     initTradingTerminal();
+    initAtmPairPill();
+    initDualViewController();
     checkMarketStatus();
     setInterval(checkMarketStatus, 30_000);
 
@@ -260,8 +270,8 @@ function initChart() {
     // Canvas & Chart sync with chart viewport (responsive for mobile & orientation change)
     const chartArea = document.getElementById('chart-area') || container;
     const syncCanvas = () => {
-        const w = chartArea.clientWidth || container.clientWidth;
-        const h = chartArea.clientHeight || container.clientHeight;
+        const w = container.clientWidth || chartArea.clientWidth;
+        const h = container.clientHeight || chartArea.clientHeight;
         if (C.chart && w > 0 && h > 0) {
             C.chart.applyOptions({ width: w, height: h });
         }
@@ -271,6 +281,7 @@ function initChart() {
             requestAnimationFrame(renderSMFCanvas);
         }
     };
+    new ResizeObserver(syncCanvas).observe(container);
     new ResizeObserver(syncCanvas).observe(chartArea);
     window.addEventListener('resize', syncCanvas);
     syncCanvas();
@@ -881,6 +892,12 @@ function selectContract(contract) {
         renderOptionChainTable(C.optionChainData);
     }
 
+    // Update ATM Pair Pill & Dual View
+    updateAtmPairPill();
+    if (C.dualMode) {
+        refreshSecondaryContract();
+    }
+
     // Auto-close Option Chain drawer on contract select so user gets full chart view
     const ocPanel = document.getElementById('option-chain-panel');
     const toggleBtn = document.getElementById('btn-toggle-oc');
@@ -1366,6 +1383,7 @@ function handleContractTick(data) {
     // Update badge & buy button live premium
     document.getElementById('badge-ltp').textContent = `₹${ltp.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
     updateMarketBuyButton(ltp);
+    updateAtmPairPillLiveLtp(ltp);
 
     if (C.tradingState && C.tradingState.active_position && C.tradingState.active_position.symbol === C.symbol) {
         updateTradingUI(C.tradingState);
@@ -3820,6 +3838,19 @@ function initTfControls() {
             if (C.rawCandles.length > 0) {
                 applyFullChart(C.rawCandles);
             }
+            if (C.dualMode && C.secondaryRawCandles.length > 0 && C.secondaryCandleSeries) {
+                const secAgg = aggregateCandles(C.secondaryRawCandles, C.currentTf);
+                const secSmf = computeSMF(secAgg);
+                C.secondarySmfLastResult = secSmf;
+                const colored = secAgg.map((c, i) => ({
+                    ...c,
+                    color: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    borderColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    wickColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                }));
+                C.secondaryCandleSeries.setData(colored);
+                requestAnimationFrame(renderSecondarySMFCanvas);
+            }
         });
     });
 }
@@ -4560,6 +4591,35 @@ function renderReplayStep() {
 
         // 2. Evaluate active trading position and SL / Target auto-triggers during replay
         evaluateReplayCandleTrading(curCandle);
+
+        // 3. Synchronize secondary chart in dual mode
+        if (C.dualMode && C.secondaryRawCandles && C.secondaryRawCandles.length > 0 && C.secondaryCandleSeries) {
+            const secSliced = C.secondaryRawCandles.filter(c => c.time <= curCandle.time);
+            if (secSliced.length > 0) {
+                const secAgg = aggregateCandles(secSliced, C.currentTf);
+                const secSmf = computeSMF(secAgg);
+                C.secondarySmfLastResult = secSmf;
+                const colored = secAgg.map((c, i) => ({
+                    ...c,
+                    color: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    borderColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    wickColor: secSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                }));
+                C.secondaryCandleSeries.setData(colored);
+                requestAnimationFrame(renderSecondarySMFCanvas);
+
+                const lastSec = secAgg[secAgg.length - 1];
+                const secLtpEl = document.getElementById('sec-chart-ltp');
+                if (secLtpEl) secLtpEl.textContent = `₹${lastSec.close.toFixed(2)}`;
+                const isBull = secSmf.lastSignal[secSmf.n - 1] === 1;
+                const secSigEl = document.getElementById('sec-chart-signal');
+                if (secSigEl) {
+                    secSigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
+                    secSigEl.style.color = isBull ? '#00f2a9' : '#ff4d6d';
+                }
+            }
+        }
+        updateAtmPairPill();
     }
 }
 
@@ -5924,4 +5984,592 @@ function initTradingTerminal() {
     fetchTradeState();
     if (C.tradingPollTimer) clearInterval(C.tradingPollTimer);
     C.tradingPollTimer = setInterval(fetchTradeState, 1500);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── HYBRID DUAL ATM STRIKE PAIR & SPLIT-SCREEN CONTROLLER ────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getOppositeContract(contract) {
+    if (!contract || !contract.symbol) return null;
+    const sym = contract.symbol;
+    const disp = contract.display_name || sym;
+    const isCe = /CE$/i.test(sym);
+    const isPe = /PE$/i.test(sym);
+    if (!isCe && !isPe) return null;
+
+    const oppSym = isCe ? sym.replace(/CE$/i, 'PE') : sym.replace(/PE$/i, 'CE');
+    const oppDisp = isCe ? disp.replace(/CE$/i, 'PE') : disp.replace(/PE$/i, 'CE');
+    return {
+        symbol: oppSym,
+        display_name: oppDisp,
+        expiry: contract.expiry || C.selectedExpiry
+    };
+}
+
+function getAtmPairContracts() {
+    let ceContract = null;
+    let peContract = null;
+    const currentSym = C.symbol || '';
+    const isCurrentCe = /CE$/i.test(currentSym);
+
+    if (C.optionChainData && Array.isArray(C.optionChainData.chain)) {
+        let matchRow = C.optionChainData.chain.find(r => 
+            (r.call && r.call.symbol === currentSym) || 
+            (r.put && r.put.symbol === currentSym)
+        );
+        if (!matchRow) {
+            matchRow = C.optionChainData.chain.find(r => r.is_atm) || C.optionChainData.chain[Math.floor(C.optionChainData.chain.length / 2)];
+        }
+        if (matchRow) {
+            if (matchRow.call && matchRow.call.symbol) {
+                ceContract = { ...matchRow.call, expiry: matchRow.call.expiry || C.selectedExpiry };
+            }
+            if (matchRow.put && matchRow.put.symbol) {
+                peContract = { ...matchRow.put, expiry: matchRow.put.expiry || C.selectedExpiry };
+            }
+        }
+    }
+
+    if (!ceContract || !peContract) {
+        if (isCurrentCe) {
+            ceContract = { symbol: currentSym, display_name: C.displayName || currentSym, expiry: C.selectedExpiry };
+            peContract = getOppositeContract(ceContract);
+        } else {
+            peContract = { symbol: currentSym, display_name: C.displayName || currentSym, expiry: C.selectedExpiry };
+            ceContract = getOppositeContract(peContract);
+        }
+    }
+
+    return { ce: ceContract, pe: peContract };
+}
+
+function updateAtmPairPill() {
+    const pair = getAtmPairContracts();
+    const isCurrentCe = /CE$/i.test(C.symbol || '');
+
+    const btnCe = document.getElementById('pill-btn-ce');
+    const btnPe = document.getElementById('pill-btn-pe');
+    const ltpCeEl = document.getElementById('pill-ce-ltp');
+    const ltpPeEl = document.getElementById('pill-pe-ltp');
+    const radarCe = document.getElementById('pill-ce-radar');
+    const radarPe = document.getElementById('pill-pe-radar');
+
+    if (btnCe) btnCe.classList.toggle('active', isCurrentCe);
+    if (btnPe) btnPe.classList.toggle('active', !isCurrentCe);
+
+    // Extract strike number
+    const strikeMatch = (C.symbol || '').match(/(\d{4,6})(CE|PE)$/i);
+    const strikeStr = strikeMatch ? strikeMatch[1] : '';
+
+    if (btnCe) {
+        const typeEl = btnCe.querySelector('.pill-type');
+        if (typeEl) typeEl.textContent = strikeStr ? `${strikeStr} CE` : 'CE';
+    }
+    if (btnPe) {
+        const typeEl = btnPe.querySelector('.pill-type');
+        if (typeEl) typeEl.textContent = strikeStr ? `${strikeStr} PE` : 'PE';
+    }
+
+    // Set prices
+    if (isCurrentCe) {
+        if (ltpCeEl && C.sessionClose != null) {
+            ltpCeEl.textContent = `₹${C.sessionClose.toFixed(1)}`;
+        }
+        if (ltpPeEl) {
+            if (C.dualMode && C.secondarySmfLastResult && C.secondaryRawCandles.length > 0) {
+                const lastPe = C.secondaryRawCandles[C.secondaryRawCandles.length - 1];
+                if (lastPe) ltpPeEl.textContent = `₹${lastPe.close.toFixed(1)}`;
+            } else if (pair.pe && pair.pe.ltp != null) {
+                ltpPeEl.textContent = `₹${Number(pair.pe.ltp).toFixed(1)}`;
+            }
+        }
+    } else {
+        if (ltpPeEl && C.sessionClose != null) {
+            ltpPeEl.textContent = `₹${C.sessionClose.toFixed(1)}`;
+        }
+        if (ltpCeEl) {
+            if (C.dualMode && C.secondarySmfLastResult && C.secondaryRawCandles.length > 0) {
+                const lastCe = C.secondaryRawCandles[C.secondaryRawCandles.length - 1];
+                if (lastCe) ltpCeEl.textContent = `₹${lastCe.close.toFixed(1)}`;
+            } else if (pair.ce && pair.ce.ltp != null) {
+                ltpCeEl.textContent = `₹${Number(pair.ce.ltp).toFixed(1)}`;
+            }
+        }
+    }
+
+    // Radar Signals (Bullish / Reversal alert)
+    const isPrimaryBull = C.smfLastResult && C.smfLastResult.lastSignal && C.smfLastResult.lastSignal[C.smfLastResult.n - 1] === 1;
+    let isSecondaryBull = false;
+    if (C.dualMode && C.secondarySmfLastResult && C.secondarySmfLastResult.lastSignal) {
+        isSecondaryBull = C.secondarySmfLastResult.lastSignal[C.secondarySmfLastResult.n - 1] === 1;
+    }
+
+    if (isCurrentCe) {
+        if (radarCe) radarCe.classList.toggle('hidden', !isPrimaryBull);
+        if (radarPe) radarPe.classList.toggle('hidden', !isSecondaryBull);
+    } else {
+        if (radarPe) radarPe.classList.toggle('hidden', !isPrimaryBull);
+        if (radarCe) radarCe.classList.toggle('hidden', !isSecondaryBull);
+    }
+}
+
+function updateAtmPairPillLiveLtp(ltp) {
+    if (ltp == null) return;
+    const isCurrentCe = /CE$/i.test(C.symbol || '');
+    const ltpEl = isCurrentCe ? document.getElementById('pill-ce-ltp') : document.getElementById('pill-pe-ltp');
+    if (ltpEl) {
+        ltpEl.textContent = `₹${ltp.toFixed(1)}`;
+    }
+}
+
+function initAtmPairPill() {
+    const btnCe = document.getElementById('pill-btn-ce');
+    const btnPe = document.getElementById('pill-btn-pe');
+    const btnDual = document.getElementById('btn-toggle-dual');
+
+    if (btnCe) {
+        btnCe.addEventListener('click', () => {
+            const isCurrentCe = /CE$/i.test(C.symbol || '');
+            if (isCurrentCe) return;
+            const pair = getAtmPairContracts();
+            if (pair.ce) {
+                selectContract(pair.ce);
+            }
+        });
+    }
+
+    if (btnPe) {
+        btnPe.addEventListener('click', () => {
+            const isCurrentPe = /PE$/i.test(C.symbol || '');
+            if (isCurrentPe) return;
+            const pair = getAtmPairContracts();
+            if (pair.pe) {
+                selectContract(pair.pe);
+            }
+        });
+    }
+
+    if (btnDual) {
+        btnDual.addEventListener('click', () => {
+            toggleDualView();
+        });
+    }
+}
+
+function initDualViewController() {
+    const btnClose = document.getElementById('btn-close-dual');
+    if (btnClose) {
+        btnClose.addEventListener('click', () => {
+            toggleDualView(false);
+        });
+    }
+
+    const secTitle = document.getElementById('sec-chart-title');
+    const secBadge = document.getElementById('sec-chart-badge');
+    const flipHandler = () => {
+        if (C.secondaryContract) {
+            selectContract(C.secondaryContract);
+        }
+    };
+    if (secTitle) secTitle.addEventListener('click', flipHandler);
+    if (secBadge) secBadge.addEventListener('click', flipHandler);
+}
+
+function toggleDualView(forceState) {
+    const nextState = forceState !== undefined ? !!forceState : !C.dualMode;
+    C.dualMode = nextState;
+
+    const chartArea = document.getElementById('chart-area');
+    const secWrapper = document.getElementById('secondary-chart-wrapper');
+    const btnDual = document.getElementById('btn-toggle-dual');
+
+    if (chartArea) chartArea.classList.toggle('dual-active', C.dualMode);
+    if (secWrapper) secWrapper.classList.toggle('hidden', !C.dualMode);
+    if (btnDual) btnDual.classList.toggle('active', C.dualMode);
+
+    // Sync primary chart container
+    const primaryContainer = document.getElementById('contract-chart-container');
+    if (C.chart && primaryContainer) {
+        setTimeout(() => {
+            const pw = primaryContainer.clientWidth;
+            const ph = primaryContainer.clientHeight;
+            if (pw > 0 && ph > 0) {
+                C.chart.applyOptions({ width: pw, height: ph });
+            }
+            requestAnimationFrame(renderSMFCanvas);
+        }, 50);
+    }
+
+    if (C.dualMode) {
+        ensureSecondaryChart();
+        refreshSecondaryContract();
+    } else {
+        disconnectSecondaryWS();
+        setTimeout(() => {
+            if (C.chart && primaryContainer) {
+                C.chart.applyOptions({ width: primaryContainer.clientWidth, height: primaryContainer.clientHeight });
+            }
+            requestAnimationFrame(renderSMFCanvas);
+        }, 100);
+    }
+}
+
+function ensureSecondaryChart() {
+    const secCont = document.getElementById('secondary-chart-container');
+    const secCanvas = document.getElementById('secondary-smf-canvas');
+    if (!secCont || C.secondaryChart) return;
+
+    C.secondaryChart = LightweightCharts.createChart(secCont, {
+        layout: {
+            background: { type: 'solid', color: '#070b14' },
+            textColor: '#6a8fac',
+            fontFamily: "'Inter', sans-serif",
+            fontSize: 10,
+        },
+        grid: {
+            vertLines: { color: 'rgba(0, 195, 255, 0.05)' },
+            horzLines: { color: 'rgba(0, 195, 255, 0.05)' },
+        },
+        crosshair: {
+            vertLine: { color: 'rgba(0, 195, 255, 0.5)', width: 1, style: 2 },
+            horzLine: { color: 'rgba(0, 195, 255, 0.5)', width: 1, style: 2 },
+        },
+        rightPriceScale: {
+            borderColor: 'rgba(0, 195, 255, 0.15)',
+            textColor: '#6a8fac',
+            autoScale: true,
+            scaleMargins: { top: 0.10, bottom: 0.05 },
+        },
+        timeScale: {
+            borderColor: 'rgba(0, 195, 255, 0.15)',
+            timeVisible: true,
+            secondsVisible: false,
+            rightOffset: 25,
+            barSpacing: 8,
+            minBarSpacing: 4,
+            tickMarkFormatter: (t) => {
+                const d = new Date(t * 1000);
+                return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            },
+        },
+        handleScale: {
+            axisPressedMouseMove: { time: true, price: true },
+            axisDoubleClickReset: { time: true, price: true },
+            mouseWheel: true,
+            pinch: true,
+        },
+        handleScroll: {
+            mouseWheel: true,
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true,
+        },
+    });
+
+    C.secondaryCandleSeries = C.secondaryChart.addCandlestickSeries({
+        upColor: SMF.bullColor,
+        downColor: SMF.bearColor,
+        borderUpColor: SMF.bullColor,
+        borderDownColor: SMF.bearColor,
+        wickUpColor: SMF.bullColor,
+        wickDownColor: SMF.bearColor,
+        autoscaleInfoProvider: (original) => {
+            const res = original();
+            if (res && res.priceRange) {
+                return {
+                    priceRange: {
+                        minValue: Math.max(0, res.priceRange.minValue),
+                        maxValue: Math.max(1, res.priceRange.maxValue),
+                    },
+                };
+            }
+            return res;
+        },
+    });
+
+    // Timescale lock-step sync between Primary and Secondary charts
+    let syncTimeScaleLock = false;
+    C.chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (syncTimeScaleLock || !C.secondaryChart || !range) return;
+        syncTimeScaleLock = true;
+        C.secondaryChart.timeScale().setVisibleLogicalRange(range);
+        syncTimeScaleLock = false;
+        requestAnimationFrame(renderSecondarySMFCanvas);
+    });
+    C.secondaryChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (syncTimeScaleLock || !C.chart || !range) return;
+        syncTimeScaleLock = true;
+        C.chart.timeScale().setVisibleLogicalRange(range);
+        syncTimeScaleLock = false;
+        requestAnimationFrame(renderSMFCanvas);
+    });
+
+    // Secondary Crosshair / canvas updates
+    C.secondaryChart.subscribeCrosshairMove(() => {
+        requestAnimationFrame(renderSecondarySMFCanvas);
+    });
+
+    const syncSecCanvas = () => {
+        if (!C.secondaryChart || !secCont) return;
+        const sw = secCont.clientWidth;
+        const sh = secCont.clientHeight;
+        if (sw > 0 && sh > 0) {
+            C.secondaryChart.applyOptions({ width: sw, height: sh });
+            if (secCanvas) {
+                secCanvas.width = sw;
+                secCanvas.height = sh;
+            }
+        }
+        requestAnimationFrame(renderSecondarySMFCanvas);
+    };
+    new ResizeObserver(syncSecCanvas).observe(secCont);
+    window.addEventListener('resize', syncSecCanvas);
+    syncSecCanvas();
+}
+
+function refreshSecondaryContract() {
+    const pair = getAtmPairContracts();
+    const isPrimaryCe = /CE$/i.test(C.symbol || '');
+    const secContract = isPrimaryCe ? pair.pe : pair.ce;
+    if (!secContract || !secContract.symbol) return;
+
+    C.secondaryContract = secContract;
+
+    const isSecPe = /PE$/i.test(secContract.symbol);
+    const badgeEl = document.getElementById('sec-chart-badge');
+    const titleEl = document.getElementById('sec-chart-title');
+    const ltpEl = document.getElementById('sec-chart-ltp');
+    const sigEl = document.getElementById('sec-chart-signal');
+
+    if (badgeEl) {
+        badgeEl.textContent = isSecPe ? 'PE' : 'CE';
+        badgeEl.style.color = isSecPe ? '#ff005d' : '#00f2a9';
+        badgeEl.style.borderColor = isSecPe ? 'rgba(255, 0, 93, 0.4)' : 'rgba(0, 242, 169, 0.4)';
+        badgeEl.style.background = isSecPe ? 'rgba(255, 0, 93, 0.2)' : 'rgba(0, 242, 169, 0.2)';
+    }
+    if (titleEl) titleEl.textContent = secContract.display_name || secContract.symbol;
+    if (ltpEl) ltpEl.textContent = '₹--';
+    if (sigEl) {
+        sigEl.textContent = 'ANALYZING…';
+        sigEl.style.color = '#94a3b8';
+    }
+
+    loadSecondaryCandles(secContract.symbol, C.selectedSessionDate || 'today');
+
+    disconnectSecondaryWS();
+    const isToday = !C.selectedSessionDate || C.selectedSessionDate === 'today';
+    if (isToday) {
+        connectSecondaryWS(secContract.symbol);
+    }
+}
+
+async function loadSecondaryCandles(symbol, optDate) {
+    if (!symbol) return;
+    try {
+        const targetDate = optDate || C.selectedSessionDate || 'today';
+        const url = `/api/contracts/candles?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(targetDate)}`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const candles = data.candles || [];
+        C.secondaryRawCandles = candles;
+
+        if (candles.length === 0 || !C.secondaryCandleSeries) return;
+
+        const agg = aggregateCandles(candles, C.currentTf);
+        const smf = computeSMF(agg);
+        C.secondarySmfLastResult = smf;
+
+        const colored = agg.map((c, i) => ({
+            ...c,
+            color: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+            borderColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+            wickColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+        }));
+        C.secondaryCandleSeries.setData(colored);
+
+        if (agg.length > 0) {
+            const lastC = agg[agg.length - 1];
+            const ltpEl = document.getElementById('sec-chart-ltp');
+            if (ltpEl) ltpEl.textContent = `₹${lastC.close.toFixed(2)}`;
+            const isBull = smf.lastSignal[smf.n - 1] === 1;
+            const sigEl = document.getElementById('sec-chart-signal');
+            if (sigEl) {
+                sigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
+                sigEl.style.color = isBull ? '#00f2a9' : '#ff4d6d';
+            }
+        }
+
+        requestAnimationFrame(renderSecondarySMFCanvas);
+        updateAtmPairPill();
+    } catch (e) {
+        console.warn('Failed to load secondary candles:', e);
+    }
+}
+
+function renderSecondarySMFCanvas() {
+    const canvas = document.getElementById('secondary-smf-canvas');
+    const secCont = document.getElementById('secondary-chart-container');
+    if (!canvas || !secCont || !C.secondaryChart || !C.secondaryCandleSeries) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!C.secondarySmfLastResult) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+    }
+
+    const smf = C.secondarySmfLastResult;
+    const { n, upper, lower, bMain, lastSignal, candles } = smf;
+    if (!n || n < 2) return;
+
+    const W = secCont.clientWidth || canvas.width;
+    const H = secCont.clientHeight || canvas.height;
+
+    if (canvas.width !== W || canvas.height !== H) {
+        canvas.width = W;
+        canvas.height = H;
+    }
+
+    ctx.clearRect(0, 0, W, H);
+
+    const points = [];
+    for (let i = 0; i < n; i++) {
+        const t = candles[i].time;
+        const coord = C.secondaryChart.timeScale().timeToCoordinate(t);
+        if (coord == null || coord < -80 || coord > W + 80) continue;
+        const yU = C.secondaryCandleSeries.priceToCoordinate(upper[i]);
+        const yL = C.secondaryCandleSeries.priceToCoordinate(lower[i]);
+        const yB = C.secondaryCandleSeries.priceToCoordinate(bMain[i]);
+        if (yU == null || yL == null || yB == null) continue;
+        points.push({ x: coord, yUpper: yU, yLower: yL, yBc: yB, regime: lastSignal[i] });
+    }
+    if (points.length < 2) return;
+
+    const segs = [];
+    let seg = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+        if (points[i].regime !== points[i - 1].regime) {
+            segs.push({ regime: points[i - 1].regime, pts: seg });
+            seg = [points[i - 1], points[i]];
+        } else {
+            seg.push(points[i]);
+        }
+    }
+    segs.push({ regime: points[points.length - 1].regime, pts: seg });
+
+    // Filled cloud ribbons
+    for (const { regime, pts } of segs) {
+        if (pts.length < 2) continue;
+        const isBull = regime === 1;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].yUpper);
+        for (const p of pts) ctx.lineTo(p.x, p.yUpper);
+        for (let j = pts.length - 1; j >= 0; j--) ctx.lineTo(pts[j].x, pts[j].yLower);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        if (isBull) {
+            grad.addColorStop(0, 'rgba(0, 200, 255, 0.22)');
+            grad.addColorStop(1, 'rgba(0, 200, 255, 0.04)');
+        } else {
+            grad.addColorStop(0, 'rgba(255, 0, 93, 0.04)');
+            grad.addColorStop(1, 'rgba(255, 0, 93, 0.22)');
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Basis center line
+    ctx.save();
+    ctx.lineWidth = 1.5;
+    for (const { regime, pts } of segs) {
+        ctx.strokeStyle = regime === 1 ? 'rgba(0, 200, 255, 0.55)' : 'rgba(255, 0, 93, 0.55)';
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+            if (i === 0) ctx.moveTo(pts[i].x, pts[i].yBc);
+            else ctx.lineTo(pts[i].x, pts[i].yBc);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // Outer dashed bands
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+        if (i === 0) ctx.moveTo(points[i].x, points[i].yUpper);
+        else ctx.lineTo(points[i].x, points[i].yUpper);
+    }
+    ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i++) {
+        if (i === 0) ctx.moveTo(points[i].x, points[i].yLower);
+        else ctx.lineTo(points[i].x, points[i].yLower);
+    }
+    ctx.stroke();
+    ctx.restore();
+}
+
+function connectSecondaryWS(symbol) {
+    if (!symbol) return;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${window.location.host}/ws/contracts?symbol=${encodeURIComponent(symbol)}`;
+
+    C.secondaryWs = new WebSocket(url);
+    if (C.secondaryWsPingInterval) clearInterval(C.secondaryWsPingInterval);
+    C.secondaryWsPingInterval = setInterval(() => {
+        if (C.secondaryWs && C.secondaryWs.readyState === WebSocket.OPEN) {
+            C.secondaryWs.send(JSON.stringify({ type: 'PING' }));
+        }
+    }, 5000);
+
+    C.secondaryWs.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'CONTRACT_TICK' && data.ltp != null) {
+                const ltpEl = document.getElementById('sec-chart-ltp');
+                if (ltpEl) ltpEl.textContent = `₹${data.ltp.toFixed(2)}`;
+                const isPrimaryCe = /CE$/i.test(C.symbol || '');
+                const pairLtpEl = isPrimaryCe ? document.getElementById('pill-pe-ltp') : document.getElementById('pill-ce-ltp');
+                if (pairLtpEl) pairLtpEl.textContent = `₹${data.ltp.toFixed(1)}`;
+
+                if (C.secondaryCandleSeries && data.forming_candle) {
+                    const fc = data.forming_candle;
+                    const oneMinCandle = {
+                        time: Number(fc.time),
+                        open: Number(fc.open),
+                        high: Number(fc.high),
+                        low: Number(fc.low),
+                        close: Number(fc.close),
+                    };
+                    const existingIdx = C.secondaryRawCandles.findIndex(c => c.time === oneMinCandle.time);
+                    if (existingIdx >= 0) {
+                        C.secondaryRawCandles[existingIdx] = oneMinCandle;
+                    } else {
+                        C.secondaryRawCandles.push(oneMinCandle);
+                    }
+                    C.secondaryCandleSeries.update(oneMinCandle);
+                }
+            }
+        } catch (e) {
+            console.warn('Secondary WS parse error:', e);
+        }
+    };
+}
+
+function disconnectSecondaryWS() {
+    if (C.secondaryWsPingInterval) clearInterval(C.secondaryWsPingInterval);
+    if (C.secondaryWs) {
+        try {
+            C.secondaryWs.close();
+        } catch (e) {}
+        C.secondaryWs = null;
+    }
 }
