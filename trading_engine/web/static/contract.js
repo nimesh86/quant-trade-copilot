@@ -474,6 +474,48 @@ function closeSearch() {
 // ── SESSION DATE (DAY) & EXPIRY DATES CONTROLLER ─────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
+function formatSessionDateDisplay(dateStr, tag) {
+    if (!dateStr || dateStr === 'today') return `Today (${tag})`;
+    try {
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            const yy = parts[0].slice(-2);
+            const mm = parts[1];
+            const dd = parts[2];
+            return `${dd}/${mm}/${yy} (${tag})`;
+        }
+    } catch {}
+    return `${dateStr} (${tag})`;
+}
+
+function formatExpiryDisplay(exp) {
+    if (!exp) return '';
+    let base = '';
+    try {
+        const parts = (exp.date || '').split('-');
+        if (parts.length === 3) {
+            const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            const mon = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+            base = `${parts[2]} ${mon}`;
+        } else {
+            base = exp.date || '';
+        }
+    } catch {
+        base = exp.date || '';
+    }
+
+    const disp = (exp.display || '').toLowerCase();
+    let tag = '';
+    if (disp.includes('weekly')) {
+        tag = ' (W)';
+    } else if (disp.includes('monthly')) {
+        tag = ' (M)';
+    } else if (exp.days_to_expiry !== undefined) {
+        tag = exp.days_to_expiry <= 7 ? ' (W)' : ' (M)';
+    }
+    return `${base}${tag}`;
+}
+
 async function initSessionDateSelector() {
     const sel = document.getElementById('master-session-date-select') || document.getElementById('session-date-select');
     if (!sel) return;
@@ -494,24 +536,22 @@ async function initSessionDateSelector() {
         const isWeekend = (day === 0 || day === 6);
         const isMarketHours = !isWeekend && (mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30);
 
-        // 1. Today option with accurate status
+        // 1. Today option with compact format: dd/MM/yy (C) or (L)
         const todayOpt = document.createElement('option');
         todayOpt.value = 'today';
-        if (isWeekend) {
-            todayOpt.textContent = `${todayStr} (Weekend — Closed)`;
-        } else if (!isMarketHours) {
-            todayOpt.textContent = `${todayStr} (Closed · Market Closed)`;
+        if (isWeekend || !isMarketHours) {
+            todayOpt.textContent = formatSessionDateDisplay(todayStr, 'C');
         } else {
-            todayOpt.textContent = `${todayStr} (Today · Live)`;
+            todayOpt.textContent = formatSessionDateDisplay(todayStr, 'L');
         }
         sel.appendChild(todayOpt);
 
-        // 2. Historical dates for Replay
+        // 2. Historical dates for Replay: dd/MM/yy (R)
         dates.forEach((d) => {
             if (d === todayStr) return;
             const opt = document.createElement('option');
             opt.value = d;
-            opt.textContent = `${d} (Replay)`;
+            opt.textContent = formatSessionDateDisplay(d, 'R');
             sel.appendChild(opt);
         });
 
@@ -557,19 +597,20 @@ async function initExpirySelector() {
         const data = await res.json();
         const expiries = data.expiries || [];
 
-        headerSel.innerHTML = '<option value="">All Expiries</option>';
+        headerSel.innerHTML = '<option value="">ALL EXP</option>';
         if (ocSel) ocSel.innerHTML = '';
 
         expiries.forEach((exp) => {
+            const compactText = formatExpiryDisplay(exp);
             const opt1 = document.createElement('option');
             opt1.value = exp.date;
-            opt1.textContent = exp.display;
+            opt1.textContent = compactText;
             headerSel.appendChild(opt1);
 
             if (ocSel) {
                 const opt2 = document.createElement('option');
                 opt2.value = exp.date;
-                opt2.textContent = exp.display;
+                opt2.textContent = compactText;
                 ocSel.appendChild(opt2);
             }
         });
@@ -4332,16 +4373,29 @@ function toggleReplay() {
 }
 
 function startReplay() {
-    if (!C.rawCandles || C.rawCandles.length < 5) {
-        alert("Please select or chart an option contract first before starting Bar Replay.");
+    const baseCandles = (Stations.CE && Stations.CE.rawCandles && Stations.CE.rawCandles.length >= 5)
+        ? Stations.CE.rawCandles
+        : (Stations.PE && Stations.PE.rawCandles && Stations.PE.rawCandles.length >= 5)
+            ? Stations.PE.rawCandles
+            : (C.rawCandles && C.rawCandles.length >= 5 ? C.rawCandles : []);
+
+    if (!baseCandles || baseCandles.length < 5) {
+        alert("Please select or load option contracts first before starting Bar Replay.");
         return;
     }
 
     Replay.active = true;
     C.replayMode = true;
-    Replay.fullCandles = [...C.rawCandles];
+    Replay.fullCandles = [...baseCandles];
 
-    const toggleBtn = document.getElementById('btn-replay-toggle');
+    if (Stations.CE && Stations.CE.rawCandles) {
+        Stations.CE.fullCandlesStore = [...Stations.CE.rawCandles];
+    }
+    if (Stations.PE && Stations.PE.rawCandles) {
+        Stations.PE.fullCandlesStore = [...Stations.PE.rawCandles];
+    }
+
+    const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.add('active');
     if (dock) dock.classList.remove('hidden');
@@ -4383,7 +4437,7 @@ function exitReplay() {
     Replay.active = false;
     C.replayMode = false;
 
-    const toggleBtn = document.getElementById('btn-replay-toggle');
+    const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
     const dock = document.getElementById('replay-bar');
     if (toggleBtn) toggleBtn.classList.remove('active');
     if (dock) dock.classList.add('hidden');
@@ -4398,7 +4452,21 @@ function exitReplay() {
         }).catch(() => {});
     }
 
-    // Restore full dataset
+    // Restore full datasets to both parallel stations
+    if (Stations.CE && Stations.CE.fullCandlesStore && Stations.CE.fullCandlesStore.length > 0) {
+        Stations.CE.rawCandles = [...Stations.CE.fullCandlesStore];
+        const ceAgg = aggregateCandles(Stations.CE.rawCandles, MasterState.currentTf);
+        updateStationTopBar(Stations.CE, ceAgg);
+        updateStationFooter(Stations.CE);
+        applyStationChart(Stations.CE);
+    }
+    if (Stations.PE && Stations.PE.fullCandlesStore && Stations.PE.fullCandlesStore.length > 0) {
+        Stations.PE.rawCandles = [...Stations.PE.fullCandlesStore];
+        const peAgg = aggregateCandles(Stations.PE.rawCandles, MasterState.currentTf);
+        updateStationTopBar(Stations.PE, peAgg);
+        updateStationFooter(Stations.PE);
+        applyStationChart(Stations.PE);
+    }
     if (Replay.fullCandles.length > 0) {
         C.rawCandles = [...Replay.fullCandles];
         updateSessionStats(C.rawCandles);
@@ -4553,48 +4621,62 @@ function renderReplayStep() {
         evaluateReplayCandleTrading(curCandle);
 
         // 3. Synchronize secondary contract & counterpart signal simultaneously
-        if (Stations && Stations.PE && Stations.PE.rawCandles && Stations.PE.rawCandles.length > 0) {
-            const peSliced = Stations.PE.rawCandles.filter(c => c.time <= curCandle.time);
-            if (peSliced.length > 0 && Stations.PE.candleSeries) {
-                const peAgg = aggregateCandles(peSliced, MasterState.currentTf);
-                const peSmf = computeSMF(peAgg);
-                Stations.PE.smfResult = peSmf;
-                const colored = peAgg.map((c, i) => ({
-                    ...c,
-                    color: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    borderColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                    wickColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                }));
-                Stations.PE.candleSeries.setData(colored);
+        if (Stations && Stations.PE) {
+            const peSource = Stations.PE.fullCandlesStore || Stations.PE.rawCandles;
+            if (peSource && peSource.length > 0) {
+                const peSliced = peSource.filter(c => c.time <= curCandle.time);
+                if (peSliced.length > 0 && Stations.PE.candleSeries) {
+                    const peAgg = aggregateCandles(peSliced, MasterState.currentTf);
+                    const peSmf = computeSMF(peAgg);
+                    Stations.PE.smfResult = peSmf;
+                    const colored = peAgg.map((c, i) => ({
+                        ...c,
+                        color: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        borderColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        wickColor: peSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    }));
+                    Stations.PE.candleSeries.setData(colored);
 
-                const dePe = computeSMFDynamicExit(peAgg, peSmf, 'V5');
-                Stations.PE.dynamicExitResult = dePe;
-                if (dePe) {
-                    if (Stations.PE.dynamicTrailSeries && dePe.trailPoints) Stations.PE.dynamicTrailSeries.setData(dePe.trailPoints);
-                    if (Stations.PE.dynamicLadderSeries && dePe.ladderPoints) Stations.PE.dynamicLadderSeries.setData(dePe.ladderPoints);
-                    if (dePe.markers) Stations.PE.candleSeries.setMarkers(dePe.markers);
+                    const dePe = computeSMFDynamicExit(peAgg, peSmf, 'V5');
+                    Stations.PE.dynamicExitResult = dePe;
+                    if (dePe) {
+                        if (Stations.PE.dynamicTrailSeries && dePe.trailPoints) Stations.PE.dynamicTrailSeries.setData(dePe.trailPoints);
+                        if (Stations.PE.dynamicLadderSeries && dePe.ladderPoints) Stations.PE.dynamicLadderSeries.setData(dePe.ladderPoints);
+                        if (dePe.markers) Stations.PE.candleSeries.setMarkers(dePe.markers);
+                    }
+                    updateStationTopBar(Stations.PE, peAgg);
+                    updateStationFooter(Stations.PE);
+                    renderStationSMFCanvas(Stations.PE);
                 }
-                updateStationTopBar(Stations.PE, peAgg);
-                updateStationFooter(Stations.PE);
-                renderStationSMFCanvas(Stations.PE);
             }
         }
-        if (Stations && Stations.CE && Stations.CE.rawCandles && Stations.CE.rawCandles.length > 0) {
-            const ceSliced = Stations.CE.rawCandles.filter(c => c.time <= curCandle.time);
-            if (ceSliced.length > 0 && Stations.CE.candleSeries) {
-                const ceAgg = aggregateCandles(ceSliced, MasterState.currentTf);
-                const ceSmf = computeSMF(ceAgg);
-                Stations.CE.smfResult = ceSmf;
-                const deCe = computeSMFDynamicExit(ceAgg, ceSmf, 'V5');
-                Stations.CE.dynamicExitResult = deCe;
-                if (deCe) {
-                    if (Stations.CE.dynamicTrailSeries && deCe.trailPoints) Stations.CE.dynamicTrailSeries.setData(deCe.trailPoints);
-                    if (Stations.CE.dynamicLadderSeries && deCe.ladderPoints) Stations.CE.dynamicLadderSeries.setData(deCe.ladderPoints);
-                    if (deCe.markers) Stations.CE.candleSeries.setMarkers(deCe.markers);
+        if (Stations && Stations.CE) {
+            const ceSource = Stations.CE.fullCandlesStore || Stations.CE.rawCandles;
+            if (ceSource && ceSource.length > 0) {
+                const ceSliced = ceSource.filter(c => c.time <= curCandle.time);
+                if (ceSliced.length > 0 && Stations.CE.candleSeries) {
+                    const ceAgg = aggregateCandles(ceSliced, MasterState.currentTf);
+                    const ceSmf = computeSMF(ceAgg);
+                    Stations.CE.smfResult = ceSmf;
+                    const colored = ceAgg.map((c, i) => ({
+                        ...c,
+                        color: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        borderColor: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                        wickColor: ceSmf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
+                    }));
+                    Stations.CE.candleSeries.setData(colored);
+
+                    const deCe = computeSMFDynamicExit(ceAgg, ceSmf, 'V5');
+                    Stations.CE.dynamicExitResult = deCe;
+                    if (deCe) {
+                        if (Stations.CE.dynamicTrailSeries && deCe.trailPoints) Stations.CE.dynamicTrailSeries.setData(deCe.trailPoints);
+                        if (Stations.CE.dynamicLadderSeries && deCe.ladderPoints) Stations.CE.dynamicLadderSeries.setData(deCe.ladderPoints);
+                        if (deCe.markers) Stations.CE.candleSeries.setMarkers(deCe.markers);
+                    }
+                    updateStationTopBar(Stations.CE, ceAgg);
+                    updateStationFooter(Stations.CE);
+                    renderStationSMFCanvas(Stations.CE);
                 }
-                updateStationTopBar(Stations.CE, ceAgg);
-                updateStationFooter(Stations.CE);
-                renderStationSMFCanvas(Stations.CE);
             }
         }
         updatePortfolioSummary();
@@ -6426,11 +6508,6 @@ function bindMasterHeaderControls() {
         btnChain.addEventListener('click', toggleOptionChain);
     }
 
-    const btnReplay = document.getElementById('btn-master-replay');
-    if (btnReplay) {
-        btnReplay.addEventListener('click', toggleReplay);
-    }
-
     const btnReport = document.getElementById('btn-master-report');
     if (btnReport) {
         btnReport.addEventListener('click', openBacktestModal);
@@ -6623,9 +6700,8 @@ async function loadStationCandles(station, contract, optDate) {
         updateStationFooter(station);
         renderStationSMFCanvas(station);
 
-        const curPx = agg[agg.length - 1]?.close || 0;
         const buyTxt = document.getElementById(station.type === 'CE' ? 'ce-buy-txt' : 'pe-buy-txt');
-        if (buyTxt) buyTxt.textContent = `${station.type} · ₹${curPx.toFixed(1)}`;
+        if (buyTxt) buyTxt.textContent = station.type;
 
     } catch (e) {
         console.warn(`Failed to load ${station.type} candles:`, e);
@@ -6640,7 +6716,7 @@ function updateStationTopBar(station, agg) {
 
     const ltpEl = document.getElementById(`${prefix}-ltp`);
     const chgEl = document.getElementById(`${prefix}-chg`);
-    const sigEl = document.getElementById(`${prefix}-signal`);
+    const trendIconEl = document.getElementById(`${prefix}-trend-icon`);
 
     if (ltpEl) ltpEl.textContent = `₹${lastC.close.toFixed(2)}`;
     if (chgEl && firstC) {
@@ -6650,10 +6726,13 @@ function updateStationTopBar(station, agg) {
         chgEl.textContent = `${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`;
         chgEl.className = `station-chg ${diff >= 0 ? 'pos' : 'neg'}`;
     }
-    if (sigEl && station.smfResult) {
-        const isBull = station.smfResult.lastSignal[station.smfResult.n - 1] === 1;
-        sigEl.textContent = isBull ? '🟢 BULLISH (BUY)' : '🔴 BEARISH';
-        sigEl.className = `station-signal ${isBull ? 'bull' : 'bear'}`;
+    if (trendIconEl && station.smfResult) {
+        const n = station.smfResult.n || (station.smfResult.lastSignal ? station.smfResult.lastSignal.length : 0);
+        const lastSig = n > 0 ? station.smfResult.lastSignal[n - 1] : 0;
+        const isBull = lastSig === 1;
+        trendIconEl.textContent = isBull ? '▲' : '▼';
+        trendIconEl.className = `trend-arrow ${isBull ? 'up' : 'down'}`;
+        trendIconEl.title = isBull ? 'Bullish (Buy)' : 'Bearish';
     }
 }
 

@@ -14,18 +14,12 @@
     <!-- ── Loading Top Bar ──────────────────────────────────────────────── -->
     <div id="loading-bar"></div>
 
-    <!-- ── Master Sticky Global Header ───────────────────────────────────── -->
+    <!-- ── Master Sticky Global Header (Exactly 3 Compact Rows) ──────────── -->
     <header id="master-header">
-        <!-- Row 1: Navigation, Underlying, Strike Stepper, Expiry, TF, Session Date -->
-        <div class="hdr-row hdr-row-nav">
-            <div class="hdr-left-group">
-                <!-- 1. Back to Dashboard Button -->
-                <a href="/" id="home-link" class="nav-switch-btn" title="Back to Main Dashboard">
-                    <span class="home-arrow">←</span>
-                    <span class="home-text">Dashboard</span>
-                </a>
-
-                <!-- 2. Master Underlying Select -->
+        <!-- Row 1: Home, Underlying, Strike Stepper, Kill Switch -->
+        <div class="hdr-row hdr-row-1">
+            <div class="hdr-group-left">
+                <a href="/" id="home-link" class="nav-switch-btn icon-only" title="Back to Dashboard">←</a>
                 <div class="underlying-select-wrap">
                     <select id="master-underlying-select" title="Switch Underlying Index">
                         <option value="NIFTY" selected>NIFTY 50</option>
@@ -35,67 +29,47 @@
                         <option value="MIDCPNIFTY">MIDCAP NIFTY</option>
                     </select>
                 </div>
-
-                <!-- 3. Master Strike Stepper (Synchronizes both CE & PE stations) -->
-                <div class="strike-stepper-box" title="Strike Stepper (Synchronizes both CALL & PUT stations)">
-                    <button id="btn-strike-prev" class="step-btn" title="Previous Strike (-Step)">-50</button>
-                    <div id="strike-display-pill" class="strike-pill">
-                        <span id="cur-strike-val" class="strike-num">22700</span>
-                        <span id="cur-strike-tag" class="strike-tag atm">ATM</span>
-                    </div>
-                    <button id="btn-strike-next" class="step-btn" title="Next Strike (+Step)">+50</button>
-                </div>
-
-                <!-- 4. Expiry Filter Dropdown -->
-                <div class="expiry-select-wrap" title="Option Expiry Date">
-                    <select id="master-expiry-select" title="Contract Expiry Date">
-                        <option value="">Expiry</option>
-                    </select>
-                </div>
-
-                <!-- 5. Timeframe Toggle Pill (1m / 5m) -->
-                <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
-                    <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute Candle">1m</button>
-                    <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute Candle">5m</button>
-                </div>
-
-                <!-- 6. Session Day Dropdown (Today Live Feed vs Historical Replay) -->
-                <div class="session-date-wrap" title="Trading Session Day">
-                    <select id="master-session-date-select" title="Switch Trading Session Day">
-                        <option value="today">Today (Live)</option>
-                    </select>
-                </div>
             </div>
-
-            <!-- Row 1 Right: Master Actions & Combined Portfolio PnL -->
-            <div class="hdr-right-group">
-                <!-- Option Chain Trigger -->
-                <button id="btn-master-chain" class="hdr-btn chain-btn" title="Open Option Chain (⚡)">
-                    <span class="btn-icon">⚡</span>
-                    <span class="btn-txt">Chain</span>
-                </button>
-
-                <!-- Replay Simulator Toggle (Icon Only) -->
-                <button id="btn-master-replay" class="hdr-btn replay-btn icon-only" title="Toggle Synchronized Bar Replay Simulator">
-                    <span class="btn-icon">⏪</span>
-                </button>
-
-                <!-- Combined Backtest Scorecard & Ledger Modal Trigger (Icon Only) -->
-                <button id="btn-master-report" class="hdr-btn report-btn icon-only" title="View Combined Session Accuracy Scorecard & Trade Ledger">
-                    <span class="btn-icon">📊</span>
-                </button>
-
-                <!-- Combined Portfolio PnL Pill (Aggregates CE + PE Realized + Unrealized) -->
-                <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Combined Realized + Unrealized PnL / Capital">
-                    <span id="val-portfolio-pnl" class="pnl-num">+₹0.00</span>
-                    <span class="pnl-sep">/</span>
-                    <span id="val-portfolio-cap" class="cap-num">100k</span>
+            <div class="strike-stepper-box" title="Strike Stepper">
+                <button id="btn-strike-prev" class="step-btn">-50</button>
+                <div id="strike-display-pill" class="strike-pill">
+                    <span id="cur-strike-val" class="strike-num">22700</span>
+                    <span id="cur-strike-tag" class="strike-tag atm">ATM</span>
                 </div>
+                <button id="btn-strike-next" class="step-btn">+50</button>
+            </div>
+            <button id="btn-master-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch">🛑</button>
+        </div>
 
-                <!-- Emergency Kill Switch (Icon Only) -->
-                <button id="btn-master-kill-switch" class="btn-kill-switch icon-only" title="Emergency Kill Switch: Market-Exit all positions & cancel open orders">
-                    <span class="kill-icon">🛑</span>
-                </button>
+        <!-- Row 2: Expiry (Compact), Timeframe (1m/5m), Session Date (Compact) -->
+        <div class="hdr-row hdr-row-2">
+            <div class="expiry-select-wrap" title="Contract Expiry">
+                <select id="master-expiry-select" title="Contract Expiry">
+                    <option value="">Expiry</option>
+                </select>
+            </div>
+            <div id="tf-controls" class="tf-toggle-pill" role="group" aria-label="Chart timeframe">
+                <button class="tf-btn active" data-tf="1" id="tf-1m" title="1 Minute">1m</button>
+                <button class="tf-btn" data-tf="5" id="tf-5m" title="5 Minute">5m</button>
+            </div>
+            <div class="session-date-wrap" title="Trading Session Day">
+                <select id="master-session-date-select" title="Trading Session Day">
+                    <option value="today">Today</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Row 3: Option Chain, Replay, Report Scorecard, Portfolio Balance -->
+        <div class="hdr-row hdr-row-3">
+            <div class="hdr-btn-toolbar">
+                <button id="btn-master-chain" class="hdr-tb-btn chain-btn" title="Option Chain (⚡)">⚡ Chain</button>
+                <button id="btn-master-replay" class="hdr-tb-btn replay-btn" title="Bar Replay Simulator">⏪</button>
+                <button id="btn-master-report" class="hdr-tb-btn report-btn" title="Session Accuracy Scorecard">📊</button>
+            </div>
+            <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Portfolio Realized + Unrealized PnL / Capital">
+                <span id="val-portfolio-pnl" class="pnl-num">+₹0.00</span>
+                <span class="pnl-sep">/</span>
+                <span id="val-portfolio-cap" class="cap-num">100k</span>
             </div>
         </div>
     </header>
@@ -107,68 +81,74 @@
         <!-- STATION 1: CALL (CE) STATION                                        -->
         <!-- ════════════════════════════════════════════════════════════════════ -->
         <section id="station-ce" class="contract-station station-call" aria-label="CALL Option Station">
-            <!-- CE Station Header Bar -->
+            <!-- CE Station Header Bar (Line 1: Contract Name Only, Line 2: Rate + Points + Trend Arrow + Indicator Tool) -->
             <div class="station-hdr">
-                <div class="station-meta-left">
+                <div class="station-hdr-line1">
                     <span id="ce-symbol-text" class="station-badge ce-badge-box">22700 CE</span>
-                    <span id="ce-ltp" class="station-ltp">₹--</span>
-                    <span id="ce-chg" class="station-chg">--</span>
-                    <span id="ce-signal" class="station-signal flat">ANALYZING…</span>
                 </div>
-                <div class="station-tools-right">
-                    <button id="ce-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
-                    <!-- Small Panel to Enable/Disable Indicators -->
-                    <div id="ce-indicators-panel" class="station-indicators-popover hidden">
-                        <div class="popover-title">Indicators (CE)</div>
-                        <label class="popover-item"><input type="checkbox" id="ce-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
-                        <label class="popover-item"><input type="checkbox" id="ce-chk-price" /> <span>🏷 Signal Price</span></label>
-                        <label class="popover-item"><input type="checkbox" id="ce-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
-                        <label class="popover-item"><input type="checkbox" id="ce-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                <div class="station-hdr-line2">
+                    <div class="rate-cluster">
+                        <span id="ce-ltp" class="station-ltp">₹--</span>
+                        <span id="ce-chg" class="station-chg">--</span>
+                        <span id="ce-trend-icon" class="trend-arrow flat" title="SMF Trend">▲</span>
+                    </div>
+                    <div class="tools-cluster">
+                        <button id="ce-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                        <!-- Small Panel to Enable/Disable Indicators -->
+                        <div id="ce-indicators-panel" class="station-indicators-popover hidden">
+                            <div class="popover-title">Indicators (CE)</div>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-price" /> <span>🏷 Signal Price</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                            <label class="popover-item"><input type="checkbox" id="ce-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- CE Station Control Bar (Independent Trading Controls & HUD) -->
+            <!-- CE Station Control Bar (Single Compact Segmented Toolbar) -->
             <div class="station-controls ce-controls">
-                <div class="lot-stepper" title="Order Lot Size">
-                    <button id="ce-lot-minus" class="lot-btn">-</button>
-                    <span id="ce-lot-val" class="lot-num">1</span>
-                    <button id="ce-lot-plus" class="lot-btn">+</button>
+                <div class="station-toolbar">
+                    <div class="lot-stepper" title="Order Lot Size">
+                        <button id="ce-lot-minus" class="lot-btn">-</button>
+                        <span id="ce-lot-val" class="lot-num">1</span>
+                        <button id="ce-lot-plus" class="lot-btn">+</button>
+                    </div>
+
+                    <!-- Clean 1-Click Market Buy Button (Icon + CE) -->
+                    <button id="ce-btn-buy" class="btn-station-buy ce-buy" title="1-Click Market Buy CALL (Instant Execution)">
+                        <svg class="cart-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="9" cy="21" r="1"></circle>
+                            <circle cx="20" cy="21" r="1"></circle>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                        </svg>
+                        <span id="ce-buy-txt">CE</span>
+                    </button>
+
+                    <!-- TradingView-Style Interactive Limit Box Tool -->
+                    <button id="ce-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
+                            <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
+                            <polyline points="4 15 10 9 14 13 20 7"></polyline>
+                            <polyline points="15 7 20 7 20 12"></polyline>
+                        </svg>
+                    </button>
+
+                    <!-- Active Position HUD for CE: POS, SL, T1, T2 -->
+                    <div id="ce-pos-hud" class="station-pos-hud hidden" title="Active CE Position Overview">
+                        <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="ce-hud-pos" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="ce-hud-sl" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="ce-hud-t1" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="ce-hud-t2" class="hud-num">₹--</span></div>
+                    </div>
+
+                    <!-- Clean 1-Click Market Exit Button for CE -->
+                    <button id="ce-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for CE">
+                        <span class="exit-txt">EXIT</span>
+                        <span id="ce-pos-pnl" class="exit-pnl">+₹0.00</span>
+                    </button>
                 </div>
-
-                <!-- Clean 1-Click Market Buy Button (Icon + CE) -->
-                <button id="ce-btn-buy" class="btn-station-buy ce-buy" title="1-Click Market Buy CALL (Instant Execution)">
-                    <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="9" cy="21" r="1"></circle>
-                        <circle cx="20" cy="21" r="1"></circle>
-                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-                    </svg>
-                    <span id="ce-buy-txt">CE</span>
-                </button>
-
-                <!-- TradingView-Style Interactive Limit Box Tool -->
-                <button id="ce-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
-                        <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
-                        <polyline points="4 15 10 9 14 13 20 7"></polyline>
-                        <polyline points="15 7 20 7 20 12"></polyline>
-                    </svg>
-                </button>
-
-                <!-- Active Position HUD for CE: POS, SL, T1, T2 -->
-                <div id="ce-pos-hud" class="station-pos-hud hidden" title="Active CE Position Overview">
-                    <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="ce-hud-pos" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="ce-hud-sl" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="ce-hud-t1" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="ce-hud-t2" class="hud-num">₹--</span></div>
-                </div>
-
-                <!-- Clean 1-Click Market Exit Button for CE -->
-                <button id="ce-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for CE">
-                    <span class="exit-txt">EXIT</span>
-                    <span id="ce-pos-pnl" class="exit-pnl">+₹0.00</span>
-                </button>
             </div>
 
             <!-- CE Station Chart Area with Canvas Ribbon -->
@@ -177,12 +157,9 @@
                 <canvas id="ce-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- CE Station Footer: Independent 1-Day Backtest & Expandable Ledger -->
+            <!-- CE Station Footer: Direct Metrics Grid (No redundant badge) -->
             <div class="station-footer ce-footer">
                 <div class="footer-strip-row">
-                    <div class="footer-left-info">
-                        <span class="footer-badge ce-footer-badge">📊 CE BACKTEST</span>
-                    </div>
                     <div class="footer-metrics-grid">
                         <div class="metric-item"><span class="m-lbl">TRADES</span><span id="ce-stat-trades" class="m-val">0</span></div>
                         <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="ce-stat-winrate" class="m-val">--%</span></div>
@@ -191,7 +168,7 @@
                         <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="ce-stat-cash" class="m-val highlight">+₹0.00</span></div>
                     </div>
                     <div class="footer-right-actions">
-                        <button id="ce-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse CE Trades Log">📋 Trades (<span id="ce-log-count">0</span>) ▾</button>
+                        <button id="ce-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse CE Trades Log">📋 (<span id="ce-log-count">0</span>) ▾</button>
                     </div>
                 </div>
                 <!-- Expandable Mini-Ledger Drawer for CE -->
@@ -211,68 +188,74 @@
         <!-- STATION 2: PUT (PE) STATION                                         -->
         <!-- ════════════════════════════════════════════════════════════════════ -->
         <section id="station-pe" class="contract-station station-put" aria-label="PUT Option Station">
-            <!-- PE Station Header Bar -->
+            <!-- PE Station Header Bar (Line 1: Contract Name Only, Line 2: Rate + Points + Trend Arrow + Indicator Tool) -->
             <div class="station-hdr">
-                <div class="station-meta-left">
+                <div class="station-hdr-line1">
                     <span id="pe-symbol-text" class="station-badge pe-badge-box">22700 PE</span>
-                    <span id="pe-ltp" class="station-ltp">₹--</span>
-                    <span id="pe-chg" class="station-chg">--</span>
-                    <span id="pe-signal" class="station-signal flat">ANALYZING…</span>
                 </div>
-                <div class="station-tools-right">
-                    <button id="pe-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
-                    <!-- Small Panel to Enable/Disable Indicators -->
-                    <div id="pe-indicators-panel" class="station-indicators-popover hidden">
-                        <div class="popover-title">Indicators (PE)</div>
-                        <label class="popover-item"><input type="checkbox" id="pe-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
-                        <label class="popover-item"><input type="checkbox" id="pe-chk-price" /> <span>🏷 Signal Price</span></label>
-                        <label class="popover-item"><input type="checkbox" id="pe-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
-                        <label class="popover-item"><input type="checkbox" id="pe-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                <div class="station-hdr-line2">
+                    <div class="rate-cluster">
+                        <span id="pe-ltp" class="station-ltp">₹--</span>
+                        <span id="pe-chg" class="station-chg">--</span>
+                        <span id="pe-trend-icon" class="trend-arrow flat" title="SMF Trend">▼</span>
+                    </div>
+                    <div class="tools-cluster">
+                        <button id="pe-btn-indicators" class="tool-btn indicator-gear-btn" title="Indicator Settings">🎛️</button>
+                        <!-- Small Panel to Enable/Disable Indicators -->
+                        <div id="pe-indicators-panel" class="station-indicators-popover hidden">
+                            <div class="popover-title">Indicators (PE)</div>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-smf" checked /> <span>⬡ SMF Cloud</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-price" /> <span>🏷 Signal Price</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-target" checked /> <span>🎯 Targets (T1/T2)</span></label>
+                            <label class="popover-item"><input type="checkbox" id="pe-chk-exit" checked /> <span>🛡️ Dynamic Exit</span></label>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PE Station Control Bar (Independent Trading Controls & HUD) -->
+            <!-- PE Station Control Bar (Single Compact Segmented Toolbar) -->
             <div class="station-controls pe-controls">
-                <div class="lot-stepper" title="Order Lot Size">
-                    <button id="pe-lot-minus" class="lot-btn">-</button>
-                    <span id="pe-lot-val" class="lot-num">1</span>
-                    <button id="pe-lot-plus" class="lot-btn">+</button>
+                <div class="station-toolbar">
+                    <div class="lot-stepper" title="Order Lot Size">
+                        <button id="pe-lot-minus" class="lot-btn">-</button>
+                        <span id="pe-lot-val" class="lot-num">1</span>
+                        <button id="pe-lot-plus" class="lot-btn">+</button>
+                    </div>
+
+                    <!-- Clean 1-Click Market Buy Button (Icon + PE) -->
+                    <button id="pe-btn-buy" class="btn-station-buy pe-buy" title="1-Click Market Buy PUT (Instant Execution)">
+                        <svg class="cart-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="9" cy="21" r="1"></circle>
+                            <circle cx="20" cy="21" r="1"></circle>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                        </svg>
+                        <span id="pe-buy-txt">PE</span>
+                    </button>
+
+                    <!-- TradingView-Style Interactive Limit Box Tool -->
+                    <button id="pe-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
+                            <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
+                            <polyline points="4 15 10 9 14 13 20 7"></polyline>
+                            <polyline points="15 7 20 7 20 12"></polyline>
+                        </svg>
+                    </button>
+
+                    <!-- Active Position HUD for PE: POS, SL, T1, T2 -->
+                    <div id="pe-pos-hud" class="station-pos-hud hidden" title="Active PE Position Overview">
+                        <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="pe-hud-pos" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="pe-hud-sl" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="pe-hud-t1" class="hud-num">₹--</span></div>
+                        <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="pe-hud-t2" class="hud-num">₹--</span></div>
+                    </div>
+
+                    <!-- Clean 1-Click Market Exit Button for PE -->
+                    <button id="pe-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for PE">
+                        <span class="exit-txt">EXIT</span>
+                        <span id="pe-pos-pnl" class="exit-pnl">+₹0.00</span>
+                    </button>
                 </div>
-
-                <!-- Clean 1-Click Market Buy Button (Icon + PE) -->
-                <button id="pe-btn-buy" class="btn-station-buy pe-buy" title="1-Click Market Buy PUT (Instant Execution)">
-                    <svg class="cart-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="9" cy="21" r="1"></circle>
-                        <circle cx="20" cy="21" r="1"></circle>
-                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-                    </svg>
-                    <span id="pe-buy-txt">PE</span>
-                </button>
-
-                <!-- TradingView-Style Interactive Limit Box Tool -->
-                <button id="pe-btn-limit" class="btn-station-limit" title="Draw Limit Box Tool">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="3" y1="5" x2="21" y2="5" stroke-dasharray="3 3"></line>
-                        <line x1="3" y1="19" x2="21" y2="19" stroke-dasharray="3 3"></line>
-                        <polyline points="4 15 10 9 14 13 20 7"></polyline>
-                        <polyline points="15 7 20 7 20 12"></polyline>
-                    </svg>
-                </button>
-
-                <!-- Active Position HUD for PE: POS, SL, T1, T2 -->
-                <div id="pe-pos-hud" class="station-pos-hud hidden" title="Active PE Position Overview">
-                    <div class="hud-pill pill-pos"><span class="hud-tag">POS</span><span id="pe-hud-pos" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-sl"><span class="hud-tag">SL</span><span id="pe-hud-sl" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-t1"><span class="hud-tag">T1</span><span id="pe-hud-t1" class="hud-num">₹--</span></div>
-                    <div class="hud-pill pill-t2"><span class="hud-tag">T2</span><span id="pe-hud-t2" class="hud-num">₹--</span></div>
-                </div>
-
-                <!-- Clean 1-Click Market Exit Button for PE -->
-                <button id="pe-btn-exit" class="btn-station-exit hidden" title="1-Click Instant Market Exit for PE">
-                    <span class="exit-txt">EXIT</span>
-                    <span id="pe-pos-pnl" class="exit-pnl">+₹0.00</span>
-                </button>
             </div>
 
             <!-- PE Station Chart Area with Canvas Ribbon -->
@@ -281,12 +264,9 @@
                 <canvas id="pe-smf-canvas" class="station-canvas"></canvas>
             </div>
 
-            <!-- PE Station Footer: Independent 1-Day Backtest & Expandable Ledger -->
+            <!-- PE Station Footer: Direct Metrics Grid (No redundant badge) -->
             <div class="station-footer pe-footer">
                 <div class="footer-strip-row">
-                    <div class="footer-left-info">
-                        <span class="footer-badge pe-footer-badge">📊 PE BACKTEST</span>
-                    </div>
                     <div class="footer-metrics-grid">
                         <div class="metric-item"><span class="m-lbl">TRADES</span><span id="pe-stat-trades" class="m-val">0</span></div>
                         <div class="metric-item"><span class="m-lbl">WIN RATE</span><span id="pe-stat-winrate" class="m-val">--%</span></div>
@@ -295,7 +275,7 @@
                         <div class="metric-item"><span class="m-lbl">NET CASH</span><span id="pe-stat-cash" class="m-val highlight">+₹0.00</span></div>
                     </div>
                     <div class="footer-right-actions">
-                        <button id="pe-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse PE Trades Log">📋 Trades (<span id="pe-log-count">0</span>) ▾</button>
+                        <button id="pe-btn-toggle-log" class="btn-toggle-log" title="Expand/Collapse PE Trades Log">📋 (<span id="pe-log-count">0</span>) ▾</button>
                     </div>
                 </div>
                 <!-- Expandable Mini-Ledger Drawer for PE -->
