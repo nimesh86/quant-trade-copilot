@@ -22,6 +22,11 @@ import urllib.parse
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+# Ensure workspace root is in sys.path
+workspace_root = str(Path(__file__).resolve().parent.parent.parent)
+if workspace_root not in sys.path:
+    sys.path.insert(0, workspace_root)
+
 import pyotp
 
 from trading_engine.core.keyvault import get_secret, set_secret
