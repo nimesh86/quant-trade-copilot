@@ -4332,6 +4332,8 @@ function initReplayController() {
             modeAutoBtn.classList.add('active');
             modeManualBtn.classList.remove('active');
             flashExecutionAlert('⚡ AUTO BACKTEST MODE', 'System executes SMF Dynamic Exit strategy automatically to measure accuracy.', 'info');
+            updateStationFooter(Stations.CE);
+            updateStationFooter(Stations.PE);
             renderReplayStep();
         });
         modeManualBtn.addEventListener('click', () => {
@@ -4339,6 +4341,8 @@ function initReplayController() {
             modeManualBtn.classList.add('active');
             modeAutoBtn.classList.remove('active');
             flashExecutionAlert('✍️ MANUAL REPLAY MODE', 'Use BUY MKT and EXIT buttons to practice discretionary trading on replay candles.', 'info');
+            updateStationFooter(Stations.CE);
+            updateStationFooter(Stations.PE);
             renderReplayStep();
         });
     }
@@ -4439,11 +4443,15 @@ function startReplay() {
     C.replayMode = true;
     Replay.fullCandles = [...baseCandles];
 
-    if (Stations.CE && Stations.CE.rawCandles) {
-        Stations.CE.fullCandlesStore = [...Stations.CE.rawCandles];
+    if (Stations.CE) {
+        if (Stations.CE.rawCandles) Stations.CE.fullCandlesStore = [...Stations.CE.rawCandles];
+        Stations.CE.manualTrades = [];
+        Stations.CE.activePosition = null;
     }
-    if (Stations.PE && Stations.PE.rawCandles) {
-        Stations.PE.fullCandlesStore = [...Stations.PE.rawCandles];
+    if (Stations.PE) {
+        if (Stations.PE.rawCandles) Stations.PE.fullCandlesStore = [...Stations.PE.rawCandles];
+        Stations.PE.manualTrades = [];
+        Stations.PE.activePosition = null;
     }
 
     const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');
@@ -4524,7 +4532,9 @@ function exitReplay() {
         const station = Stations && Stations[stKey];
         if (station) {
             station.activePosition = null;
+            station.manualTrades = [];
             updateStationPosHud(station);
+            updateStationFooter(station);
         }
         if (!station || !station.fullCandlesStore || station.fullCandlesStore.length === 0) return;
         station.rawCandles = [...station.fullCandlesStore];
@@ -4783,12 +4793,16 @@ function renderReplayStep() {
                     if (pos.current_sl && lastC.low <= pos.current_sl) {
                         const exitPx = pos.current_sl;
                         const netCash = (exitPx - pos.entry_price) * pos.units;
+                        recordStationManualTrade(station, pos, exitPx, 'STOP_LOSS_HIT', lastC);
                         station.activePosition = null;
+                        updateStationFooter(station);
                         flashExecutionAlert(`🛑 ${station.type} STOP LOSS HIT`, `Exited @ ₹${exitPx.toFixed(1)} (${netCash >= 0 ? '+' : ''}₹${Math.round(netCash).toLocaleString('en-IN')})`, 'danger');
                     } else if (pos.target2 && lastC.high >= pos.target2) {
                         const exitPx = pos.target2;
                         const netCash = (exitPx - pos.entry_price) * pos.units;
+                        recordStationManualTrade(station, pos, exitPx, 'TARGET_2_HIT', lastC);
                         station.activePosition = null;
+                        updateStationFooter(station);
                         flashExecutionAlert(`🎯 ${station.type} TARGET 2 HIT`, `Profit locked @ ₹${exitPx.toFixed(1)} (+₹${Math.round(netCash).toLocaleString('en-IN')})`, 'success');
                     } else if (pos.target1 && lastC.high >= pos.target1 && !pos.be_locked) {
                         pos.be_locked = true;
@@ -5022,6 +5036,36 @@ function closeManualReplayPosition(exitPx, reason = 'MANUAL_EXIT') {
     if (curCandle) evaluateManualReplayTrading(curCandle);
 }
 
+function recordStationManualTrade(station, pos, exitPx, reason, candle) {
+    if (!station || !pos) return;
+    if (!station.manualTrades) station.manualTrades = [];
+    const entryPx = pos.entry_price || pos.entryPrice || 0;
+    const pts = Math.round((exitPx - entryPx) * 100) / 100;
+    const units = pos.units || (station.tradingLots * station.lotUnits) || 65;
+    const grossRs = pts * units;
+    const charges = 55;
+    const netCash = grossRs - charges;
+    const exitTimeStr = candle ? formatReplayTime(candle.time) : '--';
+    const entryTimeStr = pos.entryTime ? (typeof pos.entryTime === 'number' ? formatReplayTime(pos.entryTime) : pos.entryTime) : '--';
+
+    station.manualTrades.push({
+        tradeNum: station.manualTrades.length + 1,
+        symbol: station.symbol,
+        contractType: station.type,
+        side: 'BUY',
+        entryTime: entryTimeStr,
+        entryPrice: entryPx,
+        exitTime: exitTimeStr,
+        exitPrice: exitPx,
+        exitReason: reason,
+        pnlPts: pts,
+        grossRs: grossRs,
+        charges: charges,
+        netCash: netCash,
+        isWin: pts >= 0
+    });
+}
+
 function setBacktestFilter(filter) {
     MasterState.btFilter = filter || 'ALL';
     const btnAll = document.getElementById('bt-filter-all');
@@ -5061,27 +5105,33 @@ function renderBacktestModalContent() {
     const countCeEl = document.getElementById('bt-count-ce');
     const countPeEl = document.getElementById('bt-count-pe');
 
+    const isManualReplay = Replay.active && Replay.mode === 'manual';
+
     // CE trades
-    const ceTrades = (Stations.CE.dynamicExitResult?.trades || []).map(t => ({
+    const ceTradesSource = isManualReplay ? (Stations.CE.manualTrades || []) : (Stations.CE.dynamicExitResult?.trades || []);
+    const ceTrades = ceTradesSource.map((t, idx) => ({
+        tradeNum: idx + 1,
         ...t,
         contractType: 'CE',
         side: 'BUY',
         symbolName: Stations.CE.displayName || Stations.CE.symbol || 'CE',
-        grossRs: (t.pnlPts || 0) * (Stations.CE.lotUnits || 65),
-        charges: 55,
-        netCash: (t.pnlPts || 0) * (Stations.CE.lotUnits || 65) - 55,
+        grossRs: t.grossRs != null ? t.grossRs : (t.pnlPts || 0) * (Stations.CE.lotUnits || 65),
+        charges: t.charges != null ? t.charges : 55,
+        netCash: t.netCash != null ? t.netCash : ((t.pnlPts || 0) * (Stations.CE.lotUnits || 65) - 55),
         isWin: (t.pnlPts || 0) >= 0,
     }));
 
     // PE trades
-    const peTrades = (Stations.PE.dynamicExitResult?.trades || []).map(t => ({
+    const peTradesSource = isManualReplay ? (Stations.PE.manualTrades || []) : (Stations.PE.dynamicExitResult?.trades || []);
+    const peTrades = peTradesSource.map((t, idx) => ({
+        tradeNum: idx + 1,
         ...t,
         contractType: 'PE',
         side: 'BUY',
         symbolName: Stations.PE.displayName || Stations.PE.symbol || 'PE',
-        grossRs: (t.pnlPts || 0) * (Stations.PE.lotUnits || 65),
-        charges: 55,
-        netCash: (t.pnlPts || 0) * (Stations.PE.lotUnits || 65) - 55,
+        grossRs: t.grossRs != null ? t.grossRs : (t.pnlPts || 0) * (Stations.PE.lotUnits || 65),
+        charges: t.charges != null ? t.charges : 55,
+        netCash: t.netCash != null ? t.netCash : ((t.pnlPts || 0) * (Stations.PE.lotUnits || 65) - 55),
         isWin: (t.pnlPts || 0) >= 0,
     }));
 
@@ -5100,12 +5150,13 @@ function renderBacktestModalContent() {
     }
 
     if (symEl) {
-        if (MasterState.btFilter === 'CE') symEl.textContent = `${Stations.CE.displayName || 'CALL (CE)'} — Backtest Scorecard`;
-        else if (MasterState.btFilter === 'PE') symEl.textContent = `${Stations.PE.displayName || 'PUT (PE)'} — Backtest Scorecard`;
-        else symEl.textContent = `${MasterState.underlying} ${MasterState.currentStrike} (CE + PE) — Combined Scorecard`;
+        if (MasterState.btFilter === 'CE') symEl.textContent = `${Stations.CE.displayName || 'CALL (CE)'} — ${isManualReplay ? 'Manual Practice' : 'Backtest'} Scorecard`;
+        else if (MasterState.btFilter === 'PE') symEl.textContent = `${Stations.PE.displayName || 'PUT (PE)'} — ${isManualReplay ? 'Manual Practice' : 'Backtest'} Scorecard`;
+        else symEl.textContent = `${MasterState.underlying} ${MasterState.currentStrike} (CE + PE) — ${isManualReplay ? 'Manual Practice' : 'Combined'} Scorecard`;
     }
 
-    if (subEl) subEl.textContent = `Session: ${MasterState.selectedSessionDate || 'Replay'} | Filter: ${MasterState.btFilter} | Mode: ⚡ Auto-System Dependent`;
+    if (subEl) subEl.textContent = `Session: ${MasterState.selectedSessionDate || 'Replay'} | Filter: ${MasterState.btFilter} | Mode: ${isManualReplay ? '✍️ Discretionary Manual Practice' : '⚡ Auto-System Dependent'}`;
+
 
     const totalTrades = activeTradesList.length;
     const winTrades = activeTradesList.filter(t => t.isWin).length;
@@ -6322,6 +6373,7 @@ const Stations = {
         tradingLots: 1,
         lotUnits: 65,
         activePosition: null,
+        manualTrades: [],
         targetsEnabled: true,
         smfEnabled: true,
         showPrice: false,
@@ -6345,6 +6397,7 @@ const Stations = {
         tradingLots: 1,
         lotUnits: 65,
         activePosition: null,
+        manualTrades: [],
         targetsEnabled: true,
         smfEnabled: true,
         showPrice: false,
@@ -6630,8 +6683,11 @@ function bindStationControls(station) {
                     const pos = station.activePosition;
                     const pts = curPx - (pos.entry_price || pos.entryPrice);
                     const netCash = pts * pos.units;
+                    const lastC = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1] : null;
+                    recordStationManualTrade(station, pos, curPx, 'MANUAL_EXIT', lastC);
                     station.activePosition = null;
                     updateStationPosHud(station);
+                    updateStationFooter(station);
                     flashExecutionAlert(`🏁 ${station.type} MANUAL EXIT`, `Closed @ ₹${curPx.toFixed(1)} (${netCash >= 0 ? '+' : ''}₹${Math.round(netCash).toLocaleString('en-IN')})`, 'success');
                     return;
                 }
@@ -7034,10 +7090,12 @@ function updateStationTopBar(station, agg) {
 }
 
 function updateStationFooter(station) {
+    if (!station) return;
     const prefix = station.type.toLowerCase();
+    const isManualReplay = Replay.active && Replay.mode === 'manual';
     const de = station.dynamicExitResult;
-    const trades = de?.trades || [];
-    const summary = de?.summary || {};
+    const trades = isManualReplay ? (station.manualTrades || []) : (de?.trades || []);
+    const summary = isManualReplay ? {} : (de?.summary || {});
 
     const statTrades = document.getElementById(`${prefix}-stat-trades`);
     const statWinrate = document.getElementById(`${prefix}-stat-winrate`);
