@@ -4478,6 +4478,10 @@ function exitReplay() {
     // Restore full datasets to both parallel stations
     ['CE', 'PE'].forEach(stKey => {
         const station = Stations && Stations[stKey];
+        if (station) {
+            station.activePosition = null;
+            updateStationPosHud(station);
+        }
         if (!station || !station.fullCandlesStore || station.fullCandlesStore.length === 0) return;
         station.rawCandles = [...station.fullCandlesStore];
         const agg = aggregateCandles(station.rawCandles, MasterState.currentTf);
@@ -4726,6 +4730,30 @@ function renderReplayStep() {
                     to: total + 12
                 });
             }
+
+            // Check manual replay trade tracking (SL / Target / Trailing)
+            if (Replay.active && station.activePosition && station.activePosition.isReplayManual) {
+                const pos = station.activePosition;
+                const lastC = agg[agg.length - 1];
+                if (lastC) {
+                    if (pos.current_sl && lastC.low <= pos.current_sl) {
+                        const exitPx = pos.current_sl;
+                        const netCash = (exitPx - pos.entry_price) * pos.units;
+                        station.activePosition = null;
+                        flashExecutionAlert(`🛑 ${station.type} STOP LOSS HIT`, `Exited @ ₹${exitPx.toFixed(1)} (${netCash >= 0 ? '+' : ''}₹${Math.round(netCash).toLocaleString('en-IN')})`, 'danger');
+                    } else if (pos.target2 && lastC.high >= pos.target2) {
+                        const exitPx = pos.target2;
+                        const netCash = (exitPx - pos.entry_price) * pos.units;
+                        station.activePosition = null;
+                        flashExecutionAlert(`🎯 ${station.type} TARGET 2 HIT`, `Profit locked @ ₹${exitPx.toFixed(1)} (+₹${Math.round(netCash).toLocaleString('en-IN')})`, 'success');
+                    } else if (pos.target1 && lastC.high >= pos.target1 && !pos.be_locked) {
+                        pos.be_locked = true;
+                        pos.current_sl = pos.entry_price;
+                        flashExecutionAlert(`🛡️ ${station.type} BREAK-EVEN LOCKED`, `Target 1 hit. SL moved to entry ₹${pos.entry_price.toFixed(1)}`, 'info');
+                    }
+                }
+            }
+            updateStationPosHud(station);
         }
     });
 
@@ -5301,21 +5329,22 @@ function updateTradingUI(state) {
         const sHudValT1 = document.getElementById(`${pfx}-hud-t1`);
         const sHudValT2 = document.getElementById(`${pfx}-hud-t2`);
 
-        const pos = state.active_position;
-        if (pos && station.symbol && pos.symbol === station.symbol) {
+        const pos = (state && state.active_position) || station.activePosition;
+        if (pos && (pos.symbol === station.symbol || pos.isReplayManual)) {
             if (sExitBtn) sExitBtn.classList.remove('hidden');
             if (sPosHud) sPosHud.classList.remove('hidden');
 
             const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
-            if (curPx > 0 && pos.entry_price > 0) {
-                const pts = curPx - pos.entry_price;
-                pos.unrealized_pnl = Math.round(pts * pos.units * 100) / 100;
+            const entryPx = pos.entry_price || pos.entryPrice || 0;
+            if (curPx > 0 && entryPx > 0) {
+                const pts = curPx - entryPx;
+                pos.unrealized_pnl = Math.round(pts * (pos.units || 65) * 100) / 100;
             }
             const pnl = pos.unrealized_pnl || 0.0;
             const sign = pnl >= 0 ? '+' : '';
             if (sPosPnlSub) sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
-            if (sHudValPos) sHudValPos.textContent = `₹${pos.entry_price.toFixed(1)}`;
-            if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || 0).toFixed(1)}`;
+            if (sHudValPos) sHudValPos.textContent = `₹${entryPx.toFixed(1)}`;
+            if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || pos.sl || 0).toFixed(1)}`;
             if (sHudValT1) sHudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
             if (sHudValT2) sHudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
         } else {
@@ -5323,6 +5352,38 @@ function updateTradingUI(state) {
             if (sPosHud) sPosHud.classList.add('hidden');
         }
     });
+}
+
+function updateStationPosHud(station) {
+    if (!station) return;
+    const pfx = station.type.toLowerCase();
+    const sExitBtn = document.getElementById(`${pfx}-btn-exit`);
+    const sPosPnlSub = document.getElementById(`${pfx}-pos-pnl`);
+    const sPosHud = document.getElementById(`${pfx}-pos-hud`);
+    const sHudValPos = document.getElementById(`${pfx}-hud-pos`);
+    const sHudValSl = document.getElementById(`${pfx}-hud-sl`);
+    const sHudValT1 = document.getElementById(`${pfx}-hud-t1`);
+    const sHudValT2 = document.getElementById(`${pfx}-hud-t2`);
+
+    const pos = station.activePosition;
+    if (pos) {
+        if (sExitBtn) sExitBtn.classList.remove('hidden');
+        if (sPosHud) sPosHud.classList.remove('hidden');
+
+        const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : (pos.entry_price || pos.entryPrice || 0);
+        const entryPx = pos.entry_price || pos.entryPrice || 0;
+        const pts = curPx - entryPx;
+        const pnl = pts * (pos.units || 65);
+        const sign = pnl >= 0 ? '+' : '';
+        if (sPosPnlSub) sPosPnlSub.textContent = `${sign}₹${Math.round(pnl)}`;
+        if (sHudValPos) sHudValPos.textContent = `₹${entryPx.toFixed(1)}`;
+        if (sHudValSl) sHudValSl.textContent = `₹${(pos.current_sl || pos.sl || 0).toFixed(1)}`;
+        if (sHudValT1) sHudValT1.textContent = pos.target1 ? `₹${pos.target1.toFixed(1)}` : '——';
+        if (sHudValT2) sHudValT2.textContent = pos.target2 ? `₹${pos.target2.toFixed(1)}` : '——';
+    } else {
+        if (sExitBtn) sExitBtn.classList.add('hidden');
+        if (sPosHud) sPosHud.classList.add('hidden');
+    }
 }
 
 // ── TradingView-Style Interactive Limit Order & Target/SL Canvas Overlay ───────
@@ -6435,6 +6496,50 @@ function bindStationControls(station) {
             if (!station.symbol) return;
             const units = station.tradingLots * station.lotUnits;
             const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
+
+            // Handle Replay Mode locally (no broker orders on historical bars)
+            if (Replay && Replay.active) {
+                if (Replay.mode === 'auto') {
+                    flashExecutionAlert('⚡ AUTO BACKTEST MODE', 'System executes trades automatically on SMF signals. Switch to "✍️ Manual" on the replay dock to place manual orders.', 'info');
+                    return;
+                }
+                if (station.activePosition) {
+                    flashExecutionAlert('⚠️ POSITION ACTIVE', `You already have an open ${station.type} position. Click EXIT to close it first.`, 'warning');
+                    return;
+                }
+                const curCandle = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1] : null;
+                if (!curCandle || curPx <= 0) {
+                    flashExecutionAlert('⚠️ NO PRICE', 'Waiting for replay candle price...', 'warning');
+                    return;
+                }
+
+                const smf = station.smfResult;
+                const curAtr = (smf && smf.atr && smf.atr.length > 0) ? smf.atr[smf.atr.length - 1] : 3.0;
+                const sl = Math.round((curPx - curAtr * 1.5) * 20) / 20;
+                const t1 = Math.round((curPx + Math.max(8.0, curAtr * 1.5)) * 20) / 20;
+                const t2 = Math.round((curPx + curAtr * 3.0) * 20) / 20;
+
+                station.activePosition = {
+                    symbol: station.symbol,
+                    type: station.type,
+                    entry_price: curPx,
+                    entryPrice: curPx,
+                    entryTime: curCandle.time,
+                    lots: station.tradingLots,
+                    units: units,
+                    sl: sl,
+                    current_sl: sl,
+                    target1: t1,
+                    target2: t2,
+                    be_locked: false,
+                    isReplayManual: true
+                };
+
+                updateStationPosHud(station);
+                flashExecutionAlert(`🟢 ${station.type} MANUAL BUY FILLED`, `Bought ${units} qty @ ₹${curPx.toFixed(1)} (SL ₹${sl} | T1 ₹${t1})`, 'success');
+                return;
+            }
+
             try {
                 const res = await fetch('/api/trade/order', {
                     method: 'POST',
@@ -6467,6 +6572,21 @@ function bindStationControls(station) {
     if (exitBtn) {
         exitBtn.addEventListener('click', async () => {
             if (!station.symbol) return;
+            const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
+
+            // Handle Replay Mode locally
+            if (Replay && Replay.active) {
+                if (station.activePosition) {
+                    const pos = station.activePosition;
+                    const pts = curPx - (pos.entry_price || pos.entryPrice);
+                    const netCash = pts * pos.units;
+                    station.activePosition = null;
+                    updateStationPosHud(station);
+                    flashExecutionAlert(`🏁 ${station.type} MANUAL EXIT`, `Closed @ ₹${curPx.toFixed(1)} (${netCash >= 0 ? '+' : ''}₹${Math.round(netCash).toLocaleString('en-IN')})`, 'success');
+                    return;
+                }
+            }
+
             try {
                 const res = await fetch('/api/trade/exit', {
                     method: 'POST',
