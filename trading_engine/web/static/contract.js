@@ -1986,7 +1986,52 @@ function computeSMF(candles) {
             lastBuyBar = -9999;
         }
 
-        // Confirmed trend switch: fires ONLY on true confirmed regime transition
+        // ── Support Reversal Reclaim (SRR) Early Reversal Detection ──────────
+        // When price tests base support and has wide runway (>= 22 pts) to prior session resistance,
+        // trigger an early high-reward SRR BUY entry!
+        let isSRR = false;
+        let srrDipLow = c.low;
+        if (i >= 26 && !inLongPosition) {
+            const d = new Date(c.time * 1000);
+            const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+            const istM = (d.getUTCMinutes() + 30) % 60;
+            const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
+            const inSrrWindow = (cTimeStr >= '09:45' && cTimeStr <= '11:00') || (cTimeStr >= '13:15' && cTimeStr <= '14:30');
+
+            if (inSrrWindow) {
+                let morningBase = Infinity;
+                const baseEnd = Math.min(26, i);
+                for (let k = 5; k < baseEnd; k++) {
+                    if (lows[k] < morningBase) morningBase = lows[k];
+                }
+
+                const startDip = Math.max(0, i - 4);
+                let dip5 = Infinity;
+                for (let k = startDip; k <= i; k++) {
+                    if (lows[k] < dip5) dip5 = lows[k];
+                }
+                srrDipLow = dip5;
+
+                const supCeiling = morningBase + 1.2 * atr[i];
+                const inSupportZone = (dip5 <= supCeiling) && (dip5 >= morningBase - 0.5 * atr[i]);
+
+                let resCeiling = -Infinity;
+                for (let k = 0; k < i; k++) {
+                    if (highs[k] > resCeiling) resCeiling = highs[k];
+                }
+                const runway = resCeiling - c.close;
+                const hasWideRunway = (runway >= Math.max(22.0, 2.2 * atr[i]));
+
+                const prev2High = Math.max(highs[Math.max(0, i - 2)], highs[Math.max(0, i - 1)]);
+                const isReversal = (c.close > c.open) && (c.close > prev2High) && (rsi[i] >= 45.0);
+
+                if (inSupportZone && hasWideRunway && isReversal) {
+                    isSRR = true;
+                }
+            }
+        }
+
+        // Confirmed trend switch: fires on confirmed regime transition OR Support Reversal Reclaim (SRR)
         const isSwitchUp = (currLS === 1 && prevSignal === -1);
         const isSwitchDown = (currLS === -1 && prevSignal === 1);
         prevRegime = currLS;
@@ -1994,7 +2039,7 @@ function computeSMF(candles) {
         if (SMF.showSwitch) {
             const ext = Number((Math.abs(c.close - bMain[i]) / (atr[i] || 1.0)).toFixed(2));
             const priceStr = c.close.toFixed(2);
-            if (isSwitchUp) {
+            if (isSwitchUp || (isSRR && !inLongPosition)) {
                 // Strict 5 trades per day cap
                 if (dailyTradesCount < 5) {
                     dailyTradesCount++;
@@ -2004,9 +2049,17 @@ function computeSMF(candles) {
                     lastBuyBar = i;
 
                     const tradeMetrics = calculateSMFLimitAndTarget(candles, i, atr, bMain, vsma, rsi);
+                    if (isSRR && !isSwitchUp) {
+                        const srrStop = Math.round(Math.max(srrDipLow - 1.5, c.close - 16.0) * 20) / 20;
+                        tradeMetrics.stopLoss = srrStop;
+                        tradeMetrics.risk = Math.max(4.0, c.close - srrStop);
+                        tradeMetrics.target1 = Math.round((c.close + Math.max(7.5, atr[i] * 1.1)) * 20) / 20;
+                        tradeMetrics.target2 = Math.round((c.close + Math.max(16.0, tradeMetrics.risk * 2.2, atr[i] * 2.2)) * 20) / 20;
+                        tradeMetrics.maxTarget = Math.round((c.close + Math.max(26.0, tradeMetrics.risk * 3.2, atr[i] * 3.2)) * 20) / 20;
+                    }
                     activeTradeSignal = tradeMetrics;
                     const limStr = tradeMetrics.limitPrice.toFixed(2);
-                    const label = '▲ BUY';
+                    const label = (isSRR && !isSwitchUp) ? '▲ SRR BUY' : '▲ BUY';
 
                     smfMarkers.push({
                         time: c.time,
@@ -2014,7 +2067,7 @@ function computeSMF(candles) {
                         color: SMF.buyColor, // Opaque vibrant green
                         shape: 'arrowUp',    // Clean directional arrow
                         text: label,
-                        signalType: 'BUY',
+                        signalType: (isSRR && !isSwitchUp) ? 'SRR_BUY' : 'BUY',
                         limitPrice: tradeMetrics.limitPrice,
                         maxLimitCeiling: tradeMetrics.maxLimitCeiling,
                         targetPrice: tradeMetrics.target1,
@@ -2023,7 +2076,7 @@ function computeSMF(candles) {
                         beLockTrigger: tradeMetrics.beLockTrigger,
                         stopLoss: tradeMetrics.stopLoss,
                         isMiddayChop: tradeMetrics.isMiddayChop,
-                        sessionLabel: tradeMetrics.sessionLabel,
+                        sessionLabel: (isSRR && !isSwitchUp) ? 'SUPPORT REVERSAL RECLAIM' : tradeMetrics.sessionLabel,
                         candleLow: c.low,
                         candleClose: c.close,
                         extension: ext,
@@ -2872,17 +2925,61 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
             }
         }
 
-        // 3. Check New Entry on SMF Switch Up
-        if (!activeTrade && isSwitchUp && !dayHalted && dailyTradeCount < 4) {
+        // 3. Check New Entry on SMF Switch Up OR Support Reversal Reclaim (SRR)
+        let isSRRBar = false;
+        let srrDipLowVal = c.low;
+        if (!activeTrade && i >= 26 && !dayHalted && dailyTradeCount < 4) {
+            const inSrrWindow = (cTime >= '09:45' && cTime <= '11:00') || (cTime >= '13:15' && cTime <= '14:30');
+            if (inSrrWindow) {
+                let morningBase = Infinity;
+                const baseEnd = Math.min(26, i);
+                for (let k = 5; k < baseEnd; k++) {
+                    if (candles[k].low < morningBase) morningBase = candles[k].low;
+                }
+                const startDip = Math.max(0, i - 4);
+                let dip5 = Infinity;
+                for (let k = startDip; k <= i; k++) {
+                    if (candles[k].low < dip5) dip5 = candles[k].low;
+                }
+                srrDipLowVal = dip5;
+                const supCeiling = morningBase + 1.2 * atr[i];
+                const inSupportZone = (dip5 <= supCeiling) && (dip5 >= morningBase - 0.5 * atr[i]);
+
+                let resCeiling = -Infinity;
+                for (let k = 0; k < i; k++) {
+                    if (candles[k].high > resCeiling) resCeiling = candles[k].high;
+                }
+                const runway = resCeiling - c.close;
+                const hasWideRunway = (runway >= Math.max(22.0, 2.2 * atr[i]));
+
+                const prev2High = Math.max(candles[Math.max(0, i - 2)].high, candles[Math.max(0, i - 1)].high);
+                const isReversal = (c.close > c.open) && (c.close > prev2High) && (rsi[i] >= 45.0);
+
+                if (inSupportZone && hasWideRunway && isReversal) {
+                    isSRRBar = true;
+                }
+            }
+        }
+
+        if (!activeTrade && (isSwitchUp || isSRRBar) && !dayHalted && dailyTradeCount < 4) {
             const inTimeWindow = (cTime >= '09:25' && cTime <= '15:15');
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
-            if (inTimeWindow && (!needsIgnition || isGammaIgnition(i))) {
+            if (inTimeWindow && (isSRRBar || !needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
-                const rawStop = bMain[i] - 0.35 * atr[i];
-                const rawR = entryP - rawStop;
-                const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
-                const initStop = roundTick(entryP - clampedR);
-                const R = roundTick(entryP - initStop);
+                let initStop, R;
+                if (isSRRBar && !isSwitchUp) {
+                    const rawStop = roundTick(srrDipLowVal - 1.5);
+                    const rawR = entryP - rawStop;
+                    const clampedR = Math.min(Math.max(rawR, 4.0), 16.0);
+                    initStop = roundTick(entryP - clampedR);
+                    R = roundTick(entryP - initStop);
+                } else {
+                    const rawStop = bMain[i] - 0.35 * atr[i];
+                    const rawR = entryP - rawStop;
+                    const clampedR = Math.min(Math.max(rawR, 1.5), 14.0, 0.10 * entryP);
+                    initStop = roundTick(entryP - clampedR);
+                    R = roundTick(entryP - initStop);
+                }
 
                 const minT1Pts = Math.max(6.5, atr[i] * 1.1);
                 const t1 = roundTick(entryP + minT1Pts);
@@ -2915,19 +3012,23 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     p1Booked: false,
                     realizedPts: 0.0,
                     isReentry: false,
-                    reentryType: 'NONE',
+                    reentryType: isSRRBar && !isSwitchUp ? 'SRR_REVERSAL' : 'NONE',
                     legReentries: 0,
                 };
                 dailyTradeCount++;
                 reentryWatcher = null;
+
+                const entryLabel = (isSRRBar && !isSwitchUp)
+                    ? `🔄 SRR BUY ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]`
+                    : `▲ BUY ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]`;
 
                 markers.push({
                     time: c.time,
                     position: 'belowBar',
                     color: '#00f2a9',
                     shape: 'arrowUp',
-                    text: `▲ BUY ₹${entryP.toFixed(1)} [T1: ${t1.toFixed(1)}]`,
-                    signalType: 'DE_BUY',
+                    text: entryLabel,
+                    signalType: isSRRBar && !isSwitchUp ? 'SRR_BUY' : 'DE_BUY',
                     entryPrice: entryP,
                     R: R,
                 });

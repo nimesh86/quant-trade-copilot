@@ -304,6 +304,44 @@ def is_gamma_ignition_setup(i: int, c_open: float, c_high: float, c_low: float, 
 
     return True
 
+def is_srr_setup(b: int, c_open: float, c_high: float, c_low: float, c_close: float, c_time: str, cdata: Dict) -> Tuple[bool, float]:
+    """
+    Support Reversal Reclaim (SRR):
+    Captures high-reward entries when price bounces off key base support
+    with wide runway (>= 22 pts) to overhead resistance.
+    """
+    if b < 26: return False, 0.0
+    in_srr_window = ("09:45" <= c_time <= "11:00") or ("13:15" <= c_time <= "14:30")
+    if not in_srr_window: return False, 0.0
+
+    lows = cdata["lows"]
+    highs = cdata["highs"]
+    atr = cdata["ind"]["atr"][b]
+    rsi = cdata["ind"]["rsi"][b]
+
+    # Morning base low
+    morning_base = np.min(lows[5:min(26, b)])
+    # Dip in last 5 bars
+    start_dip = max(0, b - 4)
+    dip_5 = np.min(lows[start_dip:b + 1])
+    sup_ceiling = morning_base + 1.2 * atr
+
+    in_support_zone = (dip_5 <= sup_ceiling) and (dip_5 >= morning_base - 0.5 * atr)
+    if not in_support_zone: return False, 0.0
+
+    res_ceiling = np.max(highs[:b])
+    runway = res_ceiling - c_close
+    has_wide_runway = (runway >= max(22.0, 2.2 * atr))
+    if not has_wide_runway: return False, 0.0
+
+    prev_2_high = max(highs[max(0, b - 2)], highs[max(0, b - 1)])
+    is_reversal = (c_close > c_open) and (c_close > prev_2_high) and (rsi >= 45.0)
+
+    if is_reversal:
+        return True, float(dip_5)
+    return False, 0.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. TREND HEALTH SCORE (THS, 0 TO 100)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -834,29 +872,39 @@ def run_high_conviction_backtest(
                         break
                 if reentered: continue
 
-                # Check New High-Conviction Entries across candidate contracts
+                # Check New High-Conviction Entries across candidate contracts (SMF Switch Up OR SRR)
                 candidates = []
                 for sym, cdata in contract_data.items():
                     if b >= cdata["length"]: continue
-                    if cdata["sw_up"][b]:
-                        c_close = cdata["closes"][b]
-                        c_open = cdata["opens"][b]
-                        c_high = cdata["highs"][b]
-                        c_low = cdata["lows"][b]
-                        if not (MIN_PREMIUM <= c_close <= MAX_PREMIUM): continue
+                    c_close = cdata["closes"][b]
+                    c_open = cdata["opens"][b]
+                    c_high = cdata["highs"][b]
+                    c_low = cdata["lows"][b]
+                    if not (MIN_PREMIUM <= c_close <= MAX_PREMIUM): continue
 
-                        # Pillar 4: High-Conviction Gamma Ignition Filter
-                        if is_gamma_ignition_setup(b, c_open, c_high, c_low, c_close, cdata["ind"]):
-                            candidates.append((sym, cdata["ind"]["rvol"][b], cdata["ind"]["atr"][b]))
+                    is_srr, dip_val = is_srr_setup(b, c_open, c_high, c_low, c_close, c_time, cdata)
+                    is_smf = cdata["sw_up"][b] and is_gamma_ignition_setup(b, c_open, c_high, c_low, c_close, cdata["ind"])
+
+                    if is_srr:
+                        candidates.append((sym, cdata["ind"]["rvol"][b], cdata["ind"]["atr"][b], "SRR", dip_val))
+                    elif is_smf:
+                        candidates.append((sym, cdata["ind"]["rvol"][b], cdata["ind"]["atr"][b], "SMF", 0.0))
 
                 if candidates:
-                    # Pick single best contract by highest volume surge (RVOL)
-                    candidates.sort(key=lambda x: x[1], reverse=True)
-                    best_sym = candidates[0][0]
+                    # Prefer SRR if present (early ground floor entry), else sort by volume surge RVOL
+                    candidates.sort(key=lambda x: (1 if x[3] == "SRR" else 0, x[1]), reverse=True)
+                    best_sym, _, _, entry_type, dip_val = candidates[0]
                     cdata = contract_data[best_sym]
 
                     entry = round_tick(cdata["closes"][b] + slip(cdata["closes"][b]))
-                    init_stop, r_val = calculate_initial_stop_and_r(entry, cdata["ind"]["b_main"][b], cdata["ind"]["atr"][b])
+                    if entry_type == "SRR":
+                        raw_stop = round_tick(dip_val - 1.5)
+                        raw_r = entry - raw_stop
+                        clamped_r = min(max(raw_r, 4.0), 16.0)
+                        init_stop = round_tick(entry - clamped_r)
+                        r_val = round_tick(entry - init_stop)
+                    else:
+                        init_stop, r_val = calculate_initial_stop_and_r(entry, cdata["ind"]["b_main"][b], cdata["ind"]["atr"][b])
                     cat_stop = round_tick(entry - 2.0 * r_val)
 
                     engine.daily_trade_count += 1
