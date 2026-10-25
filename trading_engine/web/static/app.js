@@ -1224,14 +1224,15 @@ function renderOptionChain(chain, atmStrike) {
         const tr = document.createElement('tr');
         if (row.is_atm) tr.className = 'atm-row';
 
+        const strikeInt = Math.round(row.strike);
         tr.innerHTML = `
-            <td class="val-green">${row.call_ltp.toFixed(1)}</td>
+            <td class="val-green" style="cursor: pointer;" onclick="location.href='/contract?symbol=NIFTY26OCT${strikeInt}CE'" title="Open ${strikeInt} CE Chart">${row.call_ltp.toFixed(1)}</td>
             <td>${row.call_iv}%</td>
             <td>${row.call_oi.toLocaleString()}</td>
-            <td class="strike-cell">${row.strike} ${row.is_atm ? '★' : ''}</td>
+            <td class="strike-cell" style="cursor: pointer;" onclick="location.href='/contract?symbol=NIFTY26OCT${strikeInt}CE'" title="Chart ${strikeInt} CE/PE Pair">${row.strike} ${row.is_atm ? '★' : ''}</td>
             <td>${row.put_oi.toLocaleString()}</td>
             <td>${row.put_iv}%</td>
-            <td class="val-red">${row.put_ltp.toFixed(1)}</td>
+            <td class="val-red" style="cursor: pointer;" onclick="location.href='/contract?symbol=NIFTY26OCT${strikeInt}PE'" title="Open ${strikeInt} PE Chart">${row.put_ltp.toFixed(1)}</td>
         `;
         tbody.appendChild(tr);
     });

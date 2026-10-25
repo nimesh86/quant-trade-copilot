@@ -38,9 +38,9 @@
 
     <!-- Quick Status Badge, Nav to Contract & KeyVault Trigger -->
     <div class="header-actions-group">
-      <a href="/static/contract.html" id="btn-nav-contract" class="vault-header-btn nav-btn" title="Open Contract Analysis View (⚡)">
-        <span>📊</span>
-        <span class="vault-btn-text">Contract</span>
+      <a href="/contract" id="btn-nav-contract" class="vault-header-btn nav-btn" title="Open Option Contract Analysis & Dual Chart (⚡)" style="background: rgba(0, 200, 255, 0.18); border: 1px solid rgba(0, 200, 255, 0.45); color: #00e5ff; font-weight: 700;">
+        <span>🥞</span>
+        <span class="vault-btn-text" style="display: inline !important; font-size: 11px;">Contract</span>
       </a>
       <button id="btn-open-vault" class="vault-header-btn" title="Key Vault Settings" onclick="openVaultModal()">
         <span>🔐</span>
@@ -70,6 +70,9 @@
     <button class="mode-btn" id="mode-btn-live" data-mode="live" onclick="selectMode('live')">
       <span>🔴</span> Live Broker
     </button>
+    <a href="/contract" class="mode-btn" id="mode-btn-contract" title="Open Dual ATM Strike & Option Charts" style="text-decoration: none; color: #00f2a9; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(0, 242, 169, 0.4); background: rgba(0, 242, 169, 0.12); font-weight: 700;">
+      <span>🥞</span> Dual Option Chart
+    </a>
   </nav>
 
   <!-- ── Simulation Configuration Modal Dialog (Instant Feedback) ──────── -->
@@ -257,6 +260,7 @@
           <select id="chart-session-date-select" class="sim-select" style="padding: 2px 8px; font-size: 0.72rem; height: 24px; border-color: rgba(0, 210, 255, 0.35); background: rgba(13, 20, 36, 0.9); color: #00d2ff; border-radius: 4px; cursor: pointer;" onchange="syncDateInputs(this.value)" title="Switch trading session date">
             <option value="">Date…</option>
           </select>
+          <a href="/contract" class="chart-ctrl-btn" style="text-decoration:none; padding: 2px 8px; height: 24px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(0, 242, 169, 0.4); background: rgba(0, 242, 169, 0.15); color: #00f2a9; border-radius: 4px; font-weight: 700; white-space: nowrap;" title="Open ATM Strike Pair & Dual Split Option Chart">🥞 Option Dual</a>
         </div>
         <div class="chart-legend">
           <!-- Smart Money Flow Cloud Toggle Button (Icon Only) -->
@@ -571,6 +575,6 @@
   <script src="/static/keyvault_modal.js?v=20261025_0835"></script>
 
   <!-- Client Logic with Cache-Busting -->
-  <script src="/static/app.js?v=8.0"></script>
+  <script src="/static/app.js?v=8.1"></script>
 </body>
 </html>
