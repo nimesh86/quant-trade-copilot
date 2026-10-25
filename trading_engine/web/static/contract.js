@@ -4272,6 +4272,7 @@ const Replay = {
     manualTrades: [], // closed manual trades
     lastNotifiedTradeCount: 0,
 };
+window.Replay = Replay;
 
 function initReplayController() {
     const toggleBtn = document.getElementById('btn-master-replay') || document.getElementById('btn-replay-toggle');

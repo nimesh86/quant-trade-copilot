@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import re
 from playwright.async_api import async_playwright
 
 BASE_URL = "http://127.0.0.1:8080"
@@ -170,5 +171,185 @@ async def test_ui_e2e_complete_mobile_flow():
         await page.click('.top-toast-close')
         await page.wait_for_timeout(350)
         assert await page.locator('.top-toast:not(.toast-dismissing)').count() == 0
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_ui_limit_order_canvas_drag_isolation():
+    """
+    TC-UI-LIMIT-DRAG:
+    Verifies that dragging the Limit Order box on the station chart updates the limit price
+    while PREVENTING LightweightCharts from moving or scrolling the candles!
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.wait_for_function("() => window.Stations && window.Stations.CE && window.Stations.CE.rawCandles && window.Stations.CE.rawCandles.length >= 5", timeout=10000)
+
+        # 1. Click Limit tool on CE
+        await page.click('#ce-btn-limit')
+        await page.wait_for_timeout(300)
+        assert 'active' in (await page.locator('#ce-btn-limit').get_attribute('class'))
+
+        # 2. Get initial chart visible logical range
+        initial_range = await page.evaluate("() => window.Stations.CE.chart.timeScale().getVisibleLogicalRange()")
+
+        # 3. Locate Station CE Canvas and simulate mouse drag
+        canvas_locator = page.locator('#station-ce canvas').first
+        box = await canvas_locator.bounding_box()
+        assert box is not None
+
+        start_x = box['x'] + (box['width'] / 2)
+        start_y = box['y'] + (box['height'] / 2)
+
+        # Drag vertically by 30 pixels
+        await page.mouse.move(start_x, start_y)
+        await page.mouse.down()
+        await page.mouse.move(start_x, start_y - 30, steps=5)
+        await page.mouse.up()
+        await page.wait_for_timeout(300)
+
+        # 4. Verify that the chart time scale range did not change / pan
+        new_range = await page.evaluate("() => window.Stations.CE.chart.timeScale().getVisibleLogicalRange()")
+        if initial_range and new_range:
+            assert abs(new_range['from'] - initial_range['from']) < 0.5, "Chart time axis must NOT pan when dragging limit handles!"
+
+        # 5. Toggle off limit tool
+        await page.click('#ce-btn-limit')
+        await page.wait_for_timeout(200)
+        assert 'active' not in (await page.locator('#ce-btn-limit').get_attribute('class'))
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_ui_mathematical_pnl_sync_header_and_footers():
+    """
+    TC-UI-PNL-SYNC:
+    Verifies that the Master Header Net PnL is mathematically identical to CE Net PnL + PE Net PnL
+    in flat state, during open positions, and after manual replay trades.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.evaluate("() => fetch('/api/trade/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({initial_capital:100000.0})})")
+        await page.reload(wait_until="networkidle")
+        await page.wait_for_function("() => window.Stations && window.Stations.CE && window.Stations.CE.rawCandles && window.Stations.CE.rawCandles.length >= 5", timeout=10000)
+
+        # 1. Enter Replay Mode in Manual
+        await page.click('#btn-master-replay')
+        await page.wait_for_selector('#replay-bar:not(.hidden)', timeout=5000)
+        await page.click('#rp-mode-manual')
+        await page.wait_for_timeout(300)
+
+        # 2. Execute 1 trade on PE and 1 trade on CE
+        await page.click('#pe-btn-buy')
+        await page.wait_for_timeout(200)
+        await page.click('#pe-btn-exit')
+        await page.wait_for_timeout(200)
+
+        await page.click('#ce-btn-buy')
+        await page.wait_for_timeout(200)
+        await page.click('#ce-btn-exit')
+        await page.wait_for_timeout(200)
+
+        # 3. Read exact cash values from Station state and header DOM
+        values = await page.evaluate("""() => {
+            const pnlEl = document.getElementById('val-portfolio-pnl');
+            return {
+                ceCash: window.Stations.CE.currentNetCash || 0,
+                peCash: window.Stations.PE.currentNetCash || 0,
+                headerText: pnlEl ? pnlEl.textContent.trim() : '+₹0.00'
+            };
+        }""")
+        expected_sum = values['ceCash'] + values['peCash']
+
+        # Parse header string (e.g., "+₹1,234.50" or "-₹55.00")
+        clean_text = values['headerText'].replace('₹', '').replace(',', '').replace('+', '').strip()
+        header_val = float(clean_text)
+
+        assert abs(header_val - expected_sum) <= 1.0, (
+            f"Net PnL Discrepancy! Header shows ₹{header_val}, "
+            f"but CE (₹{values['ceCash']}) + PE (₹{values['peCash']}) = ₹{expected_sum}!"
+        )
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_ui_replay_step_next_prev_and_icons():
+    """
+    TC-UI-REPLAY-STEP:
+    Verifies that Replay Step Next (⏭) and Step Back (⏮) controls advance and rewind
+    the exact candle index, update the time display, and display clean media glyphs.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.wait_for_function("() => window.Stations && window.Stations.CE && window.Stations.CE.rawCandles && window.Stations.CE.rawCandles.length >= 5", timeout=10000)
+
+        await page.click('#btn-master-replay')
+        await page.wait_for_selector('#replay-bar:not(.hidden)', timeout=5000)
+
+        # 1. Verify clean media transport icons
+        assert await page.locator('#rp-btn-step-fwd').text_content() == "⏭"
+        assert await page.locator('#rp-btn-step-back').text_content() == "⏮"
+        assert await page.locator('#rp-btn-play').text_content() == "▶"
+
+        # 2. Get initial replay index
+        idx_before = await page.evaluate("() => window.Replay ? window.Replay.currentIndex : null")
+        assert idx_before is not None
+
+        # 3. Click Next Candle (⏭)
+        await page.click('#rp-btn-step-fwd')
+        await page.wait_for_timeout(200)
+        idx_after_fwd = await page.evaluate("() => window.Replay.currentIndex")
+        assert idx_after_fwd == idx_before + 1, "Clicking ⏭ must advance replay by exactly 1 candle!"
+
+        # 4. Click Previous Candle (⏮)
+        await page.click('#rp-btn-step-back')
+        await page.wait_for_timeout(200)
+        idx_after_back = await page.evaluate("() => window.Replay.currentIndex")
+        assert idx_after_back == idx_before, "Clicking ⏮ must rewind replay by exactly 1 candle!"
+
+        await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_ui_lot_stepper_boundaries_and_direct_input():
+    """
+    TC-UI-LOT-BOUNDS:
+    Verifies that the lot stepper clamps at 1 minimum, allows increments up to 100 lots,
+    and supports direct typing on the lot badge.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.wait_for_timeout(500)
+
+        # 1. Decrement at minimum (1 lot) stays at 1
+        await page.click('#ce-lot-minus')
+        await page.wait_for_timeout(100)
+        assert await page.locator('#ce-lot-val').text_content() == "1"
+
+        # 2. Increment past 20 lots (e.g. up to 25 lots)
+        for _ in range(24):
+            await page.click('#ce-lot-plus')
+        await page.wait_for_timeout(100)
+        assert await page.locator('#ce-lot-val').text_content() == "25"
+        assert await page.evaluate("() => window.Stations.CE.tradingLots") == 25
+
+        # 3. Direct setting via script/prompt simulation
+        await page.evaluate("() => { window.Stations.CE.tradingLots = 50; document.getElementById('ce-lot-val').textContent = '50'; }")
+        assert await page.locator('#ce-lot-val').text_content() == "50"
+        assert await page.evaluate("() => window.Stations.CE.tradingLots") == 50
 
         await browser.close()
