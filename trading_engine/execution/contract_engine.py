@@ -95,7 +95,10 @@ class ContractTradingEngine:
         lot_size = self.get_index_lot_size(symbol)
         units = lots * lot_size
         
-        market_px = float(current_market_price or self.current_price or 0.0)
+        try:
+            market_px = float(current_market_price or self.current_price or 0.0)
+        except (ValueError, TypeError):
+            return {"status": "error", "message": "Invalid price format."}
         
         if order_type.upper() == "LIMIT":
             if not limit_price or limit_price <= 0:

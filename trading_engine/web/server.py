@@ -1129,7 +1129,7 @@ async def place_contract_order(payload: Dict[str, Any] = Body(...)):
     
     side = payload.get("side", "BUY")
     order_type = payload.get("order_type", "MARKET")
-    lots = int(payload.get("lots") or (payload.get("quantity", 65) // 65) or 1)
+    lots = int(payload.get("lots") or 1)
     limit_price = payload.get("limit_price")
     sl = payload.get("sl")
     target1 = payload.get("target1")

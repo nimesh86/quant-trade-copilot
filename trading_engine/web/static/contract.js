@@ -6712,6 +6712,28 @@ function bindStationControls(station) {
         });
     }
 
+    const limitBtn = document.getElementById(`${pfx}-btn-limit`);
+    if (limitBtn) {
+        limitBtn.addEventListener('click', () => {
+            if (!station.symbol) {
+                flashExecutionAlert('⚠️ NO CONTRACT', 'Please select an option contract from the chain first.', 'warning');
+                return;
+            }
+            C.limitTool.active = !C.limitTool.active;
+            limitBtn.classList.toggle('active', C.limitTool.active);
+            if (C.limitTool.active) {
+                const curPx = (station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 100.0);
+                C.limitTool.limitPrice = Math.round(curPx * 20) / 20;
+                C.limitTool.targetPrice = Math.round((curPx + Math.max(6.0, curPx * 0.08)) * 20) / 20;
+                C.limitTool.slPrice = Math.round((curPx - Math.max(4.0, curPx * 0.05)) * 20) / 20;
+                flashExecutionAlert('📐 LIMIT TOOL ACTIVE', `Drag the Limit, Target, and SL lines directly on the ${station.type} chart.`, 'highlight');
+            } else {
+                flashExecutionAlert('📐 LIMIT TOOL CLOSED', 'Interactive order box hidden.', 'info');
+            }
+            renderStationSMFCanvas(station);
+        });
+    }
+
     // 🎛️ Single Indicators Popover Trigger
     const btnIndicators = document.getElementById(`${pfx}-btn-indicators`);
     const indicatorsPanel = document.getElementById(`${pfx}-indicators-panel`);
@@ -6941,6 +6963,10 @@ async function loadStrikePair(strike, optExpiry, optDate) {
     Stations.CE.displayName = ceContract.display_name || `${strike} CE`;
     Stations.PE.symbol = peContract.symbol;
     Stations.PE.displayName = peContract.display_name || `${strike} PE`;
+
+    Stations.CE.lotUnits = getLotSizeForSymbol(Stations.CE.symbol || MasterState.underlying);
+    Stations.PE.lotUnits = getLotSizeForSymbol(Stations.PE.symbol || MasterState.underlying);
+    C.lotUnits = Stations.CE.lotUnits;
 
     C.symbol = Stations.CE.symbol;
     C.displayName = Stations.CE.displayName;
