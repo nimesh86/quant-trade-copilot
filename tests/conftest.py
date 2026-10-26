@@ -19,7 +19,7 @@ def client():
 @pytest.fixture
 def clean_engine():
     """Resets the contract execution engine to a clean initial state before each test."""
-    contract_engine.reset_account(capital=100000.0)
+    contract_engine.reset_account(capital=10000000.0)
     contract_engine.is_kill_switch_active = False
     contract_engine.kill_switch_triggered_at = None
     contract_engine.active_positions.clear()

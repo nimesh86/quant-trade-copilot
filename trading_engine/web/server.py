@@ -1114,7 +1114,9 @@ async def get_contract_trade_state(symbol: Optional[str] = None):
         entry = cache.get(sym) or cache.get(sym.upper())
         if entry and entry.get("price"):
             contract_engine.update_price_tick(sym, float(entry["price"]))
-    return contract_engine.get_state()
+    state = contract_engine.get_state()
+    state["position"] = state.get("active_position")
+    return state
 
 
 @app.post("/api/trade/order")
@@ -1178,6 +1180,7 @@ async def cancel_contract_pending_orders(payload: Dict[str, Any] = Body(default=
 async def modify_contract_levels(payload: Dict[str, Any] = Body(...)):
     """Modifies SL, Target, Limit price, or Trailing mode on the fly (e.g. from chart drag)."""
     res = contract_engine.modify_active_levels(
+        symbol=payload.get("symbol"),
         sl=payload.get("sl"),
         target1=payload.get("target1"),
         target2=payload.get("target2"),

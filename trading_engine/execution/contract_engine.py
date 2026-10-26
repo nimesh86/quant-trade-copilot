@@ -217,6 +217,7 @@ class ContractTradingEngine:
 
     def modify_active_levels(
         self,
+        symbol: Optional[str] = None,
         sl: Optional[float] = None,
         target1: Optional[float] = None,
         target2: Optional[float] = None,
@@ -224,32 +225,48 @@ class ContractTradingEngine:
         trailing_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """Modifies SL, Target, or Limit levels on the fly (e.g. from chart drag)."""
-        if self.active_position:
+        target_pos = None
+        if symbol and symbol in self.active_positions:
+            target_pos = self.active_positions[symbol]
+        elif symbol and self.active_position and self.active_position.get("symbol") == symbol:
+            target_pos = self.active_position
+        elif not symbol and self.active_position:
+            target_pos = self.active_position
+        elif self.active_positions:
+            target_pos = next(iter(self.active_positions.values()))
+
+        if target_pos:
             if sl is not None:
-                self.active_position["current_sl"] = round(float(sl), 2)
-                self.active_position["sl"] = round(float(sl), 2)
+                target_pos["current_sl"] = round(float(sl), 2)
+                target_pos["sl"] = round(float(sl), 2)
             if target1 is not None:
-                self.active_position["target1"] = round(float(target1), 2)
+                target_pos["target1"] = round(float(target1), 2)
             if target2 is not None:
-                self.active_position["target2"] = round(float(target2), 2)
+                target_pos["target2"] = round(float(target2), 2)
             if trailing_mode is not None:
-                self.active_position["trailing_mode"] = trailing_mode
+                target_pos["trailing_mode"] = trailing_mode
+            if self.active_position and (not symbol or self.active_position.get("symbol") == target_pos.get("symbol")):
+                self.active_position = target_pos
             self.save_state()
-            return {"status": "success", "action": "LEVELS_UPDATED", "position": self.active_position}
+            return {"status": "success", "action": "LEVELS_UPDATED", "position": target_pos}
 
         # If no active position, check if there's a pending order to modify
         if self.pending_orders:
-            order = self.pending_orders[-1]
+            target_order = None
+            if symbol:
+                target_order = next((o for o in reversed(self.pending_orders) if o.get("symbol") == symbol), None)
+            if not target_order:
+                target_order = self.pending_orders[-1]
             if limit_price is not None:
-                order["limit_price"] = round(float(limit_price), 2)
+                target_order["limit_price"] = round(float(limit_price), 2)
             if sl is not None:
-                order["sl"] = round(float(sl), 2)
+                target_order["sl"] = round(float(sl), 2)
             if target1 is not None:
-                order["target1"] = round(float(target1), 2)
+                target_order["target1"] = round(float(target1), 2)
             if target2 is not None:
-                order["target2"] = round(float(target2), 2)
+                target_order["target2"] = round(float(target2), 2)
             self.save_state()
-            return {"status": "success", "action": "PENDING_ORDER_MODIFIED", "order": order}
+            return {"status": "success", "action": "PENDING_ORDER_MODIFIED", "order": target_order}
 
         return {"status": "error", "message": "No active position or pending order to modify."}
 
@@ -435,6 +452,7 @@ class ContractTradingEngine:
             "unrealized_pnl": round(unrealized_pnl, 2),
             "total_day_pnl": total_day_pnl,
             "active_position": self.active_position,
+            "position": self.active_position,
             "active_positions": self.active_positions,
             "pending_orders": self.pending_orders,
             "is_kill_switch_active": self.is_kill_switch_active,
