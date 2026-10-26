@@ -588,7 +588,7 @@ async function initExpirySelector() {
     if (!headerSel && !ocSel) return;
 
     try {
-        const und = MasterState.currentUnderlying || C.underlying || 'NIFTY';
+        const und = MasterState.underlying || C.underlying || 'NIFTY';
         const res = await fetch(`/api/contracts/expiries?underlying=${encodeURIComponent(und)}`);
         const data = await res.json();
         const expiries = data.expiries || [];
@@ -730,19 +730,30 @@ function initOptionChain() {
     const undSel = document.getElementById('oc-underlying-select');
     if (undSel) {
         undSel.addEventListener('change', async (e) => {
-            const masterSel = document.getElementById('master-underlying-select');
-            if (masterSel) masterSel.value = e.target.value;
-            C.underlying = e.target.value;
-            MasterState.underlying = e.target.value;
-            MasterState.strikeStep = (e.target.value === 'NIFTY') ? 50 : 100;
-            if (['FINNIFTY', 'MIDCPNIFTY'].includes(e.target.value)) MasterState.strikeStep = 25;
-            C.selectedExpiry = null;
-            MasterState.selectedExpiry = null;
-            await initExpirySelector();
-            await fetchOptionChain();
+            await selectUnderlying(e.target.value);
         });
     }
 }
+
+async function selectUnderlying(und) {
+    if (!und) return;
+    und = und.toUpperCase();
+    MasterState.underlying = und;
+    C.underlying = und;
+    MasterState.strikeStep = (und === 'NIFTY') ? 50 : 100;
+    if (['FINNIFTY', 'MIDCPNIFTY'].includes(und)) MasterState.strikeStep = 25;
+
+    const masterSel = document.getElementById('master-underlying-select');
+    if (masterSel) masterSel.value = und;
+    const ocSel = document.getElementById('oc-underlying-select');
+    if (ocSel) ocSel.value = und;
+
+    C.selectedExpiry = null;
+    MasterState.selectedExpiry = null;
+    await initExpirySelector();
+    await fetchOptionChain();
+}
+window.selectUnderlying = selectUnderlying;
 
 async function fetchOptionChain() {
     const tbody = document.getElementById('oc-tbody');
@@ -755,6 +766,14 @@ async function fetchOptionChain() {
         const expiryParam = C.selectedExpiry ? `&expiry=${encodeURIComponent(C.selectedExpiry)}` : '';
         const res = await fetch(`/api/contracts/option_chain?underlying=${encodeURIComponent(C.underlying)}${expiryParam}`);
         const data = await res.json();
+
+        // Discard stale responses if underlying changed while in-flight
+        const activeUnd = MasterState.underlying || C.underlying;
+        if (data.underlying && activeUnd && data.underlying.toUpperCase() !== activeUnd.toUpperCase()) {
+            console.warn(`Ignoring stale option chain response for ${data.underlying}, current is ${activeUnd}`);
+            return;
+        }
+
         C.optionChainData = data;
 
         // Update spot display
@@ -6932,16 +6951,7 @@ function bindMasterHeaderControls() {
     const undSelect = document.getElementById('master-underlying-select');
     if (undSelect) {
         undSelect.addEventListener('change', async (e) => {
-            const ocSel = document.getElementById('oc-underlying-select');
-            if (ocSel) ocSel.value = e.target.value;
-            MasterState.underlying = e.target.value;
-            C.underlying = e.target.value;
-            MasterState.strikeStep = (MasterState.underlying === 'NIFTY') ? 50 : 100;
-            if (['FINNIFTY', 'MIDCPNIFTY'].includes(MasterState.underlying)) MasterState.strikeStep = 25;
-            C.selectedExpiry = null;
-            MasterState.selectedExpiry = null;
-            await initExpirySelector();
-            await fetchOptionChain();
+            await selectUnderlying(e.target.value);
         });
     }
 
@@ -8269,6 +8279,7 @@ function disconnectStationWS(station) {
 // ─────────────────────────────────────────────────────────────────────────────
 window.Stations = Stations;
 window.MasterState = MasterState;
+window.C = C;
 window.loadStrikePair = loadStrikePair;
 window.stepStrike = stepStrike;
 window.executeStationLimitOrder = executeStationLimitOrder;
