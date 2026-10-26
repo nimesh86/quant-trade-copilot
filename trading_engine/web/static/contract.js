@@ -555,12 +555,8 @@ async function initSessionDateSelector() {
             sel.appendChild(opt);
         });
 
-        // If today is a weekend or market is closed and we have past dates, default to most recent trading date
+        // Default to live session
         let initialDate = 'today';
-        if ((isWeekend || !isMarketHours) && dates.length > 0) {
-            initialDate = dates[0];
-        }
-
         sel.value = initialDate;
         C.selectedSessionDate = initialDate;
         MasterState.selectedSessionDate = initialDate;
@@ -7117,7 +7113,8 @@ async function loadStrikePair(strike, optExpiry, optDate) {
         loadStationCandles(Stations.PE, peContract, date)
     ]);
 
-    if (date === 'today') {
+    const isLiveFeed = (date === 'today' || !Replay || !Replay.active);
+    if (isLiveFeed) {
         connectStationWS(Stations.CE);
         connectStationWS(Stations.PE);
     }
@@ -8173,12 +8170,38 @@ function connectStationWS(station) {
         try {
             const data = JSON.parse(event.data);
             if (data.type === 'CONTRACT_TICK' && data.ltp != null) {
+                const ltp = Number(data.ltp);
+                station.ltp = ltp;
                 const pfx = station.type.toLowerCase();
                 const ltpEl = document.getElementById(`${pfx}-ltp`);
-                if (ltpEl) ltpEl.textContent = `₹${data.ltp.toFixed(2)}`;
+                if (ltpEl) {
+                    ltpEl.textContent = `₹${ltp.toFixed(2)}`;
+                    ltpEl.classList.remove('tick-flash-up', 'tick-flash-down');
+                    void ltpEl.offsetWidth; // trigger reflow
+                    if (station.prevLtp != null && ltp > station.prevLtp) {
+                        ltpEl.classList.add('tick-flash-up');
+                    } else if (station.prevLtp != null && ltp < station.prevLtp) {
+                        ltpEl.classList.add('tick-flash-down');
+                    }
+                    station.prevLtp = ltp;
+                }
+
+                // Update station % change
+                if (station.rawCandles && station.rawCandles.length > 0) {
+                    const openPx = station.rawCandles[0].open;
+                    if (openPx > 0) {
+                        const chgAbs = ltp - openPx;
+                        const chgPct = (chgAbs / openPx) * 100;
+                        const chgEl = document.getElementById(`${pfx}-chg`);
+                        if (chgEl) {
+                            chgEl.textContent = `${chgAbs >= 0 ? '+' : ''}${chgAbs.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(2)}%)`;
+                            chgEl.className = `station-chg ${chgAbs >= 0 ? 'pos' : 'neg'}`;
+                        }
+                    }
+                }
 
                 const buyTxt = document.getElementById(`${pfx}-buy-txt`);
-                if (buyTxt) buyTxt.textContent = `${station.type} · ₹${data.ltp.toFixed(1)}`;
+                if (buyTxt) buyTxt.textContent = `${station.type} · ₹${ltp.toFixed(1)}`;
 
                 if (station.candleSeries && data.forming_candle) {
                     const fc = data.forming_candle;
@@ -8197,6 +8220,21 @@ function connectStationWS(station) {
                     }
                     station.candleSeries.update(oneMinCandle);
                 }
+
+                // Live update position PnL if open
+                if (station.activePosition) {
+                    const mult = (station.activePosition.side === 'SELL') ? -1 : 1;
+                    const diff = (ltp - station.activePosition.entryPrice) * mult;
+                    const pnlVal = diff * (station.activePosition.lots || 1) * station.lotUnits;
+                    const pnlEl = document.getElementById(`${pfx}-pos-pnl`);
+                    if (pnlEl) {
+                        pnlEl.textContent = `${pnlVal >= 0 ? '+' : ''}₹${pnlVal.toFixed(2)}`;
+                        pnlEl.className = `exit-pnl ${pnlVal >= 0 ? 'pos' : 'neg'}`;
+                    }
+                }
+
+                // Re-render SMF canvas & overlay
+                renderStationSMFCanvas(station);
             }
         } catch (e) {
             console.warn(`${station.type} WS error:`, e);

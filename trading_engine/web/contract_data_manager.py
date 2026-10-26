@@ -1364,24 +1364,26 @@ def get_contract_quote(trading_symbol: str) -> Optional[Dict]:
             from trading_engine.adapters.breeze_adapter import default_breeze_adapter
             bq = default_breeze_adapter.get_quote(sym_upper)
             if bq and bq.get("price"):
+                ltp_val = float(bq["price"])
                 res = {
                     "symbol": sym_upper,
-                    "ltp": bq["price"],
+                    "ltp": ltp_val,
                     "buy_qty": 0,
                     "sell_qty": 0,
                     "total_flow": 0,
                     "buy_pct": 50.0,
                     "sell_pct": 50.0,
                     "bid_ask_ratio": 1.0,
-                    "high": bq.get("high", bq["price"]),
-                    "low": bq.get("low", bq["price"]),
-                    "open": bq.get("open", bq["price"]),
-                    "close": bq.get("close", bq["price"]),
+                    "high": bq.get("high", ltp_val),
+                    "low": bq.get("low", ltp_val),
+                    "open": bq.get("open", ltp_val),
+                    "close": bq.get("close", ltp_val),
                     "volume": bq.get("volume", 0),
                     "depth": {"buy": [], "sell": []},
                     "timestamp": datetime.now().isoformat(),
                     "broker": "breeze"
                 }
+                push_to_price_bus(sym_upper, ltp_val, bq.get("timestamp"))
                 _quote_cache[sym_upper] = (now, res)
                 return res
         except Exception as e:
@@ -1412,9 +1414,14 @@ def get_contract_quote(trading_symbol: str) -> Optional[Dict]:
             sell_pct = round((total_sell_qty / total_flow * 100), 1) if total_flow > 0 else 50.0
             ratio = round(total_buy_qty / max(total_sell_qty, 1), 2)
             
+            last_price = float(q.get("last_price", 0.0))
+            if last_price > 0:
+                push_to_price_bus(sym_upper, last_price)
+
             res = {
                 "symbol": sym_upper,
-                "last_price": float(q.get("last_price", 0.0)),
+                "last_price": last_price,
+                "ltp": last_price,
                 "volume": int(q.get("volume", 0)),
                 "oi": int(q.get("oi", 0)),
                 "buy_quantity": total_buy_qty,

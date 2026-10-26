@@ -2018,6 +2018,7 @@ async def on_startup():
     state.tick_broadcaster_task = asyncio.create_task(run_live_tick_broadcaster())
     state.collector_supervisor_task = asyncio.create_task(run_collector_supervisor())
     asyncio.create_task(run_contract_tick_broadcaster())
+    asyncio.create_task(run_contract_quote_feeder())
     state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
 
 
@@ -2143,34 +2144,40 @@ async def contract_ws_endpoint(websocket: WebSocket, symbol: str = Query(...)):
     print(f"ContractWS: Client connected for {symbol}", flush=True)
 
     try:
-        # Send initial forming candle if available
-        fc = get_forming_candle(symbol)
-        if fc:
-            ltp = fc.get("close", 0)
+        # 1. Provide immediate initial tick to client upon connect
+        ltp = get_live_ltp(symbol)
+        if not ltp:
+            q = await asyncio.to_thread(get_contract_quote, symbol)
+            if q and (q.get("ltp") or q.get("last_price")):
+                ltp = float(q.get("ltp") or q.get("last_price"))
+                push_to_price_bus(symbol, ltp, q.get("timestamp"))
+
+        fc = get_forming_candle(symbol) or (update_forming_candle(symbol, ltp) if ltp else None)
+        if ltp:
             await websocket.send_json({
                 "type": "CONTRACT_TICK",
                 "symbol": symbol,
-                "ltp": ltp,
+                "ltp": round(ltp, 2),
                 "forming_candle": fc,
                 "timestamp": datetime.now().isoformat(),
             })
 
         while True:
             try:
-                raw = await asyncio.wait_for(websocket.receive_text(), timeout=60)
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=30)
                 msg = json.loads(raw)
                 if msg.get("type") == "PING":
                     await websocket.send_json({"type": "PONG"})
             except asyncio.TimeoutError:
-                # Send keepalive with latest LTP
+                # Send keepalive heartbeat with latest LTP
                 ltp = get_live_ltp(symbol)
                 fc = get_forming_candle(symbol)
-                if ltp and is_market_open():
+                if ltp:
                     fc_updated = update_forming_candle(symbol, ltp) if ltp else fc
                     await websocket.send_json({
                         "type": "CONTRACT_TICK",
                         "symbol": symbol,
-                        "ltp": ltp,
+                        "ltp": round(ltp, 2),
                         "forming_candle": fc_updated,
                         "timestamp": datetime.now().isoformat(),
                     })
@@ -2593,6 +2600,31 @@ async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
 
 
 
+async def run_contract_quote_feeder():
+    """
+    Dedicated background poller that continuously pulls live quotes for all actively subscribed
+    contract symbols (CE & PE stations) from the active broker (Breeze / Kite) every 1 second,
+    updating the in-memory price bus without blocking the event loop.
+    """
+    print("ContractQuoteFeeder: Started broker polling engine (1s interval).", flush=True)
+    while True:
+        try:
+            symbols = list(get_all_subscribed_symbols())
+            if symbols:
+                async def _poll_sym(s: str):
+                    try:
+                        q = await asyncio.to_thread(get_contract_quote, s)
+                        if q and (q.get("ltp") or q.get("last_price")):
+                            ltp = float(q.get("ltp") or q.get("last_price"))
+                            push_to_price_bus(s, ltp, q.get("timestamp"))
+                    except Exception:
+                        pass
+                await asyncio.gather(*[_poll_sym(s) for s in symbols])
+        except Exception:
+            pass
+        await asyncio.sleep(1.0)
+
+
 async def run_contract_tick_broadcaster():
     """
     Dedicated high-frequency tick broadcaster for /contract WebSocket clients.
@@ -2604,41 +2636,40 @@ async def run_contract_tick_broadcaster():
 
     while True:
         try:
-            if is_market_open():
-                symbols = get_all_subscribed_symbols()
-                if symbols:
-                    cache = get_all_live_prices()
-                    now_iso = datetime.now().isoformat()
-                    for symbol in symbols:
-                        entry = cache.get(symbol) or cache.get(symbol.upper())
-                        if not entry or not entry.get("price"):
-                            continue
-                        ltp = float(entry["price"])
-                        prev = last_sent_prices.get(symbol)
-                        if prev is not None and abs(prev - ltp) < 1e-4:
-                            continue
-                        last_sent_prices[symbol] = ltp
-                        contract_engine.update_price_tick(symbol, ltp)
+            symbols = get_all_subscribed_symbols()
+            if symbols:
+                cache = get_all_live_prices()
+                now_iso = datetime.now().isoformat()
+                for symbol in symbols:
+                    entry = cache.get(symbol) or cache.get(symbol.upper())
+                    if not entry or not entry.get("price"):
+                        continue
+                    ltp = float(entry["price"])
+                    prev = last_sent_prices.get(symbol)
+                    if prev is not None and abs(prev - ltp) < 1e-4:
+                        continue
+                    last_sent_prices[symbol] = ltp
+                    contract_engine.update_price_tick(symbol, ltp)
 
-                        fc = update_forming_candle(symbol, ltp)
-                        clients = get_contract_clients(symbol)
-                        if not clients:
-                            continue
-                        packet = {
-                            "type": "CONTRACT_TICK",
-                            "symbol": symbol,
-                            "ltp": round(ltp, 2),
-                            "forming_candle": fc,
-                            "timestamp": now_iso,
-                        }
-                        dead = []
-                        for ws in clients:
-                            try:
-                                await asyncio.wait_for(ws.send_json(packet), timeout=0.1)
-                            except Exception:
-                                dead.append(ws)
-                        for ws in dead:
-                            unregister_contract_client(symbol, ws)
+                    fc = update_forming_candle(symbol, ltp)
+                    clients = get_contract_clients(symbol)
+                    if not clients:
+                        continue
+                    packet = {
+                        "type": "CONTRACT_TICK",
+                        "symbol": symbol,
+                        "ltp": round(ltp, 2),
+                        "forming_candle": fc,
+                        "timestamp": now_iso,
+                    }
+                    dead = []
+                    for ws in clients:
+                        try:
+                            await asyncio.wait_for(ws.send_json(packet), timeout=0.1)
+                        except Exception:
+                            dead.append(ws)
+                    for ws in dead:
+                        unregister_contract_client(symbol, ws)
         except Exception:
             pass
         await asyncio.sleep(0.05)  # 50ms loop = 20 checks/second
