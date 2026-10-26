@@ -159,6 +159,19 @@ class BreezeBrokerAdapter:
             )
 
             if not raw_quote or "Success" not in raw_quote or not raw_quote["Success"]:
+                # Fallback: Query live option chain quotes for this strike if expiry date mismatched
+                if params.get("product_type") == "options" and params.get("strike_price"):
+                    chain = breeze.get_option_chain_quotes(
+                        stock_code=params["stock_code"],
+                        exchange_code=params["exchange_code"],
+                        product_type=params["product_type"],
+                        strike_price=str(params["strike_price"]),
+                        right=params["right"]
+                    )
+                    if chain and chain.get("Success"):
+                        raw_quote = chain
+
+            if not raw_quote or "Success" not in raw_quote or not raw_quote["Success"]:
                 return None
 
             q = raw_quote["Success"][0]
