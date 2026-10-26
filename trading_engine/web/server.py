@@ -2728,39 +2728,43 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
 
 async def run_broker_websocket_stream():
     """
-    Dedicated broker WebSocket manager.
+    Dedicated broker WebSocket manager with continuous auto-reconnection watchdog.
     Connects to ICICI Direct Breeze WebSocket with ZERO REST polling.
+    Continuously monitors socket health and auto-reconnects on session refresh or network drops.
     """
-    print("BrokerWebSocketStream: Initializing broker WebSocket stream (0 REST calls)...", flush=True)
-    try:
-        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
-        if default_breeze_adapter.is_configured():
-            await asyncio.to_thread(default_breeze_adapter.start_websocket, on_broker_websocket_tick)
-            print("BrokerWebSocketStream: Breeze WebSocket stream active.", flush=True)
-        else:
-            print("BrokerWebSocketStream: Breeze credentials not fully configured; waiting for session.", flush=True)
-    except Exception as e:
-        print(f"BrokerWebSocketStream: Error starting WebSocket stream: {e}", flush=True)
+    print("BrokerWebSocketStream: Initializing broker WebSocket stream watchdog (0 REST calls)...", flush=True)
+    while True:
+        try:
+            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+            if default_breeze_adapter.is_configured():
+                if not default_breeze_adapter.is_connected or not default_breeze_adapter.ws_connected:
+                    connected = await asyncio.to_thread(default_breeze_adapter.start_websocket, on_broker_websocket_tick)
+                    if connected:
+                        print("BrokerWebSocketStream: Breeze WebSocket stream active and connected.", flush=True)
+        except Exception as e:
+            print(f"BrokerWebSocketStream: WebSocket stream watchdog error: {e}", flush=True)
+        await asyncio.sleep(5.0)
 
 
 async def run_broker_subscription_manager():
     """
     Continuous background subscription manager.
-    Ensures that ALL active positions, pending orders, and UI viewed contracts across
-    all indices (NIFTY, BANKNIFTY, SENSEX) are continuously subscribed on the broker socket.
+    Ensures that ALL active positions, pending orders, core indices (NIFTY, SENSEX, BANKNIFTY),
+    and UI viewed contracts across all indices are continuously subscribed on the broker socket.
     Uses 0 REST calls.
     """
     print("BrokerSubscriptionManager: Started background multi-index subscription daemon.", flush=True)
     subscribed_symbols = set()
+    core_index_symbols = {"NIFTY", "SENSEX", "BANKNIFTY"}
 
     while True:
         try:
             from trading_engine.adapters.breeze_adapter import default_breeze_adapter
             if default_breeze_adapter.is_connected and default_breeze_adapter.ws_connected:
-                # Monitored = all open positions in contract_engine + pending orders + UI active symbols
+                # Monitored = all open positions in contract_engine + pending orders + UI active symbols + core indices
                 engine_syms = set(contract_engine.get_monitored_symbols())
                 ui_syms = set(get_all_subscribed_symbols())
-                desired_symbols = engine_syms | ui_syms
+                desired_symbols = engine_syms | ui_syms | core_index_symbols
 
                 # Subscribe new symbols
                 to_sub = desired_symbols - subscribed_symbols
@@ -2769,7 +2773,7 @@ async def run_broker_subscription_manager():
                     if success:
                         subscribed_symbols.add(sym)
 
-                # Unsubscribe old (only if NOT in engine positions/orders AND NOT in UI)
+                # Unsubscribe old (only if NOT in engine positions/orders AND NOT in UI AND NOT core)
                 to_unsub = subscribed_symbols - desired_symbols
                 for sym in to_unsub:
                     await asyncio.to_thread(default_breeze_adapter.unsubscribe_feeds, sym)
