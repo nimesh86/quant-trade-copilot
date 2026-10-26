@@ -731,7 +731,11 @@ function initOptionChain() {
     if (undSel) {
         undSel.addEventListener('change', async (e) => {
             C.underlying = e.target.value;
+            MasterState.underlying = e.target.value;
+            MasterState.strikeStep = (e.target.value === 'NIFTY') ? 50 : 100;
+            if (['FINNIFTY', 'MIDCPNIFTY'].includes(e.target.value)) MasterState.strikeStep = 25;
             C.selectedExpiry = null;
+            MasterState.selectedExpiry = null;
             await initExpirySelector();
             await fetchOptionChain();
         });

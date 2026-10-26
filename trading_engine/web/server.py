@@ -2076,8 +2076,9 @@ async def contract_option_chain(
     underlying: str = Query("NIFTY"),
     expiry: Optional[str] = Query(None)
 ):
-    """Return full option chain matrix around ATM strike with live LTPs."""
-    data = get_option_chain_data(underlying=underlying, expiry=expiry, spot_price=state.current_spot)
+    und_upper = underlying.strip().upper()
+    spot = state.current_spot if und_upper == "NIFTY" and state.current_spot > 0 else None
+    data = get_option_chain_data(underlying=und_upper, expiry=expiry, spot_price=spot)
     return data
 
 

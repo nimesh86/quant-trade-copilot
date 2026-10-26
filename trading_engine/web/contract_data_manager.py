@@ -521,6 +521,143 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
     return res
 
 
+_spot_cache: Dict[str, Tuple[float, float]] = {}  # {und: (timestamp, price)}
+SPOT_CACHE_TTL = 3.0  # 3 seconds cache
+
+
+def resolve_spot_price(underlying: str, expiry: Optional[str] = None) -> float:
+    """
+    Resolve real-time or historical spot price for the given underlying:
+    1. In-memory live price bus
+    2. Active broker quote
+    3. TimescaleDB (historical close for requested expiry or recent candle)
+    4. Fast public financial API (Yahoo Finance chart)
+    5. Calibrated baseline fallback
+    """
+    und_upper = underlying.strip().upper()
+    now = time.time()
+
+    # Check 3s cache
+    if und_upper in _spot_cache:
+        ts, cached_px = _spot_cache[und_upper]
+        if now - ts < SPOT_CACHE_TTL and cached_px > 0:
+            return cached_px
+
+    try:
+        from trading_engine.config import get_index_spec
+    except ImportError:
+        from config import get_index_spec
+
+    spec = get_index_spec(und_upper)
+    kite_spot = spec.get("kite_spot", f"NSE:{und_upper}")
+    breeze_code = spec.get("breeze_stock_code", und_upper)
+    today = _get_ist_now().date()
+    today_str = today.strftime("%Y-%m-%d")
+
+    # 1. Live price bus
+    live_prices = get_all_live_prices()
+    candidates = [
+        und_upper,
+        kite_spot,
+        breeze_code,
+        f"{und_upper} 50",
+        f"{und_upper}-I",
+        f"{und_upper} FUT",
+    ]
+    for c in candidates:
+        entry = live_prices.get(c) or live_prices.get(c.upper())
+        if entry and entry.get("price") and float(entry["price"]) > 0:
+            px = float(entry["price"])
+            _spot_cache[und_upper] = (now, px)
+            return px
+
+    # 2. Broker quote
+    broker = get_active_broker()
+    if broker == "kite":
+        try:
+            kite = _get_kite()
+            if kite:
+                q = kite.quote([kite_spot])
+                if kite_spot in q and q[kite_spot].get("last_price"):
+                    px = float(q[kite_spot]["last_price"])
+                    _spot_cache[und_upper] = (now, px)
+                    return px
+        except Exception:
+            pass
+
+    # 3. Database query (TimescaleDB)
+    try:
+        from sqlalchemy import create_engine, text
+        db_url = os.environ.get("DB_URL") or os.environ.get("DATABASE_URL") or "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
+        if not db_url.startswith("postgresql+psycopg2://") and db_url.startswith("postgresql://"):
+            db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        db_engine = create_engine(db_url)
+        with db_engine.connect() as conn:
+            sym_list = [und_upper, kite_spot, breeze_code, f"{und_upper}-I", f"{und_upper} 50"]
+            if expiry and expiry < today_str:
+                q_spot = text("""
+                    SELECT close FROM minute_candles
+                    WHERE symbol = ANY(:syms)
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                    ORDER BY timestamp DESC LIMIT 1;
+                """)
+                row = conn.execute(q_spot, {"syms": sym_list, "d": expiry}).fetchone()
+            else:
+                q_spot = text("""
+                    SELECT close FROM minute_candles
+                    WHERE symbol = ANY(:syms)
+                    ORDER BY timestamp DESC LIMIT 1;
+                """)
+                row = conn.execute(q_spot, {"syms": sym_list}).fetchone()
+            if row and row[0] and float(row[0]) > 0:
+                px = float(row[0])
+                _spot_cache[und_upper] = (now, px)
+                return px
+    except Exception:
+        pass
+
+    # 4. Public real-time market API (Yahoo Finance)
+    yahoo_map = {
+        "SENSEX": "^BSESN",
+        "BSX": "^BSESN",
+        "NIFTY": "^NSEI",
+        "BANKNIFTY": "^NSEBANK",
+        "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
+        "MIDCPNIFTY": "NIFTY_MID_SELECT.NS",
+    }
+    ticker = yahoo_map.get(und_upper)
+    if ticker:
+        try:
+            import requests
+            r = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=2.0
+            )
+            if r.status_code == 200:
+                m = r.json()["chart"]["result"][0]["meta"]
+                px = m.get("regularMarketPrice") or m.get("chartPreviousClose")
+                if px and float(px) > 0:
+                    px_val = float(px)
+                    _spot_cache[und_upper] = (now, px_val)
+                    return px_val
+        except Exception:
+            pass
+
+    # 5. Baseline Fallback calibrated to current market levels
+    defaults = {
+        "SENSEX": 73600.0,
+        "BSX": 73600.0,
+        "NIFTY": 22750.0,
+        "BANKNIFTY": 54300.0,
+        "FINNIFTY": 24000.0,
+        "MIDCPNIFTY": 12500.0,
+    }
+    fallback_px = defaults.get(und_upper, 22750.0)
+    _spot_cache[und_upper] = (now, fallback_px)
+    return fallback_px
+
+
 def get_option_chain_data(
     underlying: str = "NIFTY",
     expiry: Optional[str] = None,
@@ -542,44 +679,9 @@ def get_option_chain_data(
         expiry = near_exp if near_exp else (exp_list[0]["date"] if exp_list else today.strftime("%Y-%m-%d"))
 
     # Determine spot price
-    if spot_price is None:
-        live_prices = get_all_live_prices()
-        spot_entry = live_prices.get(und_upper) or live_prices.get(f"{und_upper} 50") or live_prices.get(f"{und_upper}-I")
-        if spot_entry and spot_entry.get("price"):
-            spot_price = float(spot_entry["price"])
-        else:
-            # Try DB futures/index price
-            try:
-                from sqlalchemy import create_engine, text
-                db_url = os.environ.get("DB_URL") or os.environ.get("DATABASE_URL") or "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
-                if not db_url.startswith("postgresql+psycopg2://") and db_url.startswith("postgresql://"):
-                    db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
-                db_engine = create_engine(db_url)
-                with db_engine.connect() as conn:
-                    today_str = today.strftime("%Y-%m-%d")
-                    if expiry and expiry < today_str:
-                        q_spot = text("""
-                            SELECT close FROM minute_candles
-                            WHERE (symbol = :und OR symbol = :fut OR symbol = :sym50)
-                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
-                            ORDER BY timestamp DESC LIMIT 1;
-                        """)
-                        row = conn.execute(q_spot, {"und": und_upper, "fut": f"{und_upper}-I", "sym50": f"{und_upper} 50", "d": expiry}).fetchone()
-                    else:
-                        q_spot = text("""
-                            SELECT close FROM minute_candles
-                            WHERE (symbol = :und OR symbol = :fut OR symbol = :sym50)
-                            ORDER BY timestamp DESC LIMIT 1;
-                        """)
-                        row = conn.execute(q_spot, {"und": und_upper, "fut": f"{und_upper}-I", "sym50": f"{und_upper} 50"}).fetchone()
-                    if row and row[0]:
-                        spot_price = float(row[0])
-            except Exception:
-                pass
-            if not spot_price:
-                spot_price = 22700.0 if und_upper == "NIFTY" else 50000.0
-    else:
-        live_prices = get_all_live_prices()
+    if spot_price is None or spot_price <= 0:
+        spot_price = resolve_spot_price(und_upper, expiry=expiry)
+    live_prices = get_all_live_prices()
 
     try:
         from trading_engine.config import get_index_spec
@@ -719,6 +821,25 @@ def get_option_chain_data(
                                 s_data[side]["ltp"] = c_map[sym]
         except Exception as e:
             print(f"ContractDataManager: error filling missing LTPs from DB: {e}", flush=True)
+
+    # Modeled Black-Scholes theoretical price fallback for any unquoted strikes (e.g. pre-market, closed, illiquid)
+    try:
+        from trading_engine.ai.kronos_service import black_scholes_price
+        exp_dt = datetime.strptime(expiry, "%Y-%m-%d").date()
+        days_to_exp = max(0.5, (exp_dt - today).days)
+        T_years = max(1e-4, days_to_exp / 365.0)
+    except Exception:
+        T_years = 3.0 / 365.0
+
+    r = 0.07
+    sigma = 0.13
+
+    for s_data in strike_map.values():
+        stk = float(s_data["strike"])
+        for side, is_call in [("call", True), ("put", False)]:
+            if side in s_data and s_data[side].get("ltp") is None:
+                bs_px = round(black_scholes_price(spot_price, stk, T_years, r, sigma, is_call), 2)
+                s_data[side]["ltp"] = bs_px
 
     sorted_strikes = sorted(strike_map.keys())
     if sorted_strikes:
