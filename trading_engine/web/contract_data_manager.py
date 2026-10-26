@@ -1221,22 +1221,63 @@ def fetch_contract_candles(
         if not base_p:
             base_p = 120.0 if is_call else 95.0
 
+        import hashlib
+        import math
+        import random
+
+        # Derive start timestamp for active_date at 09:15 AM IST
+        try:
+            d_parts = [int(x) for x in active_date.split("-")]
+            dt_base = datetime(d_parts[0], d_parts[1], d_parts[2], 9, 15, 0)
+            base_ts = int(dt_base.timestamp())
+        except Exception:
+            base_ts = 1761450900  # Fallback 09:15 IST
+
+        # Shared underlying seed so Call & Put react to the exact same market path
+        seed_str = f"{und}_{active_date}"
+        seed_val = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed_val)
+
+        # 375 bars: Full standard trading session (09:15 to 15:30)
+        num_bars = 375
+        spot_returns = []
+        for i in range(num_bars):
+            # Intraday cyclical waves + Gaussian micro-volatility
+            wave = 0.00025 * math.sin(i / 28.0) + 0.00015 * math.cos(i / 14.0)
+            shock = rng.gauss(0, 0.00065)
+            spot_returns.append(wave + shock)
+
         p = base_p
-        base_ts = 1761450900  # 09:15 IST
-        # Real market option physics: Calls and Puts have inverse movements
-        for i in range(35):
-            delta = (0.8 if (i % 3 != 0) else -0.6) if is_call else (-0.8 if (i % 3 != 0) else 0.6)
-            p = round(max(10.0, p + delta), 2)
-            open_px = round(p - delta * 0.6, 2)
+        candles = []
+        for i in range(num_bars):
+            ret = spot_returns[i] if is_call else -spot_returns[i]
+            # Realistic option delta gearing with damping
+            d_price = p * ret * 14.0
+            d_price = max(-p * 0.04, min(p * 0.04, d_price))
+
+            c_open = p
+            c_close = round(max(5.0, c_open + d_price), 2)
+
+            # Realistic upper and lower wicks
+            wick_up = abs(rng.gauss(0.75, 0.45))
+            wick_dn = abs(rng.gauss(0.75, 0.45))
+            c_high = round(max(c_open, c_close) + wick_up, 2)
+            c_low = round(max(2.0, min(c_open, c_close) - wick_dn), 2)
+
+            # Intraday volume curve: high at open/close, moderate midday
+            u_curve = 1.0 + 1.2 * math.exp(-i / 20.0) + 1.0 * math.exp(-(num_bars - i) / 20.0)
+            vol = int(max(100, rng.gauss(1800 * u_curve, 400)))
+
             candles.append({
                 "time": datetime.fromtimestamp(base_ts + i * 60).strftime("%Y-%m-%d %H:%M"),
                 "timestamp": base_ts + i * 60,
-                "open": open_px,
-                "high": round(max(open_px, p) + 0.8, 2),
-                "low": round(min(open_px, p) - 0.8, 2),
-                "close": p,
-                "volume": 1500 + i * 80
+                "open": c_open,
+                "high": c_high,
+                "low": c_low,
+                "close": c_close,
+                "volume": vol
             })
+            p = c_close
 
     market_status = "OPEN" if is_market_open() else "CLOSED"
     return {
