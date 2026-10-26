@@ -730,6 +730,8 @@ function initOptionChain() {
     const undSel = document.getElementById('oc-underlying-select');
     if (undSel) {
         undSel.addEventListener('change', async (e) => {
+            const masterSel = document.getElementById('master-underlying-select');
+            if (masterSel) masterSel.value = e.target.value;
             C.underlying = e.target.value;
             MasterState.underlying = e.target.value;
             MasterState.strikeStep = (e.target.value === 'NIFTY') ? 50 : 100;
@@ -6927,13 +6929,17 @@ function bindStationControls(station) {
 }
 
 function bindMasterHeaderControls() {
-    const undSelect = document.getElementById('master-underlying-select') || document.getElementById('oc-underlying-select');
+    const undSelect = document.getElementById('master-underlying-select');
     if (undSelect) {
         undSelect.addEventListener('change', async (e) => {
+            const ocSel = document.getElementById('oc-underlying-select');
+            if (ocSel) ocSel.value = e.target.value;
             MasterState.underlying = e.target.value;
             C.underlying = e.target.value;
             MasterState.strikeStep = (MasterState.underlying === 'NIFTY') ? 50 : 100;
             if (['FINNIFTY', 'MIDCPNIFTY'].includes(MasterState.underlying)) MasterState.strikeStep = 25;
+            C.selectedExpiry = null;
+            MasterState.selectedExpiry = null;
             await initExpirySelector();
             await fetchOptionChain();
         });

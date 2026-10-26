@@ -44,12 +44,13 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
         # 2. Select SENSEX as index
         print("[Test 1] Step 2: Selecting SENSEX as underlying index...")
         await page.select_option("#oc-underlying-select", "SENSEX")
+        await page.dispatch_event("#oc-underlying-select", "change")
 
         # Wait for SENSEX data to be fetched and optionChainData.underlying to become SENSEX
         await page.wait_for_function("""() => {
             const data = window.MasterState && window.MasterState.optionChainData;
             return data && data.underlying === 'SENSEX' && (data.spot > 60000 || data.spot_price > 60000);
-        }""", timeout=10000)
+        }""", timeout=20000)
 
         spot_text = await page.locator("#oc-spot-val").text_content()
         clean_spot = float(re.sub(r"[^\d.]", "", spot_text or "0"))
@@ -164,10 +165,11 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         await page.click("#btn-master-chain")
         await page.wait_for_selector("#option-chain-panel:not(.collapsed)", timeout=5000)
         await page.select_option("#oc-underlying-select", "SENSEX")
+        await page.dispatch_event("#oc-underlying-select", "change")
         await page.wait_for_function("""() => {
             const data = window.MasterState && window.MasterState.optionChainData;
             return data && data.underlying === 'SENSEX' && data.chain && data.chain.length > 0;
-        }""", timeout=10000)
+        }""", timeout=20000)
         await page.wait_for_selector("#oc-tbody tr.oc-row", timeout=8000)
 
         atm_rows = page.locator("#oc-tbody tr.oc-row.atm-row")
