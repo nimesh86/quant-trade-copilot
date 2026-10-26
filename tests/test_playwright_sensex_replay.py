@@ -93,12 +93,11 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
 
         # 5. Verify on the contract screen that it is loaded successfully
         print("[Test 1] Step 5: Verifying contract screen loaded successfully...")
-        # Close option chain if still open
-        if not ("collapsed" in (await oc_panel.get_attribute("class") or "")):
-            close_btn = page.locator("#oc-close-btn")
-            if await close_btn.is_visible():
-                await close_btn.click()
-            await page.wait_for_selector("#option-chain-panel.collapsed", timeout=5000)
+        # Verify Option Chain panel automatically collapsed upon strike selection (without user having to manually click close)
+        await page.wait_for_selector("#option-chain-panel.collapsed", timeout=4000)
+        assert "collapsed" in (await oc_panel.get_attribute("class") or ""), (
+            "Option Chain panel must auto-collapse when a contract is selected so the chart is visible"
+        )
 
         # Verify strike on master header
         cur_strike_el = page.locator("#cur-strike-val")
@@ -174,14 +173,28 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         }""", timeout=20000)
         await page.wait_for_selector("#oc-tbody tr.oc-row", timeout=8000)
 
+        # Extract the ATM Call and Put premiums shown in the Option Chain table for verification
+        oc_atm_premiums = await page.evaluate("""() => {
+            const data = window.MasterState.optionChainData;
+            const atmStrike = data.atm_strike || (data.chain.find(i => i.is_atm) || {}).strike;
+            const atmRow = data.chain.find(i => i.strike == atmStrike) || data.chain[0];
+            return {
+                strike: atmRow.strike,
+                ce_ltp: (atmRow.call && atmRow.call.ltp) ? Number(atmRow.call.ltp) : null,
+                pe_ltp: (atmRow.put && atmRow.put.ltp) ? Number(atmRow.put.ltp) : null
+            };
+        }""")
+        print(f"[Test 2] Option Chain ATM Strike {oc_atm_premiums['strike']} - CE LTP: ₹{oc_atm_premiums['ce_ltp']} | PE LTP: ₹{oc_atm_premiums['pe_ltp']}")
+
         atm_rows = page.locator("#oc-tbody tr.oc-row.atm-row")
         target_row = atm_rows.first if (await atm_rows.count() > 0) else page.locator("#oc-tbody tr.oc-row").first
         await target_row.locator(".call-action-btn").click()
 
-        # Close Option Chain modal
-        if not ("collapsed" in (await page.locator("#option-chain-panel").get_attribute("class") or "")):
-            await page.locator("#oc-close-btn").click()
-            await page.wait_for_selector("#option-chain-panel.collapsed", timeout=5000)
+        # Verify Option Chain modal automatically collapses on strike select
+        await page.wait_for_selector("#option-chain-panel.collapsed", timeout=4000)
+        assert "collapsed" in (await page.locator("#option-chain-panel").get_attribute("class") or ""), (
+            "Option Chain panel must auto-collapse when a contract is selected"
+        )
 
         # 2. Make sure candles are loaded
         print("[Test 2] Step 1: Verifying candles are loaded in stations...")
@@ -288,8 +301,37 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         print(f"[Test 2] Verified: All 30 candles are valid, positive, and sequentially ordered.")
         print(f"[Test 2] Current replay time reached: {candles_validation['curTimeText']}")
 
+        # Verify CE and PE candles do not exhibit fake identical positive correlation
+        ce_pe_correlation = await page.evaluate("""() => {
+            const ce = (window.Stations.CE && window.Stations.CE.rawCandles || []).slice(0, 30);
+            const pe = (window.Stations.PE && window.Stations.PE.rawCandles || []).slice(0, 30);
+            if (ce.length < 10 || pe.length < 10) return 0;
+            const ceDiff = [];
+            const peDiff = [];
+            for (let i = 1; i < Math.min(ce.length, pe.length); i++) {
+                ceDiff.push(ce[i].close - ce[i-1].close);
+                peDiff.push(pe[i].close - pe[i-1].close);
+            }
+            const mean1 = ceDiff.reduce((a, b) => a + b, 0) / ceDiff.length;
+            const mean2 = peDiff.reduce((a, b) => a + b, 0) / peDiff.length;
+            let num = 0, den1 = 0, den2 = 0;
+            for (let i = 0; i < ceDiff.length; i++) {
+                const d1 = ceDiff[i] - mean1;
+                const d2 = peDiff[i] - mean2;
+                num += d1 * d2;
+                den1 += d1 * d1;
+                den2 += d2 * d2;
+            }
+            if (den1 === 0 || den2 === 0) return 1.0;
+            return num / (Math.sqrt(den1) * Math.sqrt(den2));
+        }""")
+        print(f"[Test 2] CE vs PE return correlation across 30 bars: {ce_pe_correlation:.2f}")
+        assert ce_pe_correlation <= 0.2, (
+            f"CE and PE cannot be positively correlated ({ce_pe_correlation:.2f})! Option call and put premiums must move inversely."
+        )
+
         # 7. Verify the premium is getting matched with ATM
-        print("[Test 2] Step 7: Verifying option premium matches ATM strike candle prices...")
+        print("[Test 2] Step 7: Verifying option premium matches ATM strike candle prices and Option Chain...")
         premium_data = await page.evaluate("""() => {
             const ce = window.Stations.CE.rawCandles;
             const pe = window.Stations.PE.rawCandles;
@@ -323,6 +365,21 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         # Assert premiums are positive realistic option values
         assert premium_data["ceLtp"] > 0 and premium_data["peLtp"] > 0, "ATM Option premiums must be strictly positive"
         assert premium_data["strike"] >= 60000, "Current strike must be a valid SENSEX ATM strike (>= 60,000)"
+
+        # Assert premium matches the ATM strike premium from the Option Chain table
+        if oc_atm_premiums.get("ce_ltp"):
+            ce_diff_pct = abs(premium_data["ceClose"] - oc_atm_premiums["ce_ltp"]) / oc_atm_premiums["ce_ltp"]
+            print(f"[Test 2] CE Chart Close (₹{premium_data['ceClose']:.2f}) vs Option Chain ATM (₹{oc_atm_premiums['ce_ltp']:.2f}) -> Diff: {ce_diff_pct*100:.1f}%")
+            assert ce_diff_pct <= 0.25, (
+                f"CE premium mismatch! Chart close ₹{premium_data['ceClose']} diverges by {ce_diff_pct*100:.1f}% from Option Chain ATM premium ₹{oc_atm_premiums['ce_ltp']}"
+            )
+
+        if oc_atm_premiums.get("pe_ltp"):
+            pe_diff_pct = abs(premium_data["peClose"] - oc_atm_premiums["pe_ltp"]) / oc_atm_premiums["pe_ltp"]
+            print(f"[Test 2] PE Chart Close (₹{premium_data['peClose']:.2f}) vs Option Chain ATM (₹{oc_atm_premiums['pe_ltp']:.2f}) -> Diff: {pe_diff_pct*100:.1f}%")
+            assert pe_diff_pct <= 0.25, (
+                f"PE premium mismatch! Chart close ₹{premium_data['peClose']} diverges by {pe_diff_pct*100:.1f}% from Option Chain ATM premium ₹{oc_atm_premiums['pe_ltp']}"
+            )
 
         print("[Test 2] SUCCESS: Option premiums match ATM candle prices seamlessly!\n")
         await context.close()
