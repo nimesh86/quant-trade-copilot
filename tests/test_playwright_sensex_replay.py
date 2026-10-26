@@ -196,18 +196,18 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
             "Option Chain panel must auto-collapse when a contract is selected"
         )
 
-        # 2. Make sure candles are loaded
+        # 2. Make sure candles are loaded in both CE and PE stations
         print("[Test 2] Step 1: Verifying candles are loaded in stations...")
         await page.wait_for_function("""() => {
             const ce = window.Stations && window.Stations.CE && window.Stations.CE.rawCandles;
             const pe = window.Stations && window.Stations.PE && window.Stations.PE.rawCandles;
-            return (ce && ce.length >= 5) || (pe && pe.length >= 5);
+            return (ce && ce.length >= 5) && (pe && pe.length >= 5);
         }""", timeout=15000)
 
         initial_candle_count = await page.evaluate("""() => {
             const ce = window.Stations.CE.rawCandles ? window.Stations.CE.rawCandles.length : 0;
             const pe = window.Stations.PE.rawCandles ? window.Stations.PE.rawCandles.length : 0;
-            return Math.max(ce, pe);
+            return Math.min(ce, pe);
         }""")
         print(f"[Test 2] Available candles confirmed: {initial_candle_count} bars.")
         assert initial_candle_count >= 5, "At least 5 candles must be loaded before launching replay"
