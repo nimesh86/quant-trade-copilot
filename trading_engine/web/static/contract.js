@@ -2495,7 +2495,7 @@ function applySMFCloud(agg) {
     const allMarkers = [];
     if (C.dynamicExitEnabled && deResult && deResult.markers && deResult.markers.length > 0) {
         allMarkers.push(...deResult.markers);
-    } else if (C.smfEnabled && smf.smfMarkers && smf.smfMarkers.length > 0) {
+    } else if (C.smfEnabled && smf && smf.smfMarkers && smf.smfMarkers.length > 0) {
         allMarkers.push(...smf.smfMarkers);
     }
 
@@ -2505,7 +2505,7 @@ function applySMFCloud(agg) {
         C.candleSeries.setMarkers([]);
     } catch (e) {}
 
-    updateGauge(smf.latestGaugeVal, smf.latestRegime);
+    updateGauge(smf ? smf.latestGaugeVal : 0, smf ? smf.latestRegime : 1);
     requestAnimationFrame(renderSMFCanvas);
 }
 

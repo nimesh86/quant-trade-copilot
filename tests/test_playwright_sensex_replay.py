@@ -58,7 +58,7 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
 
         # 3. Select Current Expiry
         print("[Test 1] Step 3: Selecting current expiry...")
-        await page.wait_for_selector("#oc-expiry-select option", timeout=5000)
+        await page.wait_for_selector("#oc-expiry-select option", state="attached", timeout=5000)
         first_expiry = await page.locator("#oc-expiry-select option").first.get_attribute("value")
         assert first_expiry, "Available expiries list must not be empty"
         await page.select_option("#oc-expiry-select", first_expiry)
