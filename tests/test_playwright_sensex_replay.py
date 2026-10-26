@@ -26,7 +26,7 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
 
         print(f"\n[Test 1] Navigating to {BASE_URL}/contract...")
         await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
-        await page.wait_for_selector("#contract-layout", timeout=10000)
+        await page.wait_for_selector("#stations-stream", timeout=10000)
 
         # 1. Open the Option Chain modal
         print("[Test 1] Step 1: Opening Option Chain modal...")

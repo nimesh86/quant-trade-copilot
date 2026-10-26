@@ -4766,12 +4766,16 @@ function renderReplayStep() {
             if (station.type === 'CE') C.smfLastResult = smf;
             else C.secondarySmfLastResult = smf;
 
-            const colored = agg.map((c, i) => ({
-                ...c,
-                color: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                borderColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-                wickColor: smf.lastSignal[i] === 1 ? SMF.bullColor : SMF.bearColor,
-            }));
+            const colored = agg.map((c, i) => {
+                const isBull = (smf && smf.lastSignal && smf.lastSignal[i] === 1);
+                const col = isBull ? SMF.bullColor : SMF.bearColor;
+                return {
+                    ...c,
+                    color: col,
+                    borderColor: col,
+                    wickColor: col,
+                };
+            });
             station.candleSeries.setData(colored);
 
             let de = null;
