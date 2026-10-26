@@ -215,10 +215,10 @@ class MarketCollectorDaemon:
                     oi = 50000
 
                     records.append((
-                        now_ts, symbol, underlying, expiry_date, strike, opt_type,
-                        rel_strike, ltp, volume, oi, 0, round(iv * 100, 2),
-                        bid_price, ask_price, round(delta, 4), round(gamma, 6),
-                        round(theta, 2), round(vega, 2)
+                        now_ts, symbol, underlying, expiry_date, float(strike), opt_type,
+                        int(rel_strike), float(ltp), int(volume), int(oi), 0, float(round(float(iv) * 100, 2)),
+                        float(bid_price), float(ask_price), float(round(float(delta), 4)), float(round(float(gamma), 6)),
+                        float(round(float(theta), 2)), float(round(float(vega), 2))
                     ))
 
             # 3. Batch insert into option_chain
