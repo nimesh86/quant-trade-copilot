@@ -2051,7 +2051,7 @@ function computeSMF(candles) {
             const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
             const istM = (d.getUTCMinutes() + 30) % 60;
             const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
-            const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '09:25');
+            const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '10:05') || (cTimeStr >= '11:30' && cTimeStr <= '13:15');
 
             const span = Math.max(c.high - c.low, 0.05);
             const bodyRatio = (c.close - c.low) / span;
@@ -2767,9 +2767,10 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                         const partialP = Math.max(targetPx, roundTick(t.entryPrice + 1.2 * t.R));
                         t.realizedPts += 0.50 * (partialP - t.entryPrice);
                         t.remQty = 0.50;
-                        // Trail stop to previous candle low minus buffer (reducing risk while letting runner breathe)
+                        // Guaranteed Profit Lock on Runner: floor must be at least entry + 0.5R
                         const prevLow = candles[Math.max(0, i - 1)].low;
-                        t.ladderFloor = Math.max(t.ladderFloor, roundTick(prevLow - 1.5));
+                        const guaranteedRunnerFloor = roundTick(t.entryPrice + 0.50 * t.R);
+                        t.ladderFloor = Math.max(t.ladderFloor, guaranteedRunnerFloor, roundTick(prevLow - 1.5));
                         markers.push({
                             time: c.time,
                             position: 'aboveBar',
@@ -2909,7 +2910,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
             dailyRealizedR += pnlR;
             if (pnlR < 0) consecutiveLosses++;
             else consecutiveLosses = 0;
-            if (consecutiveLosses >= 3) dayHalted = true;
+            if (consecutiveLosses >= 2 || dailyRealizedR >= 2.5) dayHalted = true;
 
             const isWin = pnlR >= 0;
             const pnlSign = pnlR >= 0 ? '+' : '';
@@ -3060,8 +3061,9 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
             }
         }
 
-        if (!activeTrade && (isSwitchUp || isSRRBar) && !dayHalted && dailyTradeCount < 4) {
-            const inTimeWindow = (cTime >= '09:25' && cTime <= '15:15');
+        if (!activeTrade && (isSwitchUp || isSRRBar) && !dayHalted && dailyTradeCount < 3) {
+            // High-Conviction Time Window: Avoid opening 50m chop (before 10:05) and midday consolidation (11:30-13:15)
+            const inTimeWindow = (cTime >= '10:05' && cTime <= '15:00') && !(cTime >= '11:30' && cTime <= '13:15');
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
             if (inTimeWindow && (isSRRBar || !needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
@@ -3080,10 +3082,12 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     R = roundTick(entryP - initStop);
                 }
 
-                const minT1Pts = Math.max(6.5, atr[i] * 1.1);
+                // Dynamic T1 Scaling: Scale to contract value (for SENSEX / > 200 pt options, min 16 pts or 1.4R)
+                const isHighVal = (entryP >= 200.0);
+                const minT1Pts = isHighVal ? Math.max(16.0, 1.4 * R) : Math.max(8.0, 1.2 * R);
                 const t1 = roundTick(entryP + minT1Pts);
-                const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
-                const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
+                const t2 = roundTick(entryP + Math.max(22.0, 2.2 * R, 2.2 * atr[i]));
+                const maxT = roundTick(entryP + Math.max(34.0, 3.2 * R, 3.2 * atr[i]));
 
                 activeTrade = {
                     entryPrice: entryP,
