@@ -158,7 +158,7 @@ class TunnelPipeline:
         logger.info(f"Using cloudflared binary: {self.binary_path}")
 
         while self.running:
-            cmd = [self.binary_path, "tunnel", "--protocol", "http2", "--ha-connections", "1", "--url", f"http://localhost:{self.target_port}"]
+            cmd = [self.binary_path, "tunnel", "--no-prechecks", "--protocol", "http2", "--ha-connections", "1", "--url", f"http://localhost:{self.target_port}"]
             logger.info(f"Launching tunnel subprocess: {' '.join(cmd)}")
 
             try:
