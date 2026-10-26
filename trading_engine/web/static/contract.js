@@ -2047,9 +2047,11 @@ function computeSMF(candles) {
             // 3. Candle body must be solid bullish (bodyRatio >= 0.50, no shooting star / upper wick rejections)
             // 4. RSI >= 48 (healthy expanding momentum)
             // 5. Structure Break (CHoCH): must clear 8-bar swing high (clearing immediate resistance ceiling)
-            const d = new Date(c.time * 1000);
-            const istH = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
-            const istM = (d.getUTCMinutes() + 30) % 60;
+            let ms = typeof c.time === 'number' ? (c.time > 1e11 ? c.time : c.time * 1000) : (c.timestamp ? c.timestamp * 1000 : Date.parse(c.time));
+            if (isNaN(ms)) ms = Date.now();
+            const d = new Date(ms + 19800000);
+            const istH = d.getUTCHours();
+            const istM = d.getUTCMinutes();
             const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
             const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '10:05') || (cTimeStr >= '11:30' && cTimeStr <= '13:15');
 
@@ -2910,7 +2912,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
             dailyRealizedR += pnlR;
             if (pnlR < 0) consecutiveLosses++;
             else consecutiveLosses = 0;
-            if (consecutiveLosses >= 2 || dailyRealizedR >= 2.5) dayHalted = true;
+            if (consecutiveLosses >= 2 || dailyTradeCount >= 3 || dailyRealizedR >= 2.5) dayHalted = true;
 
             const isWin = pnlR >= 0;
             const pnlSign = pnlR >= 0 ? '+' : '';
@@ -2949,8 +2951,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         // 2. Check Re-Entry if no active trade (V5, V5_P1)
         if (!activeTrade && ['V5', 'V5_P1'].includes(variantUpper) && reentryWatcher && !dayHalted) {
             const w = reentryWatcher;
-            const inTimeWindow = (cTime >= '09:25' && cTime <= '15:15');
-            if (inTimeWindow && lastSignal[i] === w.regime && w.reentryCount < 2 && i > w.pausedUntilBar && dailyTradeCount < 4) {
+            const inTimeWindow = (cTime >= '10:05' && cTime <= '11:30') || (dailyRealizedR <= 0 && cTime >= '13:15' && cTime <= '14:30');
+            if (inTimeWindow && lastSignal[i] === w.regime && w.reentryCount < 2 && i > w.pausedUntilBar && dailyTradeCount < 3) {
                 const ths = calcTHS(i);
                 w.pullbackLow = Math.min(w.pullbackLow, c.low);
 
@@ -2973,10 +2975,11 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
                     const initStop = roundTick(entryP - clampedR);
                     const R = roundTick(entryP - initStop);
 
-                    const minT1Pts = Math.max(6.5, atr[i] * 1.1);
+                    const isHighVal = (entryP >= 200.0);
+                    const minT1Pts = isHighVal ? Math.max(16.0, 1.4 * R) : Math.max(8.0, 1.2 * R);
                     const t1 = roundTick(entryP + minT1Pts);
-                    const t2 = roundTick(entryP + Math.max(16.0, 2.2 * R, 2.2 * atr[i]));
-                    const maxT = roundTick(entryP + Math.max(26.0, 3.2 * R, 3.2 * atr[i]));
+                    const t2 = roundTick(entryP + Math.max(22.0, 2.2 * R, 2.2 * atr[i]));
+                    const maxT = roundTick(entryP + Math.max(34.0, 3.2 * R, 3.2 * atr[i]));
 
                     activeTrade = {
                         entryPrice: entryP,
@@ -3028,7 +3031,7 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         // 3. Check New Entry on SMF Switch Up OR Support Reversal Reclaim (SRR)
         let isSRRBar = false;
         let srrDipLowVal = c.low;
-        if (!activeTrade && i >= 20 && !dayHalted && dailyTradeCount < 4) {
+        if (!activeTrade && i >= 20 && !dayHalted && dailyTradeCount < 3) {
             const inSrrWindow = (cTime >= '09:35' && cTime <= '11:00') || (cTime >= '13:15' && cTime <= '14:30');
             if (inSrrWindow) {
                 let morningBase = Infinity;
@@ -3062,8 +3065,8 @@ function computeSMFDynamicExit(candles, smf, variant = 'V5') {
         }
 
         if (!activeTrade && (isSwitchUp || isSRRBar) && !dayHalted && dailyTradeCount < 3) {
-            // High-Conviction Time Window: Avoid opening 50m chop (before 10:05) and midday consolidation (11:30-13:15)
-            const inTimeWindow = (cTime >= '10:05' && cTime <= '15:00') && !(cTime >= '11:30' && cTime <= '13:15');
+            // High-Conviction Time Window: Morning institutional flow (10:05-11:30). If green, halt day. No afternoon chop.
+            const inTimeWindow = (cTime >= '10:05' && cTime <= '11:30') || (dailyRealizedR <= 0 && cTime >= '13:15' && cTime <= '14:30');
             const needsIgnition = ['V4', 'V5', 'V5_P1'].includes(variantUpper);
             if (inTimeWindow && (isSRRBar || !needsIgnition || isGammaIgnition(i))) {
                 const entryP = roundTick(c.close + slip(c.close));
