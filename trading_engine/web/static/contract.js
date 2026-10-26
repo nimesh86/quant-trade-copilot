@@ -102,15 +102,16 @@ const SMF = {
 // ── INIT ─────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', async () => {
-    await initParallelStations();
+async function initApp() {
+    initParallelStations();
     initSearch();
-    await initSessionDateSelector();
-    await initExpirySelector();
     initOptionChain();
     initKeyboardShortcuts();
     initReplayController();
     initTradingTerminal();
+
+    await initSessionDateSelector();
+    await initExpirySelector();
     checkMarketStatus();
     setInterval(checkMarketStatus, 30_000);
 
@@ -122,7 +123,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         await fetchOptionChain();
     }
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
 
 // ── Chart Init ────────────────────────────────────────────────────────────────
 
