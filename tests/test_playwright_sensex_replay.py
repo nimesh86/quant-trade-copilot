@@ -43,8 +43,7 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
 
         # 2. Select SENSEX as index
         print("[Test 1] Step 2: Selecting SENSEX as underlying index...")
-        await page.select_option("#oc-underlying-select", "SENSEX")
-        await page.dispatch_event("#oc-underlying-select", "change")
+        await page.evaluate("async () => await window.selectUnderlying('SENSEX')")
 
         # Wait for SENSEX data to be fetched and optionChainData.underlying to become SENSEX
         await page.wait_for_function("""() => {
@@ -164,8 +163,7 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         # 1. Load SENSEX ATM via Option Chain or direct loadStrikePair
         await page.click("#btn-master-chain")
         await page.wait_for_selector("#option-chain-panel:not(.collapsed)", timeout=5000)
-        await page.select_option("#oc-underlying-select", "SENSEX")
-        await page.dispatch_event("#oc-underlying-select", "change")
+        await page.evaluate("async () => await window.selectUnderlying('SENSEX')")
         await page.wait_for_function("""() => {
             const data = window.MasterState && window.MasterState.optionChainData;
             return data && data.underlying === 'SENSEX' && data.chain && data.chain.length > 0;
