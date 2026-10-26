@@ -1794,6 +1794,7 @@ async def run_live_tick_broadcaster():
 
                 if tick_price is not None and tick_price > 0:
                     state.current_spot = tick_price
+                    enqueue_tick_for_db("NIFTY 50", tick_price)
                     now = datetime.now()
                     now_min = now.replace(second=0, microsecond=0)
                     now_min_ts = int(now_min.timestamp())
@@ -2019,6 +2020,7 @@ async def on_startup():
     state.collector_supervisor_task = asyncio.create_task(run_collector_supervisor())
     asyncio.create_task(run_contract_tick_broadcaster())
     asyncio.create_task(run_contract_quote_feeder())
+    asyncio.create_task(run_tick_db_writer())
     state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
 
 
@@ -2151,6 +2153,7 @@ async def contract_ws_endpoint(websocket: WebSocket, symbol: str = Query(...)):
             if q and (q.get("ltp") or q.get("last_price")):
                 ltp = float(q.get("ltp") or q.get("last_price"))
                 push_to_price_bus(symbol, ltp, q.get("timestamp"))
+                enqueue_tick_for_db(symbol, ltp, int(q.get("volume", 0) or 0), int(q.get("oi", 0) or 0))
 
         fc = get_forming_candle(symbol) or (update_forming_candle(symbol, ltp) if ltp else None)
         if ltp:
@@ -2600,11 +2603,64 @@ async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
 
 
 
+# ── Persistent TimescaleDB Tick Writer Queue ────────────────────────────────
+_tick_db_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+
+def enqueue_tick_for_db(symbol: str, price: float, volume: int = 0, oi: int = 0, ts: Optional[datetime] = None):
+    """Enqueues tick for asynchronous non-blocking persistence into TimescaleDB tick_data table."""
+    try:
+        if price and price > 0:
+            _tick_db_queue.put_nowait((ts or datetime.now(), symbol, float(price), int(volume or 0), int(oi or 0)))
+    except Exception:
+        pass
+
+
+async def run_tick_db_writer():
+    """
+    Dedicated background worker that flushes queued ticks into TimescaleDB tick_data table
+    every 500ms or when batch size reaches 50 records.
+    """
+    print("TickDbWriter: Started persistent TimescaleDB writer worker.", flush=True)
+    batch = []
+    last_flush = time.time()
+
+    while True:
+        try:
+            try:
+                item = await asyncio.wait_for(_tick_db_queue.get(), timeout=0.5)
+                batch.append(item)
+            except asyncio.TimeoutError:
+                pass
+
+            now = time.time()
+            if len(batch) >= 50 or (batch and now - last_flush >= 1.0):
+                to_write = batch[:]
+                batch.clear()
+                last_flush = now
+
+                def _flush(items):
+                    try:
+                        if hasattr(state, "db_engine") and state.db_engine:
+                            with state.db_engine.begin() as conn:
+                                for tick_ts, sym, px, vol, oi_val in items:
+                                    conn.execute(text("""
+                                        INSERT INTO tick_data (timestamp, symbol, price, volume, bid_price, ask_price, bid_qty, ask_qty, oi)
+                                        VALUES (:ts, :sym, :p, :v, :p, :p, 0, 0, :oi);
+                                    """), {"ts": tick_ts, "sym": sym, "p": px, "v": vol, "oi": oi_val})
+                    except Exception as err:
+                        print(f"TickDbWriter: Flush error: {err}", flush=True)
+
+                await asyncio.to_thread(_flush, to_write)
+        except Exception as e:
+            print(f"TickDbWriter error: {e}", flush=True)
+            await asyncio.sleep(0.5)
+
+
 async def run_contract_quote_feeder():
     """
     Dedicated background poller that continuously pulls live quotes for all actively subscribed
     contract symbols (CE & PE stations) from the active broker (Breeze / Kite) every 1 second,
-    updating the in-memory price bus without blocking the event loop.
+    updating the in-memory price bus and persisting ticks to TimescaleDB without blocking the event loop.
     """
     print("ContractQuoteFeeder: Started broker polling engine (1s interval).", flush=True)
     while True:
@@ -2617,6 +2673,7 @@ async def run_contract_quote_feeder():
                         if q and (q.get("ltp") or q.get("last_price")):
                             ltp = float(q.get("ltp") or q.get("last_price"))
                             push_to_price_bus(s, ltp, q.get("timestamp"))
+                            enqueue_tick_for_db(s, ltp, int(q.get("volume", 0) or 0), int(q.get("oi", 0) or 0))
                     except Exception:
                         pass
                 await asyncio.gather(*[_poll_sym(s) for s in symbols])
