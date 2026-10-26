@@ -222,13 +222,13 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
 
         # 5. Start Run from beginning of session
         print("[Test 2] Step 4: Starting Replay run from bar 0 (09:15 AM)...")
-        await page.select_option("#rp-speed-select", "80")
+        await page.select_option("#rp-speed-select", "120")
 
         # Reset scrubber to bar 0 and start playback
         await page.evaluate("""() => {
             if (window.Replay) {
                 window.Replay.currentIndex = 0;
-                window.Replay.speedMs = 80;
+                window.Replay.speedMs = 120;
                 window.renderReplayStep();
                 window.playReplay();
             }
