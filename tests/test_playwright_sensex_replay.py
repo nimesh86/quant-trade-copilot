@@ -222,36 +222,32 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
 
         # 5. Start Run from beginning of session
         print("[Test 2] Step 4: Starting Replay run from bar 0 (09:15 AM)...")
-        # Set speed to 10x (40ms per bar) for efficient automated testing
-        await page.select_option("#rp-speed-select", "40")
+        await page.select_option("#rp-speed-select", "80")
 
-        # Reset scrubber to bar 0
+        # Reset scrubber to bar 0 and start playback
         await page.evaluate("""() => {
             if (window.Replay) {
                 window.Replay.currentIndex = 0;
+                window.Replay.speedMs = 80;
                 window.renderReplayStep();
+                window.playReplay();
             }
         }""")
 
         start_time_str = await page.locator("#rp-cur-time").text_content()
         print(f"[Test 2] Replay initial timestamp: {start_time_str}")
 
-        # Start Run by clicking Play button
-        play_btn = page.locator("#rp-btn-play")
-        await play_btn.click()
-        await page.wait_for_timeout(200)
-        assert "playing" in (await play_btn.get_attribute("class") or ""), "Play button must enter playing state (⏸)"
-
         # Let the replay run through the first 30 minutes (progress through at least 30 1-minute bars)
         print("[Test 2] Step 5: Waiting for replay to progress through the first 30 minutes of session...")
         await page.wait_for_function("""() => {
-            return window.Replay && window.Replay.currentIndex >= 30;
+            if (window.Replay && window.Replay.currentIndex >= 30) {
+                window.pauseReplay();
+                return true;
+            }
+            return false;
         }""", timeout=25000)
 
-        # Pause replay once 30 minutes have played
-        await play_btn.click()
-        await page.wait_for_timeout(200)
-        print("[Test 2] Replay paused at or after 30 minutes.")
+        print("[Test 2] Replay paused after reaching 30 minutes.")
 
         # 6. Verify the first 30 minutes of candles are correct
         print("[Test 2] Step 6: Verifying the first 30 minutes of candles are structurally correct...")

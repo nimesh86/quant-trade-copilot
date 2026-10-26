@@ -4710,6 +4710,9 @@ function onScrubberInput(e) {
     Replay.currentIndex = parseInt(e.target.value, 10);
     renderReplayStep();
 }
+window.playReplay = playReplay;
+window.pauseReplay = pauseReplay;
+window.renderReplayStep = renderReplayStep;
 
 function formatReplayTime(ts) {
     if (!ts) return '--:--';
