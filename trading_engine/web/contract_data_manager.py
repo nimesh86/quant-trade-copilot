@@ -1193,18 +1193,47 @@ def fetch_contract_candles(
             print(f"ContractDataManager: fallback fetch error for {trading_symbol}: {e}", flush=True)
 
     if not candles:
-        # Fallback deterministic candles for offline / closed-market / test environments
+        # Fallback realistic candles for offline / closed-market / test environments
+        # Dynamically anchor base price to Black-Scholes theoretical price so it matches Option Chain ATM premium
+        import re
+        is_call = "CE" in trading_symbol.upper()
+        if "SENSEX" in trading_symbol.upper():
+            und = "SENSEX"
+        elif "BANKNIFTY" in trading_symbol.upper():
+            und = "BANKNIFTY"
+        else:
+            und = "NIFTY"
+
+        stk_matches = re.findall(r"(\d{4,6})", trading_symbol)
+        stk = float(stk_matches[-1]) if stk_matches else (73600.0 if und == "SENSEX" else 22700.0)
+
+        base_p = None
+        try:
+            from trading_engine.ai.kronos_service import black_scholes_price
+            spot_px = resolve_spot_price(und)
+            if spot_px and spot_px > 0:
+                bs_px = black_scholes_price(spot_px, stk, 3.0 / 365.0, 0.07, 0.13, is_call)
+                if bs_px and bs_px > 5.0:
+                    base_p = round(float(bs_px), 2)
+        except Exception as e:
+            print(f"ContractDataManager: error calculating fallback BS price for {trading_symbol}: {e}", flush=True)
+
+        if not base_p:
+            base_p = 120.0 if is_call else 95.0
+
+        p = base_p
         base_ts = 1761450900  # 09:15 IST
-        p = 120.0 if "CE" in trading_symbol else 95.0
+        # Real market option physics: Calls and Puts have inverse movements
         for i in range(35):
-            delta = 0.8 if (i % 3 != 0) else -0.6
+            delta = (0.8 if (i % 3 != 0) else -0.6) if is_call else (-0.8 if (i % 3 != 0) else 0.6)
             p = round(max(10.0, p + delta), 2)
+            open_px = round(p - delta * 0.6, 2)
             candles.append({
                 "time": datetime.fromtimestamp(base_ts + i * 60).strftime("%Y-%m-%d %H:%M"),
                 "timestamp": base_ts + i * 60,
-                "open": round(p - 0.4, 2),
-                "high": round(p + 1.0, 2),
-                "low": round(p - 0.6, 2),
+                "open": open_px,
+                "high": round(max(open_px, p) + 0.8, 2),
+                "low": round(min(open_px, p) - 0.8, 2),
                 "close": p,
                 "volume": 1500 + i * 80
             })

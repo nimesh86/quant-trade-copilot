@@ -150,96 +150,96 @@ class MarketCollectorDaemon:
                 logger.error(f"Error initializing Kite client: {e}")
 
     def fetch_and_store_option_chain_snapshot(self):
-        """Fetches current option chain snapshot and stores in TimescaleDB."""
-        try:
-            now_ts = datetime.now(TZ_KOLKATA)
-            underlying = "NIFTY"
-            spot_price = None
+        """Fetches current option chain snapshot and stores in TimescaleDB for NIFTY and SENSEX."""
+        now_ts = datetime.now(TZ_KOLKATA)
+        underlyings_config = [
+            {"underlying": "NIFTY", "strike_step": 50.0, "default_spot": 24500.0, "target_weekday": 1 if (now_ts.year, now_ts.month) >= (2025, 9) else 3, "exchange": "NSE", "breeze_code": "NIFTY 50"},
+            {"underlying": "SENSEX", "strike_step": 100.0, "default_spot": 73600.0, "target_weekday": 4, "exchange": "BSE", "breeze_code": "SENSEX"},
+        ]
 
-            # 1. Fetch current spot
-            if self.active_broker == "breeze" and self.breeze_client and self.breeze_client.is_connected:
-                try:
-                    quotes = self.breeze_client.get_quotes(stock_code="NIFTY 50", exchange_code="NSE")
-                    if quotes and "Success" in quotes and quotes["Success"]:
-                        spot_price = float(quotes["Success"][0].get("ltp", 0))
-                except Exception as e:
-                    logger.debug(f"Breeze spot quote fetch error: {e}")
+        for ucfg in underlyings_config:
+            try:
+                underlying = ucfg["underlying"]
+                strike_step = ucfg["strike_step"]
+                spot_price = None
 
-            if not spot_price or spot_price <= 0:
-                # Query most recent spot from minute_candles or tick_data
-                try:
+                # 1. Fetch current spot
+                if self.active_broker == "breeze" and self.breeze_client and self.breeze_client.is_connected:
+                    try:
+                        quotes = self.breeze_client.get_quotes(stock_code=ucfg["breeze_code"], exchange_code=ucfg["exchange"])
+                        if quotes and "Success" in quotes and quotes["Success"]:
+                            spot_price = float(quotes["Success"][0].get("ltp", 0))
+                    except Exception as e:
+                        logger.debug(f"Breeze spot quote fetch error for {underlying}: {e}")
+
+                if not spot_price or spot_price <= 0:
+                    try:
+                        conn = get_db_connection()
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT close FROM minute_candles WHERE symbol = %s ORDER BY timestamp DESC LIMIT 1;", (ucfg["breeze_code"],))
+                            row = cur.fetchone()
+                            if row:
+                                spot_price = float(row[0])
+                        conn.close()
+                    except Exception:
+                        pass
+
+                if not spot_price or spot_price <= 0:
+                    spot_price = ucfg["default_spot"]
+
+                # 2. Determine ATM and strikes (ATM +/- 10 strikes = 21 strikes)
+                atm_strike = round(spot_price / strike_step) * strike_step
+                strikes = [atm_strike + i * strike_step for i in range(-10, 11)]
+
+                days_ahead = (ucfg["target_weekday"] - now_ts.weekday()) % 7
+                expiry_date = (now_ts + timedelta(days=days_ahead)).date()
+                t_years = max((datetime.combine(expiry_date, datetime.min.time(), tzinfo=TZ_KOLKATA) - now_ts).total_seconds() / (365.25 * 86400), 0.0001)
+
+                records = []
+                for strike in strikes:
+                    rel_strike = int(round((strike - atm_strike) / strike_step))
+                    for opt_type in ("CE", "PE"):
+                        symbol = f"{underlying}{expiry_date.strftime('%y%m%d')}{int(strike)}{opt_type}"
+                        
+                        base_iv = 0.165
+                        skew = -0.09 if opt_type == "PE" else -0.05
+                        moneyness = math.log(strike / spot_price)
+                        iv = max(base_iv + skew * moneyness, 0.08)
+                        delta, gamma, theta, vega = compute_bsm_greeks(spot_price, strike, t_years, r=0.065, iv=iv, opt_type=opt_type)
+                        
+                        intrinsic = max(spot_price - strike, 0.0) if opt_type == "CE" else max(strike - spot_price, 0.0)
+                        ltp = round(intrinsic + (spot_price * iv * math.sqrt(t_years) * 0.4), 2)
+                        bid_price = round(max(ltp - 0.25, 0.05), 2)
+                        ask_price = round(ltp + 0.25, 2)
+                        volume = 1000
+                        oi = 50000
+
+                        records.append((
+                            now_ts, symbol, underlying, expiry_date, float(strike), opt_type,
+                            int(rel_strike), float(ltp), int(volume), int(oi), 0, float(round(float(iv) * 100, 2)),
+                            float(bid_price), float(ask_price), float(round(float(delta), 4)), float(round(float(gamma), 6)),
+                            float(round(float(theta), 2)), float(round(float(vega), 2))
+                        ))
+
+                # 3. Batch insert into option_chain
+                if records:
                     conn = get_db_connection()
                     with conn.cursor() as cur:
-                        cur.execute("SELECT close FROM minute_candles WHERE symbol = 'NIFTY 50' ORDER BY timestamp DESC LIMIT 1;")
-                        row = cur.fetchone()
-                        if row:
-                            spot_price = float(row[0])
+                        query = """
+                            INSERT INTO public.option_chain (
+                                timestamp, symbol, underlying, expiry, strike, option_type,
+                                relative_strike, ltp, volume, oi, oi_change, iv,
+                                bid_price, ask_price, delta, gamma, theta, vega
+                            ) VALUES %s
+                            ON CONFLICT DO NOTHING;
+                        """
+                        execute_values(cur, query, records)
+                        conn.commit()
                     conn.close()
-                except Exception:
-                    pass
+                    logger.info(f"Captured snapshot: {len(records)} option strikes for {underlying} spot={spot_price:.2f} (ATM {atm_strike})")
 
-            if not spot_price or spot_price <= 0:
-                spot_price = 24500.0  # Fallback default if market closed/data empty
-
-            # 2. Determine ATM and strikes (ATM +/- 10 strikes = 21 strikes)
-            strike_step = 50.0
-            atm_strike = round(spot_price / strike_step) * strike_step
-            strikes = [atm_strike + i * strike_step for i in range(-10, 11)]
-
-            # Nearest weekly expiry (Thursdays or Tuesdays)
-            target_weekday = 1 if (now_ts.year, now_ts.month) >= (2025, 9) else 3
-            days_ahead = (target_weekday - now_ts.weekday()) % 7
-            expiry_date = (now_ts + timedelta(days=days_ahead)).date()
-            t_years = max((datetime.combine(expiry_date, datetime.min.time(), tzinfo=TZ_KOLKATA) - now_ts).total_seconds() / (365.25 * 86400), 0.0001)
-
-            records = []
-            for strike in strikes:
-                rel_strike = int(round((strike - atm_strike) / strike_step))
-                for opt_type in ("CE", "PE"):
-                    # Standard NSE symbol naming
-                    symbol = f"NIFTY{expiry_date.strftime('%y%m%d')}{int(strike)}{opt_type}"
-                    
-                    # Compute Greeks & synthetic IV baseline
-                    base_iv = 0.165
-                    skew = -0.09 if opt_type == "PE" else -0.05
-                    moneyness = math.log(strike / spot_price)
-                    iv = max(base_iv + skew * moneyness, 0.08)
-                    delta, gamma, theta, vega = compute_bsm_greeks(spot_price, strike, t_years, r=0.065, iv=iv, opt_type=opt_type)
-                    
-                    # Intrinsic + extrinsic price estimate
-                    intrinsic = max(spot_price - strike, 0.0) if opt_type == "CE" else max(strike - spot_price, 0.0)
-                    ltp = round(intrinsic + (spot_price * iv * math.sqrt(t_years) * 0.4), 2)
-                    bid_price = round(max(ltp - 0.25, 0.05), 2)
-                    ask_price = round(ltp + 0.25, 2)
-                    volume = 1000
-                    oi = 50000
-
-                    records.append((
-                        now_ts, symbol, underlying, expiry_date, float(strike), opt_type,
-                        int(rel_strike), float(ltp), int(volume), int(oi), 0, float(round(float(iv) * 100, 2)),
-                        float(bid_price), float(ask_price), float(round(float(delta), 4)), float(round(float(gamma), 6)),
-                        float(round(float(theta), 2)), float(round(float(vega), 2))
-                    ))
-
-            # 3. Batch insert into option_chain
-            if records:
-                conn = get_db_connection()
-                with conn.cursor() as cur:
-                    query = """
-                        INSERT INTO public.option_chain (
-                            timestamp, symbol, underlying, expiry, strike, option_type,
-                            relative_strike, ltp, volume, oi, oi_change, iv,
-                            bid_price, ask_price, delta, gamma, theta, vega
-                        ) VALUES %s
-                        ON CONFLICT DO NOTHING;
-                    """
-                    execute_values(cur, query, records)
-                    conn.commit()
-                conn.close()
-                logger.info(f"Captured snapshot: {len(records)} option strikes for spot={spot_price:.2f} (ATM {atm_strike})")
-
-        except Exception as e:
-            logger.error(f"Error capturing option chain snapshot: {e}", exc_info=False)
+            except Exception as e:
+                logger.error(f"Error capturing option chain snapshot for {ucfg.get('underlying')}: {e}", exc_info=False)
 
     async def run(self):
         """Main daemon loop."""
