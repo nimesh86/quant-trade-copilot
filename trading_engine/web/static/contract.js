@@ -2388,7 +2388,7 @@ function applySMFCloud(agg) {
         const istM = (d.getUTCMinutes() + 30) % 60;
         const cTimeStr = `${String(istH).padStart(2, '0')}:${String(istM).padStart(2, '0')}`;
         const isWarmup = (cTimeStr >= '09:15' && cTimeStr < '09:25');
-        const isBull = smf.lastSignal[i] === 1;
+        const isBull = (smf && smf.lastSignal && smf.lastSignal[i] === 1);
 
         let col, borderCol, wickCol;
         if (isWarmup) {

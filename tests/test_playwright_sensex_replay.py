@@ -25,7 +25,7 @@ async def test_1_verify_sensex_contract_loaded_via_option_chain():
         page = await context.new_page()
 
         print(f"\n[Test 1] Navigating to {BASE_URL}/contract...")
-        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.goto(f"{BASE_URL}/contract", wait_until="domcontentloaded")
         await page.wait_for_selector("#stations-stream", timeout=10000)
 
         # 1. Open the Option Chain modal
@@ -157,7 +157,8 @@ async def test_2_verify_sensex_replay_mode_30min_and_premium():
         page = await context.new_page()
 
         print(f"\n[Test 2] Navigating to {BASE_URL}/contract and preparing SENSEX ATM contract...")
-        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.goto(f"{BASE_URL}/contract", wait_until="domcontentloaded")
+        await page.wait_for_selector("#stations-stream", timeout=10000)
 
         # 1. Load SENSEX ATM via Option Chain or direct loadStrikePair
         await page.click("#btn-master-chain")
