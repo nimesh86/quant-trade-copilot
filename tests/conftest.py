@@ -44,3 +44,34 @@ def sample_candles():
             "volume": 1000 + (i * 150)
         })
     return candles
+
+@pytest.fixture(scope="session", autouse=True)
+def live_server():
+    """Starts the web server in a background thread for Playwright E2E tests if not running."""
+    import socket
+    import threading
+    import time
+    import uvicorn
+
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('127.0.0.1', port)) == 0
+
+    if is_port_in_use(8080):
+        yield "http://127.0.0.1:8080"
+        return
+
+    config = uvicorn.Config(app=app, host="127.0.0.1", port=8080, log_level="warning")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+
+    # Wait for server to boot
+    for _ in range(50):
+        if is_port_in_use(8080):
+            break
+        time.sleep(0.1)
+
+    yield "http://127.0.0.1:8080"
+    server.should_exit = True
+

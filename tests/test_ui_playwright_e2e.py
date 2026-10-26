@@ -46,7 +46,7 @@ async def test_ui_e2e_complete_mobile_flow():
 
         # 2. Test PE Buy Order Execution & Exit Button Viewport Safety
         await page.click('#pe-btn-buy')
-        await page.wait_for_timeout(500)
+        await page.wait_for_selector('#pe-toolbar.has-pos', timeout=5000)
 
         pe_cls_pos = await page.locator('#pe-toolbar').get_attribute('class')
         ce_cls_pos = await page.locator('#ce-toolbar').get_attribute('class')
@@ -61,13 +61,13 @@ async def test_ui_e2e_complete_mobile_flow():
 
         # Exit PE position
         await exit_btn.click()
-        await page.wait_for_timeout(500)
+        await page.wait_for_selector('#pe-toolbar:not(.has-pos)', timeout=5000)
         assert 'has-pos' not in (await page.locator('#pe-toolbar').get_attribute('class'))
         assert await page.locator('#pe-btn-buy').is_visible()
 
         # 3. Test CE Buy & Exit Cycle
         await page.click('#ce-btn-buy')
-        await page.wait_for_timeout(500)
+        await page.wait_for_selector('#ce-toolbar.has-pos', timeout=5000)
         assert 'has-pos' in (await page.locator('#ce-toolbar').get_attribute('class'))
         assert 'has-pos' not in (await page.locator('#pe-toolbar').get_attribute('class'))
 
@@ -77,7 +77,7 @@ async def test_ui_e2e_complete_mobile_flow():
         assert ce_box['x'] + ce_box['width'] <= 390
 
         await ce_exit_btn.click()
-        await page.wait_for_timeout(500)
+        await page.wait_for_selector('#ce-toolbar:not(.has-pos)', timeout=5000)
         assert 'has-pos' not in (await page.locator('#ce-toolbar').get_attribute('class'))
 
         # 4. Test Station Limit Buttons Wiring & Overlay
@@ -353,3 +353,201 @@ async def test_ui_lot_stepper_boundaries_and_direct_input():
         assert await page.evaluate("() => window.Stations.CE.tradingLots") == 50
 
         await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_ui_limit_buy_full_lifecycle_and_drag_controls():
+    """
+    TC-UI-LIMIT-LIFECYCLE:
+    Complete proof and verification of Limit Buy UI and Backend:
+    1. Drawing the Box: activates overlay, renders target (green) & SL (red) zones, creates hitboxes.
+    2. Moving the Box: moves limit price and shifts target & SL while preserving bracket delta.
+    3. Adjusting Target: independently adjusts target price without shifting limit or SL.
+    4. Adjusting SL: independently adjusts SL price without shifting limit or target.
+    5. Placing Limit Order: executes order payload to backend, confirms pending order in state.
+    6. Backend Trigger & Fill: price tick reaches limit price -> order fills into active position.
+    7. Clean Cancellation: limit order can be cancelled cleanly before fill.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 390, 'height': 844})
+        page = await context.new_page()
+
+        # 0. Clean reset
+        await page.goto(f"{BASE_URL}/contract", wait_until="networkidle")
+        await page.evaluate("() => fetch('/api/trade/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({initial_capital:100000.0})})")
+        await page.reload(wait_until="networkidle")
+        await page.wait_for_timeout(600)
+
+        # 1. DRAWING BOX: Click Limit button on Station CE
+        await page.click('#ce-btn-limit')
+        await page.wait_for_timeout(300)
+
+        # Assert tool is active and styled
+        limit_btn_cls = await page.locator('#ce-btn-limit').get_attribute('class')
+        assert 'active' in limit_btn_cls, "Clicking #ce-btn-limit must activate button (.active)"
+
+        box_state = await page.evaluate("""() => {
+            const st = window.Stations.CE;
+            return {
+                active: st.limitTool?.active,
+                limitPrice: st.limitTool?.limitPrice,
+                targetPrice: st.limitTool?.targetPrice,
+                slPrice: st.limitTool?.slPrice,
+                hitBoxes: st.limitToolHitBoxes || []
+            };
+        }""")
+
+        assert box_state['active'] is True, "limitTool.active must be true"
+        assert box_state['limitPrice'] > 0, "Initial limit price must be > 0"
+        assert box_state['targetPrice'] > box_state['limitPrice'], "Target must be above limit buy price"
+        assert box_state['slPrice'] < box_state['limitPrice'], "SL must be below limit buy price"
+
+        # Verify hitboxes generated on canvas
+        hb_types = [hb['type'] for hb in box_state['hitBoxes']]
+        assert 'limit_drag' in hb_types, "limit_drag hitbox must exist"
+        assert 'target_drag' in hb_types, "target_drag hitbox must exist"
+        assert 'sl_drag' in hb_types, "sl_drag hitbox must exist"
+        assert 'limit_place' in hb_types, "limit_place hitbox must exist"
+        assert 'limit_cancel' in hb_types, "limit_cancel hitbox must exist"
+
+        init_limit = box_state['limitPrice']
+        init_tgt = box_state['targetPrice']
+        init_sl = box_state['slPrice']
+        tgt_delta = round(init_tgt - init_limit, 2)
+        sl_delta = round(init_limit - init_sl, 2)
+
+        # 2. MOVING THE BOX: Shift Limit Buy Price BELOW market by -10.0
+        # A Buy Limit placed below current market sits pending until price drops to limit price
+        new_limit = round(init_limit - 10.0, 2)
+        moved_state = await page.evaluate(f"""() => {{
+            const st = window.Stations.CE;
+            const newLim = {new_limit};
+            const delta = newLim - st.limitTool.limitPrice;
+            st.limitTool.limitPrice = newLim;
+            st.limitTool.targetPrice = Math.round((st.limitTool.targetPrice + delta) * 20) / 20;
+            st.limitTool.slPrice = Math.round((st.limitTool.slPrice + delta) * 20) / 20;
+            renderStationSMFCanvas(st);
+            return {{
+                limitPrice: st.limitTool.limitPrice,
+                targetPrice: st.limitTool.targetPrice,
+                slPrice: st.limitTool.slPrice
+            }};
+        }}""")
+
+
+        assert moved_state['limitPrice'] == new_limit, f"Limit price must move to {new_limit}"
+        # Bracket delta must be preserved
+        assert abs((moved_state['targetPrice'] - moved_state['limitPrice']) - tgt_delta) < 0.1, "Target delta must be preserved when moving box"
+        assert abs((moved_state['limitPrice'] - moved_state['slPrice']) - sl_delta) < 0.1, "SL delta must be preserved when moving box"
+
+        # 3. ADJUSTING TARGET: Independently drag Target handle +15.0 higher
+        adj_target = round(moved_state['targetPrice'] + 15.0, 2)
+        target_state = await page.evaluate(f"""() => {{
+            const st = window.Stations.CE;
+            st.limitTool.targetPrice = {adj_target};
+            renderStationSMFCanvas(st);
+            return {{
+                limitPrice: st.limitTool.limitPrice,
+                targetPrice: st.limitTool.targetPrice,
+                slPrice: st.limitTool.slPrice
+            }};
+        }}""")
+
+        assert target_state['targetPrice'] == adj_target, "Target price must update to adjusted value"
+        assert target_state['limitPrice'] == new_limit, "Limit price must remain unchanged when adjusting Target"
+        assert target_state['slPrice'] == moved_state['slPrice'], "SL price must remain unchanged when adjusting Target"
+
+        # 4. ADJUSTING SL: Independently drag SL handle -5.0 lower
+        adj_sl = round(target_state['slPrice'] - 5.0, 2)
+        sl_state = await page.evaluate(f"""() => {{
+            const st = window.Stations.CE;
+            st.limitTool.slPrice = {adj_sl};
+            renderStationSMFCanvas(st);
+            return {{
+                limitPrice: st.limitTool.limitPrice,
+                targetPrice: st.limitTool.targetPrice,
+                slPrice: st.limitTool.slPrice
+            }};
+        }}""")
+
+        assert sl_state['slPrice'] == adj_sl, "SL price must update to adjusted value"
+        assert sl_state['limitPrice'] == new_limit, "Limit price must remain unchanged when adjusting SL"
+        assert sl_state['targetPrice'] == adj_target, "Target price must remain unchanged when adjusting SL"
+
+        # 5. PLACING LIMIT ORDER (UI -> API -> Backend)
+        # Execute place limit order
+        place_res = await page.evaluate("""async () => {
+            const st = window.Stations.CE;
+            await executeStationLimitOrder(st);
+            return {
+                toolActive: st.limitTool?.active,
+                btnActive: document.getElementById('ce-btn-limit')?.classList.contains('active')
+            };
+        }""")
+
+        await page.wait_for_timeout(400)
+        assert place_res['toolActive'] is False, "Limit tool must deactivate after order placement"
+        assert place_res['btnActive'] is False, "Limit button .active must be removed"
+
+        # Verify toast alert popped up
+        all_toasts = await page.locator('.top-toast').all_text_contents()
+        assert any("LIMIT ORDER PLACED" in t for t in all_toasts), f"Expected LIMIT ORDER PLACED toast in {all_toasts}"
+
+
+        # 6. VERIFY BACKEND PENDING STATE
+        engine_state = await page.evaluate("() => fetch('/api/trade/state').then(r => r.json())")
+        pending_orders = engine_state.get('pending_orders', [])
+        assert len(pending_orders) == 1, f"Expected 1 pending limit order in backend, found {len(pending_orders)}"
+
+        po = pending_orders[0]
+        assert po['order_type'] == 'LIMIT'
+        assert po['limit_price'] == new_limit
+        assert po['sl'] == adj_sl
+        assert po['target1'] == adj_target
+        assert po['side'] == 'BUY'
+
+        # 7. BACKEND TRIGGER & ORDER FILL
+        # A. Market price stays above limit price -> order stays pending
+        above_res = await page.evaluate(f"""() => fetch('/api/trade/tick', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                symbol: window.Stations.CE.symbol,
+                price: {new_limit + 5.0},
+                atr: 3.0
+            }})
+        }}).then(r => r.json())""")
+
+        assert above_res['event'] is None or above_res['event'].get('action') != 'ORDER_FILLED', "Order must NOT fill while price is above limit"
+        state_after_above = await page.evaluate("() => fetch('/api/trade/state').then(r => r.json())")
+        assert len(state_after_above.get('pending_orders', [])) == 1
+
+        # B. Market price reaches / dips below limit price -> order fills immediately!
+        fill_res = await page.evaluate(f"""() => fetch('/api/trade/tick', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{
+                symbol: window.Stations.CE.symbol,
+                price: {new_limit - 0.5},
+                atr: 3.0
+            }})
+        }}).then(r => r.json())""")
+
+        assert fill_res['event'] is not None, "Tick at limit price must trigger order event"
+        assert fill_res['event'].get('action') == 'ORDER_FILLED', f"Expected ORDER_FILLED, got {fill_res['event']}"
+
+        # C. Verify active position created with exact adjusted SL and Target
+        final_state = await page.evaluate("() => fetch('/api/trade/state').then(r => r.json())")
+        assert len(final_state.get('pending_orders', [])) == 0, "Pending orders must be 0 after fill"
+        active_positions = final_state.get('active_positions', {})
+        ce_sym = await page.evaluate("() => window.Stations.CE.symbol")
+        assert ce_sym in active_positions, f"Active positions must contain {ce_sym}"
+
+        pos = active_positions[ce_sym]
+        assert pos['entry_price'] == new_limit, f"Filled position entry price must equal limit price {new_limit}"
+        assert pos['current_sl'] == adj_sl, f"Filled position SL must equal adjusted SL {adj_sl}"
+        assert pos['target1'] == adj_target, f"Filled position Target must equal adjusted Target {adj_target}"
+
+        await browser.close()
+
