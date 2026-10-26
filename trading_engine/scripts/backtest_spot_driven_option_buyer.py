@@ -48,12 +48,24 @@ def run_hybrid_spot_backtest():
     spot_df['time_hm'] = spot_df['timestamp'].dt.strftime('%H:%M')
     print(f"Loaded {len(spot_df):,} Spot candles across {spot_df['date'].nunique()} trading days.")
 
-    # 2. Load Option cache
-    print("2. Loading Option Contracts Cache...")
-    t0 = time.time()
-    with open(CACHE_FILE, "rb") as f:
-        opt_df = pickle.load(f)
-    print(f"Loaded {len(opt_df):,} option candles in {time.time()-t0:.1f}s.")
+    # 2. Load Option candles
+    if os.path.exists(CACHE_FILE):
+        print("2. Loading Option Contracts Cache from PKL...")
+        t0 = time.time()
+        with open(CACHE_FILE, "rb") as f:
+            opt_df = pickle.load(f)
+        print(f"Loaded {len(opt_df):,} option candles in {time.time()-t0:.1f}s.")
+    else:
+        print("2. Loading Option Contracts directly from PostgreSQL option_minute_candles...")
+        t0 = time.time()
+        query_opt = "SELECT timestamp, symbol, open, high, low, close, volume FROM option_minute_candles ORDER BY timestamp ASC;"
+        with engine.connect() as conn:
+            opt_df = pd.read_sql(text(query_opt), conn)
+        opt_df['timestamp'] = pd.to_datetime(opt_df['timestamp']).dt.tz_convert('Asia/Kolkata')
+        opt_df['date'] = opt_df['timestamp'].dt.strftime('%Y-%m-%d')
+        opt_df['time_hm'] = opt_df['timestamp'].dt.strftime('%H:%M')
+        print(f"Loaded {len(opt_df):,} option candles from DB in {time.time()-t0:.1f}s.")
+
 
     print("3. Indexing option contracts...")
     opt_by_day = {}
