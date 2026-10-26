@@ -2414,11 +2414,11 @@ function applySMFCloud(agg) {
     });
     C.candleSeries.setData(coloredCandles);
 
-    if (C.smfEnabled) {
-        if (C.smfBcSeries) C.smfBcSeries.setData(smf.bcPoints);
-        if (C.smfUpperSeries) C.smfUpperSeries.setData(smf.upPoints);
-        if (C.smfLowerSeries) C.smfLowerSeries.setData(smf.loPoints);
-        if (C.smfBoSeries) C.smfBoSeries.setData(smf.boPoints);
+    if (C.smfEnabled && smf) {
+        if (C.smfBcSeries) C.smfBcSeries.setData(smf.bcPoints || []);
+        if (C.smfUpperSeries) C.smfUpperSeries.setData(smf.upPoints || []);
+        if (C.smfLowerSeries) C.smfLowerSeries.setData(smf.loPoints || []);
+        if (C.smfBoSeries) C.smfBoSeries.setData(smf.boPoints || []);
     } else {
         if (C.smfBcSeries) C.smfBcSeries.setData([]);
         if (C.smfUpperSeries) C.smfUpperSeries.setData([]);
@@ -2427,20 +2427,20 @@ function applySMFCloud(agg) {
     }
 
     // Maximum Target Dynamic Volatility Bands (Upper & Lower)
-    if (C.targetsEnabled && C.smfTargetUpperSeries && smf.targetMaxUpperPoints) {
+    if (C.targetsEnabled && C.smfTargetUpperSeries && smf && smf.targetMaxUpperPoints) {
         C.smfTargetUpperSeries.setData(smf.targetMaxUpperPoints);
     } else if (C.smfTargetUpperSeries) {
         C.smfTargetUpperSeries.setData([]);
     }
 
-    if (C.targetsEnabled && C.smfTargetLowerSeries && smf.targetMaxLowerPoints) {
+    if (C.targetsEnabled && C.smfTargetLowerSeries && smf && smf.targetMaxLowerPoints) {
         C.smfTargetLowerSeries.setData(smf.targetMaxLowerPoints);
     } else if (C.smfTargetLowerSeries) {
         C.smfTargetLowerSeries.setData([]);
     }
 
     // Update horizontal target projections & header target badge
-    updateTargetPriceLines(smf.latestTradeSignal, agg[agg.length - 1]?.close);
+    updateTargetPriceLines(smf ? smf.latestTradeSignal : null, agg[agg.length - 1]?.close);
 
     // ── SMF Dynamic Exit & Chandelier Trailing Engine Execution ──────────────
     let deResult = null;
