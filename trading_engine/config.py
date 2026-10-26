@@ -147,3 +147,37 @@ def get_index_spec(underlying: str) -> dict:
         return INDEX_SPEC_REGISTRY["MIDCPNIFTY"]
     return INDEX_SPEC_REGISTRY["NIFTY"]
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BREEZE SDK COMPATIBILITY LAYER
+# ─────────────────────────────────────────────────────────────────────────────
+# ICICI BreezeConnect SDK has an un-namespaced 'import config' which collides
+# with trading_engine/config.py when trading_engine is in sys.path.
+# Providing these direct constants and __getattr__ proxy ensures 100% collision immunity.
+SECURITY_MASTER_URL: str = "https://directlink.icicidirect.com/MotherAppMaster/SecurityMaster.zip"
+API_URL: str = "https://api.icicidirect.com/breezeapi/api/v1/"
+BREEZE_NEW_URL: str = "https://breezeapi.icicidirect.com/api/v2/"
+LIVE_FEEDS_URL: str = "https://livefeeds.icicidirect.com"
+LIVE_STREAM_URL: str = "https://livestream.icicidirect.com"
+LIVE_OHLC_STREAM_URL: str = "https://breezeapi.icicidirect.com"
+STOCK_SCRIPT_CSV_URL: str = "https://traderweb.icicidirect.com/Content/File/txtFile/ScripFile/StockScriptNew.csv"
+
+
+def __getattr__(name: str):
+    """Fallback proxy to breeze_connect.config to prevent third-party SDK namespace collisions."""
+    try:
+        import sys, importlib.util, pathlib
+        for p in sys.path:
+            cand = pathlib.Path(p) / "breeze_connect" / "config.py"
+            if cand.exists():
+                spec = importlib.util.spec_from_file_location("breeze_connect_config_proxy", str(cand))
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                val = getattr(mod, name)
+                globals()[name] = val
+                return val
+    except Exception:
+        pass
+    raise AttributeError(f"module 'config' has no attribute '{name}'")
+
+

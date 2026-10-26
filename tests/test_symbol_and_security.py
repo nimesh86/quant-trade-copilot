@@ -74,3 +74,19 @@ def test_tc_sec_03_injection_resilience(client):
         res = client.get(f"/api/contracts/expiries?underlying={m}")
         # Must return valid HTTP response, never 500 unhandled server crash
         assert res.status_code in [200, 400, 422]
+
+
+def test_tc_breeze_config_namespace_immunity():
+    """TC-BRZ-01: Verifies trading_engine.config provides Breeze SDK constants and avoids module collision."""
+    import trading_engine.config as cfg
+    assert hasattr(cfg, "SECURITY_MASTER_URL")
+    assert cfg.SECURITY_MASTER_URL == "https://directlink.icicidirect.com/MotherAppMaster/SecurityMaster.zip"
+    assert hasattr(cfg, "APIEndPoint")
+    assert hasattr(cfg, "API_URL")
+
+    # BreezeConnect import must succeed without AttributeError: module 'config' has no attribute 'SECURITY_MASTER_URL'
+    from breeze_connect import BreezeConnect
+    client = BreezeConnect(api_key="mock_test_key")
+    assert client is not None
+    assert client.api_key == "mock_test_key"
+
