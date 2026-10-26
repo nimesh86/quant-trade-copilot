@@ -361,3 +361,103 @@ def test_tc_eng_24_chandelier_trailing_atr(clean_engine):
     pos = clean_engine.active_positions["NIFTY26OCT22700CE"]
     assert pos["current_sl"] == 115.5
 
+def test_tc_eng_25_decoupled_background_sl_trigger_when_viewing_different_index(clean_engine):
+    """
+    TC-ENG-25: Multi-index position decoupling.
+    User buys NIFTY contract with SL=90.0, then buys or views SENSEX.
+    When a NIFTY tick drops below SL (88.0), NIFTY SL MUST trigger in background,
+    closing the NIFTY position while leaving SENSEX open and untouched.
+    """
+    # 1. Buy NIFTY contract with SL = 90.0
+    res_nifty = clean_engine.place_order(
+        symbol="NIFTY26OCT22700CE",
+        side="BUY",
+        order_type="MARKET",
+        lots=1,
+        sl=90.0,
+        target1=120.0,
+        target2=150.0,
+        current_market_price=100.0
+    )
+    assert res_nifty["status"] == "success"
+
+    # 2. Buy SENSEX contract (now SENSEX is active in terminal / UI)
+    res_sensex = clean_engine.place_order(
+        symbol="SENSEX26OCT73600CE",
+        side="BUY",
+        order_type="MARKET",
+        lots=1,
+        sl=140.0,
+        current_market_price=160.0
+    )
+    assert res_sensex["status"] == "success"
+
+    # Verify both positions exist
+    assert "NIFTY26OCT22700CE" in clean_engine.active_positions
+    assert "SENSEX26OCT73600CE" in clean_engine.active_positions
+
+    # 3. NIFTY tick arrives at 88.0 (SL breached) while active_position or UI is on SENSEX
+    close_event = clean_engine.update_price_tick("NIFTY26OCT22700CE", 88.0)
+    assert close_event is not None
+    assert close_event["status"] == "success"
+    assert close_event["action"] == "POSITION_CLOSED"
+    assert close_event["record"]["symbol"] == "NIFTY26OCT22700CE"
+    assert close_event["record"]["reason"] == "STOP_LOSS_HIT"
+    assert close_event["record"]["exit_price"] == 90.0
+
+    # NIFTY position must be completely removed from active_positions
+    assert "NIFTY26OCT22700CE" not in clean_engine.active_positions
+
+    # SENSEX position MUST remain 100% intact and untouched
+    assert "SENSEX26OCT73600CE" in clean_engine.active_positions
+    assert clean_engine.active_positions["SENSEX26OCT73600CE"]["units"] == 20
+
+def test_tc_eng_26_decoupled_background_target_trigger_when_viewing_different_index(clean_engine):
+    """
+    TC-ENG-26: Multi-index target decoupling.
+    User buys NIFTY contract with Target2 = 140.0.
+    Terminal switches to SENSEX.
+    Incoming NIFTY tick at 142.0 MUST trigger TARGET_2_HIT in background.
+    """
+    clean_engine.place_order(
+        symbol="NIFTY26OCT22700CE",
+        side="BUY",
+        order_type="MARKET",
+        lots=1,
+        target2=140.0,
+        current_market_price=100.0
+    )
+    clean_engine.place_order(
+        symbol="SENSEX26OCT73600CE",
+        side="BUY",
+        order_type="MARKET",
+        lots=1,
+        current_market_price=150.0
+    )
+
+    # NIFTY tick crosses target2
+    close_event = clean_engine.update_price_tick("NIFTY26OCT22700CE", 142.0)
+    assert close_event is not None
+    assert close_event["action"] == "POSITION_CLOSED"
+    assert close_event["record"]["symbol"] == "NIFTY26OCT22700CE"
+    assert close_event["record"]["reason"] == "TARGET_2_HIT"
+    assert "NIFTY26OCT22700CE" not in clean_engine.active_positions
+    assert "SENSEX26OCT73600CE" in clean_engine.active_positions
+
+def test_tc_eng_27_get_monitored_symbols_all_indices(clean_engine):
+    """
+    TC-ENG-27: get_monitored_symbols captures all active positions and pending limit orders
+    across multiple indices so broker WebSocket continuously streams them in background.
+    """
+    assert clean_engine.get_monitored_symbols() == []
+
+    clean_engine.place_order(symbol="NIFTY26OCT22700CE", side="BUY", current_market_price=100.0)
+    clean_engine.place_order(symbol="SENSEX26OCT73600PE", side="BUY", current_market_price=120.0)
+    clean_engine.place_order(symbol="BANKNIFTY26OCT52000CE", order_type="LIMIT", limit_price=150.0, current_market_price=180.0)
+
+    monitored = clean_engine.get_monitored_symbols()
+    assert "NIFTY26OCT22700CE" in monitored
+    assert "SENSEX26OCT73600PE" in monitored
+    assert "BANKNIFTY26OCT52000CE" in monitored
+
+

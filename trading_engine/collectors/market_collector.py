@@ -154,8 +154,12 @@ class MarketCollectorDaemon:
         now_ts = datetime.now(TZ_KOLKATA)
         underlyings_config = [
             {"underlying": "NIFTY", "strike_step": 50.0, "default_spot": 24500.0, "target_weekday": 1 if (now_ts.year, now_ts.month) >= (2025, 9) else 3, "exchange": "NSE", "breeze_code": "NIFTY 50"},
-            {"underlying": "SENSEX", "strike_step": 100.0, "default_spot": 73600.0, "target_weekday": 4, "exchange": "BSE", "breeze_code": "SENSEX"},
+            {"underlying": "BANKNIFTY", "strike_step": 100.0, "default_spot": 51200.0, "target_weekday": 2, "exchange": "NSE", "breeze_code": "CNXBAN"},
+            {"underlying": "SENSEX", "strike_step": 100.0, "default_spot": 79500.0, "target_weekday": 4, "exchange": "BSE", "breeze_code": "SENSEX"},
+            {"underlying": "FINNIFTY", "strike_step": 50.0, "default_spot": 23800.0, "target_weekday": 1, "exchange": "NSE", "breeze_code": "NIFFIN"},
+            {"underlying": "MIDCPNIFTY", "strike_step": 25.0, "default_spot": 12800.0, "target_weekday": 0, "exchange": "NSE", "breeze_code": "NIFMID"},
         ]
+
 
         for ucfg in underlyings_config:
             try:

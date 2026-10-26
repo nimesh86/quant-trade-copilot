@@ -9,7 +9,7 @@ import os
 import sys
 import logging
 from datetime import datetime, date
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Callable, Tuple, Set
 
 from trading_engine.core.keyvault import get_secret
 from trading_engine.adapters.symbol_translator import to_breeze_params
@@ -28,6 +28,11 @@ class BreezeBrokerAdapter:
         self.client = None
         self.is_connected = False
         self._subscribed_symbols = set()
+        self._tick_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._token_to_symbol: Dict[str, str] = {}
+        self._symbol_to_tokens: Dict[str, Tuple[str, str]] = {}
+        self.ws_connected = False
+
 
     def is_configured(self) -> bool:
         """Returns True if all required Breeze credentials exist in KeyVault."""
@@ -190,12 +195,217 @@ class BreezeBrokerAdapter:
             logger.error(f"BreezeBrokerAdapter: Quote error for {symbol}: {e}")
             return None
 
+    def register_tick_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """Registers a callback function to receive normalized live ticks from broker WebSocket."""
+        if callback not in self._tick_callbacks:
+            self._tick_callbacks.append(callback)
+
+    def unregister_tick_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """Unregisters a previously registered callback."""
+        if callback in self._tick_callbacks:
+            self._tick_callbacks.remove(callback)
+
+    def start_websocket(self, on_tick_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> bool:
+        """
+        Connects to ICICI Direct Breeze streaming WebSocket.
+        Subscribes to live price refresh feeds with ZERO REST calls.
+        """
+        breeze = self.connect()
+        if not breeze:
+            logger.warning("BreezeBrokerAdapter: Cannot start WebSocket, client not connected.")
+            return False
+
+        if on_tick_callback:
+            self.register_tick_callback(on_tick_callback)
+
+        try:
+            # Ensure SecurityMaster token maps are loaded
+            if not getattr(breeze, "stock_script_dict_list", None) or not breeze.stock_script_dict_list[0]:
+                logger.info("BreezeBrokerAdapter: Loading security master script mappings...")
+                breeze.get_stock_script_list()
+
+            breeze.interval = ""
+            breeze.on_ticks = self._handle_incoming_breeze_tick
+
+            if not self.ws_connected:
+                logger.info("BreezeBrokerAdapter: Initializing ws_connect() streaming socket...")
+                breeze.ws_connect()
+                self.ws_connected = True
+                logger.info("BreezeBrokerAdapter: Broker WebSocket connected successfully.")
+
+            # Re-subscribe any previously registered symbols
+            for sym in list(self._subscribed_symbols):
+                self.subscribe_feeds(sym)
+
+            return True
+        except Exception as e:
+            logger.error(f"BreezeBrokerAdapter: Failed to start WebSocket stream: {e}")
+            self.ws_connected = False
+            return False
+
+    def subscribe_feeds(self, symbol: str) -> bool:
+        """
+        Subscribes to live feeds for a canonical symbol using WebSocket.
+        Uses 0 REST API calls.
+        """
+        breeze = self.connect()
+        if not breeze:
+            return False
+
+        symbol = symbol.strip().upper()
+        if symbol in self._subscribed_symbols and symbol in self._symbol_to_tokens:
+            return True
+
+        params = to_breeze_params(symbol)
+        if not params:
+            logger.warning(f"BreezeBrokerAdapter: Could not parse symbol {symbol} for subscription.")
+            return False
+
+        try:
+            # Format expiry date for security master: DD-Mon-YYYY (e.g. 29-Oct-2026)
+            expiry_str = ""
+            from trading_engine.adapters.symbol_translator import parse_canonical_symbol
+            parsed = parse_canonical_symbol(symbol)
+            if parsed and parsed.get("expiry_date"):
+                expiry_str = parsed["expiry_date"].strftime("%d-%b-%Y")
+
+            breeze.interval = ""
+            quotes_tok, depth_tok = breeze.get_stock_token_value(
+                exchange_code=params["exchange_code"],
+                stock_code=params["stock_code"],
+                product_type=params["product_type"],
+                expiry_date=expiry_str,
+                strike_price=str(params["strike_price"]),
+                right=params["right"],
+                get_exchange_quotes=True,
+                get_market_depth=True
+            )
+
+            if isinstance(quotes_tok, Exception) or not quotes_tok:
+                logger.warning(f"BreezeBrokerAdapter: get_stock_token_value error for {symbol}: {quotes_tok}")
+                return False
+
+            # Store bidirectional mapping
+            self._symbol_to_tokens[symbol] = (str(quotes_tok), str(depth_tok))
+            self._token_to_symbol[str(quotes_tok)] = symbol
+            if depth_tok:
+                self._token_to_symbol[str(depth_tok)] = symbol
+            if "!" in str(quotes_tok):
+                self._token_to_symbol[str(quotes_tok).split("!")[-1]] = symbol
+
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+                if depth_tok:
+                    breeze.sio_rate_refresh_handler.watch(depth_tok)
+
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed to WebSocket feeds for {symbol} (token={quotes_tok})")
+            return True
+        except Exception as e:
+            logger.error(f"BreezeBrokerAdapter: Exception subscribing to {symbol}: {e}")
+            return False
+
+    def unsubscribe_feeds(self, symbol: str) -> bool:
+        """Unsubscribes from WebSocket feeds for a canonical symbol."""
+        breeze = self.connect()
+        if not breeze:
+            return False
+
+        symbol = symbol.strip().upper()
+        tokens = self._symbol_to_tokens.pop(symbol, None)
+        self._subscribed_symbols.discard(symbol)
+
+        if tokens and hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+            quotes_tok, depth_tok = tokens
+            try:
+                breeze.sio_rate_refresh_handler.unwatch(quotes_tok)
+                if depth_tok:
+                    breeze.sio_rate_refresh_handler.unwatch(depth_tok)
+                self._token_to_symbol.pop(str(quotes_tok), None)
+                if depth_tok:
+                    self._token_to_symbol.pop(str(depth_tok), None)
+            except Exception as e:
+                logger.error(f"BreezeBrokerAdapter: Error unwatching {symbol}: {e}")
+
+        logger.info(f"BreezeBrokerAdapter: Unsubscribed from {symbol}")
+        return True
+
+    def _handle_incoming_breeze_tick(self, data: Dict[str, Any]):
+        """
+        Receives real-time streaming tick dict from Breeze socket.io client.
+        Normalizes tick and dispatches immediately to all registered callbacks with 0 latency.
+        """
+        if not data or not isinstance(data, dict):
+            return
+
+        # 1. Resolve canonical symbol
+        sym_token = str(data.get("symbol") or "")
+        token_num = sym_token.split("!")[-1] if "!" in sym_token else sym_token
+        canonical_symbol = self._token_to_symbol.get(sym_token) or self._token_to_symbol.get(token_num)
+
+        if not canonical_symbol:
+            stk_name = data.get("stock_name") or data.get("stock_code")
+            strike = data.get("strike_price")
+            right = data.get("right")
+            exp = data.get("expiry_date")
+            if stk_name and strike and right:
+                from trading_engine.adapters.symbol_translator import to_canonical_symbol
+                canonical_symbol = to_canonical_symbol(stk_name, strike, right, exp)
+            elif stk_name:
+                canonical_symbol = stk_name
+
+        if not canonical_symbol:
+            return
+
+        # 2. Extract price
+        ltp = float(data.get("last") or data.get("last_trade_price") or data.get("close") or 0.0)
+        if ltp <= 0:
+            return
+
+        vol = int(data.get("ttq") or data.get("total_traded_volume") or data.get("volume") or 0)
+        oi = int(data.get("OI") or data.get("open_interest_value") or data.get("open_interest") or 0)
+        high = float(data.get("high") or ltp)
+        low = float(data.get("low") or ltp)
+        open_px = float(data.get("open") or ltp)
+        close_px = float(data.get("close") or ltp)
+        ltt = data.get("ltt") or data.get("last_traded_time") or datetime.now().isoformat()
+
+        tick_packet = {
+            "symbol": canonical_symbol,
+            "price": round(ltp, 2),
+            "volume": vol,
+            "oi": oi,
+            "high": round(high, 2),
+            "low": round(low, 2),
+            "open": round(open_px, 2),
+            "close": round(close_px, 2),
+            "timestamp": str(ltt),
+            "source": "breeze_websocket"
+        }
+
+        # 3. Zero-latency dispatch to listeners
+        for cb in list(self._tick_callbacks):
+            try:
+                cb(tick_packet)
+            except Exception as e:
+                logger.error(f"BreezeBrokerAdapter: Error in tick listener callback: {e}")
+
     def reset(self):
         """Resets cached client instance for hot-reload on credential update."""
         global _breeze_client
+        if _breeze_client and hasattr(_breeze_client, "ws_disconnect"):
+            try:
+                _breeze_client.ws_disconnect()
+            except Exception:
+                pass
         _breeze_client = None
         self.client = None
         self.is_connected = False
+        self.ws_connected = False
+        self._subscribed_symbols.clear()
+        self._token_to_symbol.clear()
+        self._symbol_to_tokens.clear()
+
 
 
 default_breeze_adapter = BreezeBrokerAdapter()

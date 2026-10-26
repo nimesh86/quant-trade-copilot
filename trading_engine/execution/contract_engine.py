@@ -380,14 +380,12 @@ class ContractTradingEngine:
         """
         Sub-second tick update hook:
         1. Evaluates pending limit orders for fills.
-        2. Updates live unrealized PnL.
-        3. Evaluates automatic trailing stop and SL/Target exits.
+        2. Updates live unrealized PnL for the specific contract symbol.
+        3. Evaluates automatic trailing stop and SL/Target exits in the background
+           regardless of what symbol or screen the UI is currently viewing.
         """
         if not price or price <= 0:
             return None
-
-        self.current_symbol = symbol
-        self.current_price = float(price)
 
         # 1. Check pending limit orders for fills
         for o in list(self.pending_orders):
@@ -395,9 +393,13 @@ class ContractTradingEngine:
                 if o["side"] == "BUY" and price <= o["limit_price"]:
                     return self._fill_order(o, fill_price=o["limit_price"])
 
-        # 2. Update active position metrics
-        if self.active_position and self.active_position["symbol"] == symbol:
+        # 2. Check active positions by symbol (Decoupled execution: works for any open contract
+        # even if UI is currently viewing a different index/contract)
+        pos = self.active_positions.get(symbol)
+        if not pos and self.active_position and self.active_position.get("symbol") == symbol:
             pos = self.active_position
+
+        if pos:
             pos["current_price"] = price
             pos["highest_price"] = max(pos.get("highest_price", price), price)
             
@@ -427,12 +429,27 @@ class ContractTradingEngine:
             # C. Check Automatic Exits
             if current_sl is not None and current_sl > 0 and price <= current_sl:
                 reason = "TRAILING_SL_HIT" if pos.get("be_locked") else "STOP_LOSS_HIT"
-                return self.close_position(reason=reason, exit_price=current_sl)
+                return self.close_position(reason=reason, exit_price=current_sl, symbol=symbol)
 
             if t2 and t2 > 0 and price >= t2:
-                return self.close_position(reason="TARGET_2_HIT", exit_price=t2)
+                return self.close_position(reason="TARGET_2_HIT", exit_price=t2, symbol=symbol)
 
         return None
+
+    def get_monitored_symbols(self) -> List[str]:
+        """
+        Returns all symbols that currently require live price ticks from broker
+        (all open positions across all indices + all pending limit orders).
+        Ensures continuous background execution even when UI navigates elsewhere.
+        """
+        syms = set(self.active_positions.keys())
+        if self.active_position and self.active_position.get("symbol"):
+            syms.add(self.active_position["symbol"])
+        for o in self.pending_orders:
+            if o.get("symbol"):
+                syms.add(o["symbol"])
+        return sorted(list(syms))
+
 
     def get_state(self) -> Dict[str, Any]:
         """Returns comprehensive trading terminal state."""

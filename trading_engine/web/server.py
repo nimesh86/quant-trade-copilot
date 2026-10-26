@@ -2012,6 +2012,8 @@ async def run_tunnel_supervisor():
 
 @app.on_event("startup")
 async def on_startup():
+    global _server_event_loop
+    _server_event_loop = asyncio.get_running_loop()
     try:
         compute_live_market_prediction()
     except Exception as e:
@@ -2019,18 +2021,25 @@ async def on_startup():
     state.tick_broadcaster_task = asyncio.create_task(run_live_tick_broadcaster())
     state.collector_supervisor_task = asyncio.create_task(run_collector_supervisor())
     asyncio.create_task(run_contract_tick_broadcaster())
-    asyncio.create_task(run_contract_quote_feeder())
+    asyncio.create_task(run_broker_websocket_stream())
+    asyncio.create_task(run_broker_subscription_manager())
     asyncio.create_task(run_tick_db_writer())
     state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        default_breeze_adapter.reset()
+    except Exception:
+        pass
     if hasattr(state, "tunnel_pipeline") and state.tunnel_pipeline:
         try:
             state.tunnel_pipeline.stop()
         except Exception:
             pass
+
 
 
 
@@ -2657,30 +2666,118 @@ async def run_tick_db_writer():
             await asyncio.sleep(0.5)
 
 
-async def run_contract_quote_feeder():
+_server_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+async def _broadcast_contract_packet(symbol: str, clients: List, packet: Dict[str, Any]):
+    dead = []
+    for ws in clients:
+        try:
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.08)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        unregister_contract_client(symbol, ws)
+
+
+def on_broker_websocket_tick(tick: Dict[str, Any]):
     """
-    Dedicated background poller that continuously pulls live quotes for all actively subscribed
-    contract symbols (CE & PE stations) from the active broker (Breeze / Kite) every 1 second,
-    updating the in-memory price bus and persisting ticks to TimescaleDB without blocking the event loop.
+    Sub-second broker WebSocket callback.
+    Called directly whenever a live tick arrives from Breeze / broker socket:
+    1. Updates in-memory price bus
+    2. Updates decoupled background contract engine (triggers SL/Target independent of UI screen)
+    3. Queues tick for batch DB insert
+    4. Dispatches tick to UI clients with ZERO latency
     """
-    print("ContractQuoteFeeder: Started broker polling engine (1s interval).", flush=True)
+    try:
+        symbol = tick.get("symbol")
+        if not symbol:
+            return
+        ltp = float(tick.get("price") or 0.0)
+        if ltp <= 0:
+            return
+        ts = tick.get("timestamp") or datetime.now().isoformat()
+
+        # 1. Update in-memory price bus
+        push_to_price_bus(symbol, ltp, ts)
+
+        # 2. Decoupled background SL / Target / Limit execution
+        # Evaluates open positions and pending orders regardless of current UI screen
+        contract_engine.update_price_tick(symbol, ltp)
+
+        # 3. Non-blocking queue for TimescaleDB batch insert
+        enqueue_tick_for_db(symbol, ltp, int(tick.get("volume", 0) or 0), int(tick.get("oi", 0) or 0))
+
+        # 4. Zero-latency instant push to UI clients
+        clients = get_contract_clients(symbol)
+        if clients and _server_event_loop and not _server_event_loop.is_closed():
+            fc = update_forming_candle(symbol, ltp)
+            packet = {
+                "type": "CONTRACT_TICK",
+                "symbol": symbol,
+                "ltp": round(ltp, 2),
+                "forming_candle": fc,
+                "timestamp": ts,
+                "volume": int(tick.get("volume", 0) or 0),
+                "oi": int(tick.get("oi", 0) or 0),
+            }
+            asyncio.run_coroutine_threadsafe(_broadcast_contract_packet(symbol, clients, packet), _server_event_loop)
+    except Exception:
+        pass
+
+
+async def run_broker_websocket_stream():
+    """
+    Dedicated broker WebSocket manager.
+    Connects to ICICI Direct Breeze WebSocket with ZERO REST polling.
+    """
+    print("BrokerWebSocketStream: Initializing broker WebSocket stream (0 REST calls)...", flush=True)
+    try:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        if default_breeze_adapter.is_configured():
+            await asyncio.to_thread(default_breeze_adapter.start_websocket, on_broker_websocket_tick)
+            print("BrokerWebSocketStream: Breeze WebSocket stream active.", flush=True)
+        else:
+            print("BrokerWebSocketStream: Breeze credentials not fully configured; waiting for session.", flush=True)
+    except Exception as e:
+        print(f"BrokerWebSocketStream: Error starting WebSocket stream: {e}", flush=True)
+
+
+async def run_broker_subscription_manager():
+    """
+    Continuous background subscription manager.
+    Ensures that ALL active positions, pending orders, and UI viewed contracts across
+    all indices (NIFTY, BANKNIFTY, SENSEX) are continuously subscribed on the broker socket.
+    Uses 0 REST calls.
+    """
+    print("BrokerSubscriptionManager: Started background multi-index subscription daemon.", flush=True)
+    subscribed_symbols = set()
+
     while True:
         try:
-            symbols = list(get_all_subscribed_symbols())
-            if symbols:
-                async def _poll_sym(s: str):
-                    try:
-                        q = await asyncio.to_thread(get_contract_quote, s)
-                        if q and (q.get("ltp") or q.get("last_price")):
-                            ltp = float(q.get("ltp") or q.get("last_price"))
-                            push_to_price_bus(s, ltp, q.get("timestamp"))
-                            enqueue_tick_for_db(s, ltp, int(q.get("volume", 0) or 0), int(q.get("oi", 0) or 0))
-                    except Exception:
-                        pass
-                await asyncio.gather(*[_poll_sym(s) for s in symbols])
+            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+            if default_breeze_adapter.is_connected and default_breeze_adapter.ws_connected:
+                # Monitored = all open positions in contract_engine + pending orders + UI active symbols
+                engine_syms = set(contract_engine.get_monitored_symbols())
+                ui_syms = set(get_all_subscribed_symbols())
+                desired_symbols = engine_syms | ui_syms
+
+                # Subscribe new symbols
+                to_sub = desired_symbols - subscribed_symbols
+                for sym in to_sub:
+                    success = await asyncio.to_thread(default_breeze_adapter.subscribe_feeds, sym)
+                    if success:
+                        subscribed_symbols.add(sym)
+
+                # Unsubscribe old (only if NOT in engine positions/orders AND NOT in UI)
+                to_unsub = subscribed_symbols - desired_symbols
+                for sym in to_unsub:
+                    await asyncio.to_thread(default_breeze_adapter.unsubscribe_feeds, sym)
+                    subscribed_symbols.discard(sym)
         except Exception:
             pass
         await asyncio.sleep(1.0)
+
 
 
 async def run_contract_tick_broadcaster():
