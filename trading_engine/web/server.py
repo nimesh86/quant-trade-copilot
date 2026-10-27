@@ -2025,6 +2025,8 @@ async def on_startup():
     asyncio.create_task(run_broker_subscription_manager())
     asyncio.create_task(run_tick_db_writer())
     state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
+    from trading_engine.execution.autonomous_runner import autonomous_runner
+    state.autonomous_runner_task = asyncio.create_task(autonomous_runner.run_loop())
 
 
 @app.on_event("shutdown")
