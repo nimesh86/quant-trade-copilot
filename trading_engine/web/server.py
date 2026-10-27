@@ -2672,12 +2672,18 @@ _server_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 async def _broadcast_contract_packet(symbol: str, clients: List, packet: Dict[str, Any]):
-    dead = []
-    for ws in clients:
+    if not clients:
+        return
+
+    async def _send(ws):
         try:
-            await asyncio.wait_for(ws.send_json(packet), timeout=0.08)
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.20)
+            return None
         except Exception:
-            dead.append(ws)
+            return ws
+
+    results = await asyncio.gather(*[_send(ws) for ws in clients], return_exceptions=True)
+    dead = [res for res in results if res and not isinstance(res, Exception)]
     for ws in dead:
         unregister_contract_client(symbol, ws)
 

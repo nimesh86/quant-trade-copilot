@@ -8195,12 +8195,41 @@ function renderStationSMFCanvas(station) {
 
 function connectStationWS(station) {
     if (!station || !station.symbol) return;
-    disconnectStationWS(station);
+    
+    if (station.wsReconnectTimer) {
+        clearTimeout(station.wsReconnectTimer);
+        station.wsReconnectTimer = null;
+    }
+    station.isManuallyDisconnected = false;
+
+    if (station.wsPingInterval) clearInterval(station.wsPingInterval);
+    if (station.ws) {
+        station.ws.onclose = null;
+        station.ws.onerror = null;
+        try { station.ws.close(); } catch (e) {}
+        station.ws = null;
+    }
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}/ws/contracts?symbol=${encodeURIComponent(station.symbol)}`;
 
-    station.ws = new WebSocket(url);
+    try {
+        station.ws = new WebSocket(url);
+    } catch (e) {
+        console.warn(`[${station.type}] Failed to create WebSocket:`, e);
+        scheduleStationReconnect(station);
+        return;
+    }
+
+    station.ws.onopen = () => {
+        station.wsReconnectAttempts = 0;
+        // Auto catch-up candles if there is a gap (e.g. after laptop sleep or reconnect)
+        const targetDate = (typeof MasterState !== 'undefined' && MasterState.selectedSessionDate) ? MasterState.selectedSessionDate : 'today';
+        if (targetDate === 'today') {
+            loadStationCandles(station, { symbol: station.symbol }, 'today');
+        }
+    };
+
     station.wsPingInterval = setInterval(() => {
         if (station.ws && station.ws.readyState === WebSocket.OPEN) {
             station.ws.send(JSON.stringify({ type: 'PING' }));
@@ -8281,15 +8310,72 @@ function connectStationWS(station) {
             console.warn(`${station.type} WS error:`, e);
         }
     };
+
+    station.ws.onerror = (e) => {
+        console.warn(`[${station.type}] WebSocket error:`, e);
+    };
+
+    station.ws.onclose = () => {
+        if (!station.isManuallyDisconnected) {
+            scheduleStationReconnect(station);
+        }
+    };
+}
+
+function scheduleStationReconnect(station) {
+    if (!station || station.isManuallyDisconnected) return;
+    if (station.wsReconnectTimer) clearTimeout(station.wsReconnectTimer);
+    station.wsReconnectAttempts = (station.wsReconnectAttempts || 0) + 1;
+    const delay = Math.min(1000 * Math.pow(1.5, station.wsReconnectAttempts - 1), 5000);
+    station.wsReconnectTimer = setTimeout(() => {
+        station.wsReconnectTimer = null;
+        connectStationWS(station);
+    }, delay);
 }
 
 function disconnectStationWS(station) {
-    if (station.wsPingInterval) clearInterval(station.wsPingInterval);
+    if (!station) return;
+    station.isManuallyDisconnected = true;
+    if (station.wsReconnectTimer) {
+        clearTimeout(station.wsReconnectTimer);
+        station.wsReconnectTimer = null;
+    }
+    if (station.wsPingInterval) {
+        clearInterval(station.wsPingInterval);
+        station.wsPingInterval = null;
+    }
     if (station.ws) {
+        station.ws.onclose = null;
+        station.ws.onerror = null;
         try { station.ws.close(); } catch (e) {}
         station.ws = null;
     }
 }
+
+function checkAndReconnectStations() {
+    if (typeof Stations === 'undefined') return;
+    [Stations.CE, Stations.PE].forEach(st => {
+        if (st && st.symbol) {
+            if (!st.ws || st.ws.readyState !== WebSocket.OPEN) {
+                connectStationWS(st);
+            } else {
+                loadStationCandles(st, { symbol: st.symbol }, 'today');
+            }
+        }
+    });
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            checkAndReconnectStations();
+        }
+    });
+    window.addEventListener('online', () => {
+        checkAndReconnectStations();
+    });
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Handlers & Window Exports
