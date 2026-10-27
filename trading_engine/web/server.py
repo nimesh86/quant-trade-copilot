@@ -2024,7 +2024,8 @@ async def on_startup():
     asyncio.create_task(run_broker_websocket_stream())
     asyncio.create_task(run_broker_subscription_manager())
     asyncio.create_task(run_tick_db_writer())
-    state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
+    if os.getenv("ENABLE_CLOUDFLARE_TUNNEL", "0").lower() in ("1", "true", "yes"):
+        state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
     from trading_engine.execution.autonomous_runner import autonomous_runner
     state.autonomous_runner_task = asyncio.create_task(autonomous_runner.run_loop())
 
