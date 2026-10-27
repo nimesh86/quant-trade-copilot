@@ -5100,6 +5100,46 @@ body.replay-mode-active #stations-stream {
     letter-spacing: 0.5px;
 }
 
+.tvi-lbl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tvi-script-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tvi-mini-btn {
+    background: rgba(0, 255, 187, 0.15);
+    border: 1px solid rgba(0, 255, 187, 0.35);
+    color: #00ffbb;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.tvi-mini-btn:hover {
+    background: rgba(0, 255, 187, 0.3);
+    color: #ffffff;
+}
+
+.tvi-mini-btn.danger {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #f87171;
+}
+
+.tvi-mini-btn.danger:hover {
+    background: rgba(239, 68, 68, 0.3);
+    color: #ffffff;
+}
+
 .tvi-select {
     background: #1e293b;
     border: 1px solid rgba(255, 255, 255, 0.12);

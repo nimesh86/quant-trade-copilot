@@ -9,7 +9,323 @@
 (function () {
     'use strict';
 
-    // ── Built-in Preset Scripts ────────────────────────────────────────────────
+    // ── Full Complete AlgoAlpha Script Verbatim ───────────────────────────────────
+    const ALGOALPHA_FULL_SCRIPT = `// © AlgoAlpha
+// This Source Code is subject to the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+//@version=6
+indicator("Smart Money Breakout Channels [AlgoAlpha]", "AlgoAlpha - Breakout Channels",  overlay=true, max_boxes_count = 500)
+import TradingView/ta/10
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+overlap = input.bool(false, "Nested Channels", group = "Main Settings", tooltip="When enabled, allows multiple channels to overlap. When disabled, only one channel can exist at a time. Overlapping channels can show multiple breakout levels simultaneously.")
+strong = input.bool(true, "Strong Closes Only", "When enabled, breakouts only trigger when more than 50% of the candle body is outside the channel. This reduces false signals from wicks. When disabled, any price movement outside the channel triggers a breakout.", group = "Main Settings")
+length_ = input.int(100, title="Normalization Length", minval=1, group = "Main Settings", tooltip="The number of bars used to calculate the highest high and lowest low for price normalization. Higher values create more stable normalization but may be less responsive to recent price changes.")
+length = input.int(14, "Box Detection Length", minval=1, group = "Main Settings", tooltip="The number of bars used to detect channel formation patterns. Lower values create more frequent channels but may be more sensitive to noise. Higher values create fewer but potentially more significant channels.")
+
+shw_vol = input.bool(true, "Show Volume Analysis", "When enabled, displays volume analysis as candle-like bars within the channel. This helps identify volume patterns that may precede breakouts.", group = "Volume Analysis")
+vol_mode = input.string("Comparison", "Volume Display Mode", options=["Volume", "Comparison", "Delta"], group="Volume Analysis", tooltip="Volume: Shows total volume as symmetrical bars. Comparison: Shows up volume above midline, down volume below. Delta: Shows net volume delta (positive above, negative below midline).")
+tf = input.timeframe("1", "Volume Delta Timeframe Source", group = "Volume Analysis", tooltip="The timeframe used to calculate volume delta data. Lower timeframes provide more granular volume analysis but may be noisier.")
+vol_scale = input.float(0.5, "Volume Scale", minval=0.1, maxval=2.0, step=0.1, group="Volume Analysis", tooltip="Adjusts the height of volume bars relative to channel size. Higher values make volume bars more prominent, lower values make them more subtle.")
+
+text_size    = input.string("Tiny", "Volume Text Size", options=["Tiny","Small","Medium","Large"], group="Appearance", tooltip="Size of the volume text at the corner of the channels.")
+green = input.color(#00ffbb, title = "Bullish Colour", group = "Appearance", tooltip = "Primary colour for bullish visual elements. Adjust for preferred palette – affects bars, fills, and labels when momentum is positive.")
+red   = input.color(#ff1100, title = "Bearish Colour", group = "Appearance", tooltip = "Primary colour for bearish visual elements. Adjust for preferred palette – affects bars, fills, and labels when momentum is negative.")
+
+// ============================================================================
+// VARIABLES
+// ============================================================================
+
+var boxes = array.new_box()
+var boxes_u = array.new_box()
+var boxes_l = array.new_box()
+
+var line[] gaugeLines = array.new<line>()
+var label gaugeLabel = na
+var line[] centerLines = array.new<line>()
+
+// ============================================================================
+// FUNCTIONS
+// ============================================================================
+
+textSize(text_size) =>
+    switch text_size
+        "Tiny"  => size.tiny
+        "Small" => size.small
+        "Medium"=> size.normal
+        "Large" => size.large
+
+f_can_create(float tNew, float bNew) =>
+    ok = true
+    if boxes.size() > 0
+        for j = 0 to boxes.size()-1
+            if (tNew > boxes.get(j).get_bottom()) and (bNew < boxes.get(j).get_top())
+                ok := false
+                break
+    ok
+
+getVolumeTransparency(float vol, float smoothed_vol) =>
+    if vol_mode == "Volume"
+        float vol_ratio = vol / smoothed_vol
+        float transparency = math.max(20, math.min(80, 80 - (vol_ratio - 0.5) * 40))
+        transparency
+    else
+        0
+
+// ============================================================================
+// CALCULATIONS
+// ============================================================================
+
+lowestLow = ta.lowest(low, length_)
+highestHigh = ta.highest(high, length_)
+normalizedPrice = (close - lowestLow) / (highestHigh - lowestLow)
+vol = ta.stdev(normalizedPrice, 14)
+
+upper = (ta.highestbars(vol, length + 1) + length)/length
+lower = (ta.lowestbars(vol, length + 1) + length)/length
+
+upbreak = 0.0
+downbreak = 0.0
+
+duration = math.max(nz(ta.barssince(ta.crossover(lower,upper))), 1)
+h = ta.highest(duration)
+l = ta.lowest(duration)
+
+[uv, dv, vold] = ta.requestUpAndDownVolume(tf)
+
+var hvold = vold
+var lvold = vold
+
+if ta.crossover(lower, upper)
+    hvold := vold
+    lvold := vold
+
+if vold > hvold
+    hvold := vold
+
+if vold < lvold
+    lvold := vold
+
+smoothedvol = ta.sma(volume, 20)
+vola = ta.atr(length)/2
+
+bool newChannelFormed = false
+bool bullishBreakout = false
+bool bearishBreakout = false
+
+if ta.crossover(upper, lower) and duration > 10
+    if overlap or f_can_create(h, l)
+        boxes.unshift(box.new(bar_index-duration, h, bar_index, l, bgcolor = color.new(chart.fg_color, 90), border_color = na))
+        boxes_u.unshift(box.new(bar_index-duration, h, bar_index, h-vola, bgcolor = color.new(red, 70), border_color = na))
+        boxes_l.unshift(box.new(bar_index-duration, l+vola, bar_index, l, bgcolor = color.new(green, 70), border_color = na))
+        
+        float centerY = (h + l) / 2
+        centerLines.unshift(line.new(bar_index-duration, centerY, bar_index, centerY, color = color.new(chart.fg_color, 50), width = 1, style = line.style_dashed))
+        newChannelFormed := true
+
+if boxes.size() > 0
+    for i = 0 to boxes.size()-1
+        if ((strong ? math.avg(close, open) : close) > boxes.get(i).get_top())
+            upbreak := boxes.get(i).get_bottom()
+            boxes.remove(i)
+            boxes_u.remove(i)
+            boxes_l.remove(i)
+            centerLines.remove(i)
+            bullishBreakout := true
+            
+        else if ((strong ? math.avg(close, open) : close) < boxes.get(i).get_bottom())
+            downbreak := boxes.get(i).get_top()
+            boxes.remove(i)
+            boxes_u.remove(i)
+            boxes_l.remove(i)
+            centerLines.remove(i)
+            bearishBreakout := true
+                  
+        else
+            boxes.get(i).set_right(bar_index)
+            boxes_u.get(i).set_right(bar_index)
+            boxes_l.get(i).set_right(bar_index)
+            centerLines.get(i).set_x2(bar_index)
+            
+            // Add volume text to appropriate box based on price position
+            float boxMidline = (boxes.get(i).get_top() + boxes.get(i).get_bottom()) / 2
+            float currentPrice = strong ? math.avg(close, open) : close
+            
+            string volText = ""
+            if vol_mode == "Volume"
+                volText := str.tostring(math.round(volume / 1000, 1)) + "K"
+            else if vol_mode == "Comparison"
+                volText := str.tostring(math.round(uv / 1000, 1)) + "K/" + str.tostring(math.round(dv / 1000, 1)) + "K"
+            else if vol_mode == "Delta"
+                volText := str.tostring(math.round(vold / 1000, 1)) + "K"
+            
+            if currentPrice > boxMidline
+                // Price is above midline, add text to lower (green) box
+                boxes_l.get(i).set_text(volText)
+                boxes_l.get(i).set_text_halign(text.align_right)
+                boxes_l.get(i).set_text_color(color.new(chart.fg_color, 30))
+                boxes_l.get(i).set_text_size(textSize(text_size))
+                boxes_u.get(i).set_text("")
+            else
+                // Price is below midline, add text to upper (red) box
+                boxes_u.get(i).set_text(volText)
+                boxes_u.get(i).set_text_halign(text.align_right)
+                boxes_u.get(i).set_text_color(color.new(chart.fg_color, 30))
+                boxes_u.get(i).set_text_size(textSize(text_size))
+                boxes_l.get(i).set_text("")
+
+float currentMidline = na
+float channelHeight = na
+
+if boxes.size() > 0
+    float topBound = boxes.get(0).get_top()
+    float bottomBound = boxes.get(0).get_bottom()
+    currentMidline := (topBound + bottomBound) / 2
+    channelHeight := (topBound - bottomBound) * vol_scale
+
+float vol_upper_open = na
+float vol_upper_high = na  
+float vol_upper_low = na
+float vol_upper_close = na
+
+float vol_lower_open = na
+float vol_lower_high = na
+float vol_lower_low = na  
+float vol_lower_close = na
+
+if not na(currentMidline) and not na(channelHeight) and shw_vol
+    if vol_mode == "Volume"
+        float vol_height = (volume / smoothedvol) * (channelHeight / 4)
+        vol_upper_open := currentMidline
+        vol_upper_close := currentMidline + vol_height
+        vol_upper_high := currentMidline + vol_height
+        vol_upper_low := currentMidline
+        
+        vol_lower_open := currentMidline
+        vol_lower_close := currentMidline - vol_height
+        vol_lower_high := currentMidline
+        vol_lower_low := currentMidline - vol_height
+        
+    else if vol_mode == "Comparison"
+        float uv_height = na(uv) ? 0 : (uv / smoothedvol) * (channelHeight / 4)
+        float dv_height = na(dv) ? 0 : (dv / smoothedvol) * (channelHeight / 4)
+        
+        vol_upper_open := currentMidline
+        vol_upper_close := currentMidline + uv_height  
+        vol_upper_high := currentMidline + uv_height
+        vol_upper_low := currentMidline
+        
+        vol_lower_open := currentMidline
+        vol_lower_close := currentMidline + dv_height
+        vol_lower_high := currentMidline  
+        vol_lower_low := currentMidline + dv_height
+        
+    else if vol_mode == "Delta" 
+        float delta_height = na(vold) ? 0 : math.abs(vold / smoothedvol) * (channelHeight / 4)
+        
+        if vold >= 0
+            vol_upper_open := currentMidline
+            vol_upper_close := currentMidline + delta_height
+            vol_upper_high := currentMidline + delta_height  
+            vol_upper_low := currentMidline
+            
+            vol_lower_open := currentMidline
+            vol_lower_close := currentMidline
+            vol_lower_high := currentMidline
+            vol_lower_low := currentMidline
+        else
+            vol_upper_open := currentMidline
+            vol_upper_close := currentMidline
+            vol_upper_high := currentMidline
+            vol_upper_low := currentMidline
+            
+            vol_lower_open := currentMidline
+            vol_lower_close := currentMidline - delta_height  
+            vol_lower_high := currentMidline
+            vol_lower_low := currentMidline - delta_height
+
+color upperColor = na
+color lowerColor = na
+
+if vol_mode == "Volume"
+    float transparency = getVolumeTransparency(volume, smoothedvol)
+    upperColor := color.new(chart.fg_color, transparency)
+    lowerColor := color.new(chart.fg_color, transparency)
+else
+    upperColor := green
+    lowerColor := red
+
+// ============================================================================
+// VISUALS
+// ============================================================================
+
+plotshape(upbreak != 0 ? upbreak : na, "Bullish Breakout Signal", shape.labelup, location.absolute, green, text = "▲", textcolor = chart.fg_color)
+plotshape(downbreak != 0 ? downbreak : na, "Bearish Breakout Signal", shape.labeldown, location.absolute, red, text = "▼", textcolor = chart.fg_color)
+
+plotcandle(vol_upper_open, vol_upper_high, vol_upper_low, vol_upper_close, color=upperColor, wickcolor=upperColor, bordercolor=upperColor)
+plotcandle(vol_lower_open, vol_lower_high, vol_lower_low, vol_lower_close, color=lowerColor, wickcolor=lowerColor, bordercolor=lowerColor)
+
+volumeAvailable = not na(volume)
+
+if barstate.islast
+    bool channelActive = boxes.size() > 0 and upbreak == 0 and downbreak == 0
+    
+    if array.size(gaugeLines) > 0
+        for ln in gaugeLines
+            ln.delete()
+        gaugeLines.clear()
+    
+    if not na(gaugeLabel)
+        gaugeLabel.delete()
+        gaugeLabel := na
+    
+    if channelActive
+        float topBound    = boxes.get(0).get_top()
+        float bottomBound = boxes.get(0).get_bottom()
+        
+        if not na(topBound) and not na(bottomBound) and topBound != bottomBound
+            int segments = 21
+            float segLen = (topBound - bottomBound) / segments
+            
+            for i = 0 to segments - 1
+                float y1 = topBound   - i * segLen
+                float y2 = topBound   - (i + 1) * segLen
+                color segCol = color.from_gradient(y1, bottomBound, topBound, red, green)
+                line ln = line.new(x1 = bar_index + 2,
+                                     y1 = y1,
+                                     x2 = bar_index + 2,
+                                     y2 = y2,
+                                     color = segCol,
+                                     width = 4)
+                gaugeLines.unshift(ln)
+            
+            float delvol = -100*2*((vold-lvold)/(hvold-lvold)-0.5)
+            delvol := math.max(math.min(delvol, 100), -100)
+            float pointerPos = topBound - ((delvol + 100) / 200) * (topBound - bottomBound)
+            gaugeLabel := label.new(x = bar_index + 3,
+                                     y = pointerPos,
+                                     text = "◀",
+                                     color = na,
+                                     textcolor = chart.fg_color,
+                                     size = size.small,
+                                     style = label.style_label_left)
+
+if not volumeAvailable
+    var gaugeWarnTable = table.new(position = position.top_right, columns = 1, rows = 1, bgcolor = red, border_width = 1, border_color = chart.fg_color, frame_color = chart.fg_color, frame_width = 1)
+    table.cell(gaugeWarnTable, 0, 0, "Volume not available\\nGauge may not work as expected", text_color = chart.fg_color, text_halign = text.align_center, text_size = size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(newChannelFormed, "New Channel Formation", "A new breakout channel has been formed")
+alertcondition(bullishBreakout, "Bullish Breakout", "Price has broken out above the channel (bullish signal)")
+alertcondition(bearishBreakout, "Bearish Breakout", "Price has broken out below the channel (bearish signal)")`;
+
+    // ── Built-in Preset Registry ────────────────────────────────────────────────
     const PRESETS = {
         algoalpha_breakout_channels: {
             id: 'algoalpha_breakout_channels',
@@ -20,29 +336,12 @@
                 overlap: false,
                 strong: true,
                 shw_vol: true,
-                vol_mode: 'Comparison', // 'Volume', 'Comparison', 'Delta'
+                vol_mode: 'Comparison',
                 vol_scale: 0.5,
                 green: '#00ffbb',
                 red: '#ff1100'
             },
-            code: `// © AlgoAlpha
-// This Source Code is subject to the Mozilla Public License 2.0
-// https://mozilla.org/MPL/2.0/
-//@version=6
-indicator("Smart Money Breakout Channels [AlgoAlpha]", "AlgoAlpha - Breakout Channels", overlay=true, max_boxes_count=500)
-
-// Main Settings
-overlap = input.bool(false, "Nested Channels")
-strong = input.bool(true, "Strong Closes Only")
-length_ = input.int(100, "Normalization Length")
-length = input.int(14, "Box Detection Length")
-
-// Volume Analysis
-shw_vol = input.bool(true, "Show Volume Analysis")
-vol_mode = input.string("Comparison", "Volume Display Mode", options=["Volume", "Comparison", "Delta"])
-vol_scale = input.float(0.5, "Volume Scale")
-green = input.color(#00ffbb, "Bullish Colour")
-red = input.color(#ff1100, "Bearish Colour")`
+            code: ALGOALPHA_FULL_SCRIPT
         },
         supertrend: {
             id: 'supertrend',
@@ -53,26 +352,79 @@ red = input.color(#ff1100, "Bearish Colour")`
                 green: '#00ffbb',
                 red: '#ff1100'
             },
-            code: `//@version=5
+            code: `//@version=6
 indicator("Supertrend", overlay=true)
-atr_period = input.int(10, "ATR Period")
-multiplier = input.float(3.0, "Multiplier")
+
+// Inputs
+atr_period = input.int(10, "ATR Period", minval=1)
+multiplier = input.float(3.0, "Multiplier", step=0.1)
 green = input.color(#00ffbb, "Bullish Color")
-red = input.color(#ff1100, "Bearish Color")`
+red = input.color(#ff1100, "Bearish Color")
+
+// Calculations
+atr = ta.atr(atr_period)
+hl2 = (high + low) / 2
+up = hl2 - multiplier * atr
+dn = hl2 + multiplier * atr
+
+var float trend = 1.0
+var float st = na
+
+if bar_index == 0
+    st := dn
+else
+    if close > st
+        st := up
+        trend := 1.0
+    else if close < st
+        st := dn
+        trend := -1.0
+
+plot(st, "Supertrend", color = trend == 1.0 ? green : red, linewidth=2)
+plotshape(ta.crossover(close, st), "Bullish Entry", shape.labelup, location.belowbar, green, text="▲ BUY")
+plotshape(ta.crossunder(close, st), "Bearish Entry", shape.labeldown, location.abovebar, red, text="▼ SELL")`
         },
-        vwap_bands: {
-            id: 'vwap_bands',
-            name: 'VWAP + Standard Deviation Bands',
+        ema_ribbon: {
+            id: 'ema_ribbon',
+            name: 'EMA Ribbon (9 / 21 / 50 / 200)',
             inputs: {
-                band1_mult: 1.0,
-                band2_mult: 2.0,
-                vwap_color: '#38bdf8',
-                band_color: 'rgba(56, 189, 248, 0.3)'
+                ema1_len: 9,
+                ema2_len: 21,
+                ema3_len: 50,
+                ema4_len: 200,
+                col1: '#38bdf8',
+                col2: '#00ffbb',
+                col3: '#f59e0b',
+                col4: '#ec4899'
             },
-            code: `//@version=5
-indicator("VWAP + SD Bands", overlay=true)
-band1_mult = input.float(1.0, "Band 1 Multiplier")
-band2_mult = input.float(2.0, "Band 2 Multiplier")`
+            code: `//@version=6
+indicator("EMA Ribbon", overlay=true)
+
+len1 = input.int(9, "EMA 1 Length")
+len2 = input.int(21, "EMA 2 Length")
+len3 = input.int(50, "EMA 3 Length")
+len4 = input.int(200, "EMA 4 Length")
+
+col1 = input.color(#38bdf8, "EMA 1 Color")
+col2 = input.color(#00ffbb, "EMA 2 Color")
+col3 = input.color(#f59e0b, "EMA 3 Color")
+col4 = input.color(#ec4899, "EMA 4 Color")
+
+e1 = ta.ema(close, len1)
+e2 = ta.ema(close, len2)
+e3 = ta.ema(close, len3)
+e4 = ta.ema(close, len4)
+
+plot(e1, "EMA 9", color=col1, linewidth=1)
+plot(e2, "EMA 21", color=col2, linewidth=1)
+plot(e3, "EMA 50", color=col3, linewidth=2)
+plot(e4, "EMA 200", color=col4, linewidth=2)
+
+bullishCross = ta.crossover(e1, e2)
+bearishCross = ta.crossunder(e1, e2)
+
+plotshape(bullishCross, "Bull Cross", shape.labelup, location.belowbar, col2, text="▲")
+plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff1100, text="▼")`
         }
     };
 
@@ -81,7 +433,8 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         enabled: true,
         target: 'both', // 'both', 'CE', 'PE'
         activePresetId: 'algoalpha_breakout_channels',
-        currentCode: PRESETS.algoalpha_breakout_channels.code,
+        customIndicators: {}, // id -> { id, name, code, inputs }
+        currentCode: ALGOALPHA_FULL_SCRIPT,
         inputs: { ...PRESETS.algoalpha_breakout_channels.inputs },
         lastCompileTime: null,
         compileStats: null
@@ -147,7 +500,7 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                         maxIdx = j;
                     }
                 }
-                out[i] = maxIdx - i; // negative offset or 0
+                out[i] = maxIdx - i;
             }
             return out;
         },
@@ -181,6 +534,20 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             return out;
         },
 
+        ema(series, len) {
+            const n = series.length;
+            const out = new Array(n);
+            if (n === 0) return out;
+            const k = 2 / (len + 1);
+            let prev = series[0];
+            out[0] = prev;
+            for (let i = 1; i < n; i++) {
+                prev = series[i] * k + prev * (1 - k);
+                out[i] = prev;
+            }
+            return out;
+        },
+
         atr(candles, len) {
             const n = candles.length;
             const tr = new Array(n);
@@ -203,15 +570,103 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         crossover(a, b) {
             const out = new Array(a.length).fill(false);
             for (let i = 1; i < a.length; i++) {
-                if (a[i] > b[i] && a[i - 1] <= b[i - 1]) {
-                    out[i] = true;
-                }
+                const valA = typeof a === 'number' ? a : a[i];
+                const prevA = typeof a === 'number' ? a : a[i - 1];
+                const valB = typeof b === 'number' ? b : b[i];
+                const prevB = typeof b === 'number' ? b : b[i - 1];
+                if (valA > valB && prevA <= prevB) out[i] = true;
+            }
+            return out;
+        },
+
+        crossunder(a, b) {
+            const out = new Array(a.length).fill(false);
+            for (let i = 1; i < a.length; i++) {
+                const valA = typeof a === 'number' ? a : a[i];
+                const prevA = typeof a === 'number' ? a : a[i - 1];
+                const valB = typeof b === 'number' ? b : b[i];
+                const prevB = typeof b === 'number' ? b : b[i - 1];
+                if (valA < valB && prevA >= prevB) out[i] = true;
             }
             return out;
         }
     };
 
-    // ── AlgoAlpha Breakout Channels Mathematical Runner ─────────────────────────
+    // ── Dynamic Pine Script Input Parser ────────────────────────────────────────
+    function parsePineInputsFromScript(scriptCode) {
+        const parsed = {};
+        if (!scriptCode) return parsed;
+        const lines = scriptCode.split('\n');
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('//') || trimmed.length === 0) continue;
+
+            // Match input.type(def, title, ...) or input(def, title, ...)
+            const m = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*input(?:\.([a-z]+))?\s*\((.*)\)/);
+            if (m) {
+                const varName = m[1];
+                const type = m[2] || 'float';
+                const argsStr = m[3];
+                const rawArgs = splitPineArgs(argsStr);
+                const rawDef = rawArgs[0] ? rawArgs[0].trim() : '';
+                const rawTitle = rawArgs[1] ? rawArgs[1].replace(/["']/g, '').trim() : varName;
+
+                let val = rawDef;
+                let inputType = 'text';
+
+                if (type === 'int' || (!m[2] && /^-?\d+$/.test(rawDef))) {
+                    val = parseInt(rawDef) || 0;
+                    inputType = 'int';
+                } else if (type === 'float' || (!m[2] && /^-?\d+\.\d+$/.test(rawDef))) {
+                    val = parseFloat(rawDef) || 0.0;
+                    inputType = 'float';
+                } else if (type === 'bool' || rawDef === 'true' || rawDef === 'false') {
+                    val = rawDef === 'true';
+                    inputType = 'bool';
+                } else if (type === 'color' || rawDef.startsWith('#')) {
+                    val = rawDef.startsWith('#') ? rawDef.split(/[\s,)]/)[0] : '#00ffbb';
+                    inputType = 'color';
+                } else if (type === 'string' || rawDef.startsWith('"') || rawDef.startsWith("'")) {
+                    val = rawDef.replace(/["']/g, '');
+                    inputType = 'string';
+                }
+
+                parsed[varName] = {
+                    name: varName,
+                    title: rawTitle,
+                    type: inputType,
+                    val: val
+                };
+            }
+        }
+        return parsed;
+    }
+
+    function splitPineArgs(argsStr) {
+        const args = [];
+        let cur = '';
+        let inQuotes = false;
+        let depth = 0;
+        for (let i = 0; i < argsStr.length; i++) {
+            const ch = argsStr[i];
+            if (ch === '"' || ch === "'") inQuotes = !inQuotes;
+            if (!inQuotes) {
+                if (ch === '(' || ch === '[') depth++;
+                else if (ch === ')' || ch === ']') depth--;
+                else if (ch === ',' && depth === 0) {
+                    args.push(cur.trim());
+                    cur = '';
+                    continue;
+                }
+            }
+            cur += ch;
+        }
+        if (cur.trim()) args.push(cur.trim());
+        return args;
+    }
+
+    // ── Dedicated AlgoAlpha Breakout Channels Runner ─────────────────────────────
     function computeAlgoAlphaBreakoutChannels(candles, inputs) {
         const n = candles.length;
         if (n < 20) return null;
@@ -257,7 +712,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         const vola = new Array(n);
         for (let i = 0; i < n; i++) vola[i] = (atrArr[i] || 1) / 2;
 
-        // Up & Down Volume Delta approximations from intraday candles
         const uv = new Array(n);
         const dv = new Array(n);
         const vold = new Array(n);
@@ -270,7 +724,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             vold[i] = uv[i] - dv[i];
         }
 
-        // Box & Signal State Machine
         const activeBoxes = [];
         const completedBoxes = [];
         const signals = [];
@@ -279,14 +732,12 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         let lastLowerCrossUpper = -999;
 
         for (let i = 1; i < n; i++) {
-            // Check crossover(lower, upper)
             if (lower[i] > upper[i] && lower[i - 1] <= upper[i - 1]) {
                 lastLowerCrossUpper = i;
             }
 
             const duration = Math.max(1, lastLowerCrossUpper >= 0 ? i - lastLowerCrossUpper : i);
 
-            // Highest & lowest over duration
             let h = lows[i];
             let l = highs[i];
             const durStart = Math.max(0, i - duration + 1);
@@ -295,7 +746,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 if (lows[j] < l) l = lows[j];
             }
 
-            // Check crossover(upper, lower) and duration > 10
             const upperCrossLower = (upper[i] > lower[i] && upper[i - 1] <= lower[i - 1]);
             if (upperCrossLower && duration > 10) {
                 let canCreate = true;
@@ -329,14 +779,12 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 }
             }
 
-            // Evaluate active boxes against current candle
             const currentEvalPrice = strong ? (closes[i] + opens[i]) / 2 : closes[i];
 
             for (let bIdx = activeBoxes.length - 1; bIdx >= 0; bIdx--) {
                 const b = activeBoxes[bIdx];
 
                 if (currentEvalPrice > b.top) {
-                    // Bullish Breakout
                     b.endIdx = i;
                     b.endTime = candles[i].time;
                     b.active = false;
@@ -353,7 +801,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                         color: colGreen
                     });
                 } else if (currentEvalPrice < b.bottom) {
-                    // Bearish Breakout
                     b.endIdx = i;
                     b.endTime = candles[i].time;
                     b.active = false;
@@ -370,7 +817,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                         color: colRed
                     });
                 } else {
-                    // Channel still active, extend right
                     b.endIdx = i;
                     b.endTime = candles[i].time;
 
@@ -388,7 +834,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 }
             }
 
-            // Channel Volume Candle for current active channel
             if (activeBoxes.length > 0 && shw_vol) {
                 const primaryBox = activeBoxes[0];
                 const mid = primaryBox.centerY;
@@ -438,74 +883,131 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         };
     }
 
-    // ── Supertrend Mathematical Runner ──────────────────────────────────────────
-    function computeSupertrend(candles, inputs) {
+    // ── Universal Pine Script Runner & Transpiler ────────────────────────────────
+    function computeGenericPineScript(candles, scriptCode, inputs) {
         const n = candles.length;
-        if (n < 15) return null;
-        const period = parseInt(inputs.atr_period) || 10;
-        const mult = parseFloat(inputs.multiplier) || 3.0;
-        const atr = PineTA.atr(candles, period);
+        if (n < 5) return null;
 
-        const upperBand = new Array(n);
-        const lowerBand = new Array(n);
-        const supertrend = new Array(n);
-        const direction = new Array(n).fill(1); // 1 = Bullish, -1 = Bearish
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        const opens = candles.map(c => c.open);
+        const volumes = candles.map(c => c.volume || 1);
+        const times = candles.map(c => c.time);
+
+        const plots = [];
         const signals = [];
 
-        for (let i = 0; i < n; i++) {
-            const hl2 = (candles[i].high + candles[i].low) / 2;
-            const a = atr[i] || 1;
-            let basicUpper = hl2 + mult * a;
-            let basicLower = hl2 - mult * a;
+        // Scan plot(...) calls
+        const plotMatches = [...scriptCode.matchAll(/plot\s*\(\s*([a-zA-Z0-9_.]+)(?:,\s*["']([^"']*)["'])?(?:,\s*color\s*=\s*([^,\)]+))?(?:,\s*linewidth\s*=\s*(\d+))?/g)];
+        
+        // Scan plotshape(...) calls
+        const shapeMatches = [...scriptCode.matchAll(/plotshape\s*\(\s*([^,\)]+)(?:,\s*["']([^"']*)["'])?(?:,\s*shape\.([a-z0-9_]+))?(?:,\s*location\.([a-z0-9_]+))?(?:,\s*([^,\)]+))?(?:,\s*text\s*=\s*["']([^"']*)["'])?/g)];
 
-            if (i === 0) {
-                upperBand[i] = basicUpper;
-                lowerBand[i] = basicLower;
-                supertrend[i] = basicLower;
-                direction[i] = 1;
-                continue;
+        // Compute EMAs / SMAs / ATR referenced
+        const seriesVars = {};
+        seriesVars['open'] = opens;
+        seriesVars['high'] = highs;
+        seriesVars['low'] = lows;
+        seriesVars['close'] = closes;
+        seriesVars['volume'] = volumes;
+
+        const lines = scriptCode.split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('//') || trimmed.length === 0) continue;
+
+            // EMA assignment: e1 = ta.ema(close, len1)
+            const emaM = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*ta\.ema\s*\(\s*([a-zA-Z0-9_]+)\s*,\s*([a-zA-Z0-9_]+|\d+)\s*\)/);
+            if (emaM) {
+                const varName = emaM[1];
+                const src = seriesVars[emaM[2]] || closes;
+                const len = parseInt(inputs[emaM[3]] !== undefined ? inputs[emaM[3]] : emaM[3]) || 14;
+                seriesVars[varName] = PineTA.ema(src, len);
             }
 
-            // Lower Band trailing
-            if (basicLower > lowerBand[i - 1] || candles[i - 1].close < lowerBand[i - 1]) {
-                lowerBand[i] = basicLower;
-            } else {
-                lowerBand[i] = lowerBand[i - 1];
+            // SMA assignment: s1 = ta.sma(close, len1)
+            const smaM = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*ta\.sma\s*\(\s*([a-zA-Z0-9_]+)\s*,\s*([a-zA-Z0-9_]+|\d+)\s*\)/);
+            if (smaM) {
+                const varName = smaM[1];
+                const src = seriesVars[smaM[2]] || closes;
+                const len = parseInt(inputs[smaM[3]] !== undefined ? inputs[smaM[3]] : smaM[3]) || 14;
+                seriesVars[varName] = PineTA.sma(src, len);
             }
 
-            // Upper Band trailing
-            if (basicUpper < upperBand[i - 1] || candles[i - 1].close > upperBand[i - 1]) {
-                upperBand[i] = basicUpper;
-            } else {
-                upperBand[i] = upperBand[i - 1];
+            // ATR assignment: a = ta.atr(len)
+            const atrM = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*ta\.atr\s*\(\s*([a-zA-Z0-9_]+|\d+)\s*\)/);
+            if (atrM) {
+                const varName = atrM[1];
+                const len = parseInt(inputs[atrM[2]] !== undefined ? inputs[atrM[2]] : atrM[2]) || 14;
+                seriesVars[varName] = PineTA.atr(candles, len);
             }
 
-            // Direction flip
-            if (direction[i - 1] === 1) {
-                if (candles[i].close < lowerBand[i]) {
-                    direction[i] = -1;
-                    supertrend[i] = upperBand[i];
-                    signals.push({ time: candles[i].time, price: candles[i].high, type: 'bearish', text: '▼', color: inputs.red || '#ff1100' });
-                } else {
-                    direction[i] = 1;
-                    supertrend[i] = lowerBand[i];
-                }
-            } else {
-                if (candles[i].close > upperBand[i]) {
-                    direction[i] = 1;
-                    supertrend[i] = lowerBand[i];
-                    signals.push({ time: candles[i].time, price: candles[i].low, type: 'bullish', text: '▲', color: inputs.green || '#00ffbb' });
-                } else {
-                    direction[i] = -1;
-                    supertrend[i] = upperBand[i];
+            // Crossover: bull = ta.crossover(a, b)
+            const coM = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*ta\.crossover\s*\(\s*([a-zA-Z0-9_]+)\s*,\s*([a-zA-Z0-9_]+)\s*\)/);
+            if (coM) {
+                const varName = coM[1];
+                const s1 = seriesVars[coM[2]] || closes;
+                const s2 = seriesVars[coM[3]] || closes;
+                seriesVars[varName] = PineTA.crossover(s1, s2);
+            }
+
+            // Crossunder: bear = ta.crossunder(a, b)
+            const cuM = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*ta\.crossunder\s*\(\s*([a-zA-Z0-9_]+)\s*,\s*([a-zA-Z0-9_]+)\s*\)/);
+            if (cuM) {
+                const varName = cuM[1];
+                const s1 = seriesVars[cuM[2]] || closes;
+                const s2 = seriesVars[cuM[3]] || closes;
+                seriesVars[varName] = PineTA.crossunder(s1, s2);
+            }
+        }
+
+        // Build plot line series
+        for (const pm of plotMatches) {
+            const seriesName = pm[1];
+            const title = pm[2] || seriesName;
+            let col = pm[3] || '#38bdf8';
+            if (inputs[col.trim()]) col = inputs[col.trim()];
+            const lw = parseInt(pm[4]) || 2;
+
+            if (seriesVars[seriesName]) {
+                plots.push({
+                    title: title,
+                    color: col,
+                    width: lw,
+                    data: seriesVars[seriesName]
+                });
+            }
+        }
+
+        // Build plotshape markers
+        for (const sm of shapeMatches) {
+            const condName = sm[1].trim();
+            const title = sm[2] || condName;
+            const isUp = (sm[3] || '').includes('up') || (sm[4] || '').includes('below');
+            let col = sm[5] ? sm[5].trim() : (isUp ? '#00ffbb' : '#ff1100');
+            if (inputs[col]) col = inputs[col];
+            const text = sm[6] || (isUp ? '▲' : '▼');
+
+            const condArr = seriesVars[condName];
+            if (condArr && Array.isArray(condArr)) {
+                for (let i = 0; i < n; i++) {
+                    if (condArr[i]) {
+                        signals.push({
+                            time: times[i],
+                            price: isUp ? lows[i] : highs[i],
+                            type: isUp ? 'bullish' : 'bearish',
+                            text: text,
+                            color: col
+                        });
+                    }
                 }
             }
         }
 
         return {
-            type: 'supertrend',
-            supertrend,
-            direction,
+            type: 'generic_pine',
+            plots,
             signals,
             candles
         };
@@ -513,13 +1015,12 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
     // ── Station Computation Dispatcher ──────────────────────────────────────────
     function computeIndicatorsForStation(station) {
-        if (!station || !station.rawCandles || station.rawCandles.length < 15) return;
+        if (!station || !station.rawCandles || station.rawCandles.length < 5) return;
         if (!state.enabled) {
             station.tvIndicatorResult = null;
             return;
         }
 
-        // Target station check: 'both', 'ce', 'pe'
         const stationType = (station.type || '').toUpperCase();
         if (state.target !== 'both' && state.target.toUpperCase() !== stationType) {
             station.tvIndicatorResult = null;
@@ -531,8 +1032,8 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
         if (state.activePresetId === 'algoalpha_breakout_channels') {
             result = computeAlgoAlphaBreakoutChannels(station.rawCandles, state.inputs);
-        } else if (state.activePresetId === 'supertrend') {
-            result = computeSupertrend(station.rawCandles, state.inputs);
+        } else {
+            result = computeGenericPineScript(station.rawCandles, state.currentCode, state.inputs);
         }
 
         const elapsed = (performance.now() - t0).toFixed(1);
@@ -541,11 +1042,13 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         if (result && (!state.compileStats || stationType === 'CE')) {
             const activeCount = (result.activeBoxes ? result.activeBoxes.length : 0);
             const sigCount = (result.signals ? result.signals.length : 0);
+            const plotCount = (result.plots ? result.plots.length : 0);
             state.compileStats = {
                 elapsedMs: elapsed,
                 numCandles: station.rawCandles.length,
                 activeChannels: activeCount,
                 signalsCount: sigCount,
+                plotsCount: plotCount,
                 preset: state.activePresetId
             };
             updateDrawerStatus();
@@ -565,8 +1068,8 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
         if (res.type === 'algoalpha_breakout_channels') {
             renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H);
-        } else if (res.type === 'supertrend') {
-            renderSupertrendOverlay(ctx, res, timeScale, candleSeries, W, H);
+        } else if (res.type === 'generic_pine') {
+            renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H);
         }
 
         ctx.restore();
@@ -574,8 +1077,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
     function renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H) {
         const { activeBoxes, completedBoxes, signals, volCandles, colGreen, colRed } = res;
-
-        // 1. Draw Active Channels & Breakout Zones
         const allBoxes = [...completedBoxes.slice(-6), ...activeBoxes];
 
         for (const box of allBoxes) {
@@ -598,11 +1099,11 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             const boxWidth = Math.max(2, drawX2 - drawX1);
             const boxHeight = Math.abs(yBottom - yTop);
 
-            // A. Main Channel Background Fill
+            // A. Main Channel Box Fill
             ctx.fillStyle = box.active ? 'rgba(148, 163, 184, 0.08)' : 'rgba(100, 116, 139, 0.04)';
             ctx.fillRect(drawX1, Math.min(yTop, yBottom), boxWidth, boxHeight);
 
-            // B. Upper Resistance Zone (Red Tint)
+            // B. Upper Zone (Red Tint)
             if (yTopZone != null) {
                 const uH = Math.abs(yTopZone - yTop);
                 ctx.fillStyle = box.active ? 'rgba(255, 17, 0, 0.22)' : 'rgba(255, 17, 0, 0.08)';
@@ -612,7 +1113,7 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 ctx.strokeRect(drawX1, Math.min(yTop, yTopZone), boxWidth, uH);
             }
 
-            // C. Lower Support Zone (Green Tint)
+            // C. Lower Zone (Green Tint)
             if (yBottomZone != null) {
                 const lH = Math.abs(yBottom - yBottomZone);
                 ctx.fillStyle = box.active ? 'rgba(0, 255, 187, 0.20)' : 'rgba(0, 255, 187, 0.08)';
@@ -634,17 +1135,15 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 ctx.setLineDash([]);
             }
 
-            // E. Volume Text at right edge
+            // E. Volume Text
             if (box.active && box.volText) {
                 ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
                 ctx.textAlign = 'right';
                 ctx.textBaseline = 'middle';
                 if (box.isPriceAboveMid) {
-                    // Lower green box
                     ctx.fillStyle = colGreen;
                     ctx.fillText(box.volText, drawX2 - 4, (yBottom + (yBottomZone || yBottom)) / 2);
                 } else {
-                    // Upper red box
                     ctx.fillStyle = colRed;
                     ctx.fillText(box.volText, drawX2 - 4, (yTop + (yTopZone || yTop)) / 2);
                 }
@@ -657,7 +1156,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 const x = timeScale.timeToCoordinate(vc.time);
                 if (x == null || x < 0 || x > W) continue;
 
-                // Upper comparison volume bar (Bullish / Up Volume)
                 const yUOpen = candleSeries.priceToCoordinate(vc.upperOpen);
                 const yUClose = candleSeries.priceToCoordinate(vc.upperClose);
                 if (yUOpen != null && yUClose != null) {
@@ -666,7 +1164,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                     ctx.fillRect(x - 1.5, Math.min(yUOpen, yUClose), 3, barH);
                 }
 
-                // Lower comparison volume bar (Bearish / Down Volume)
                 const yLOpen = candleSeries.priceToCoordinate(vc.lowerOpen);
                 const yLClose = candleSeries.priceToCoordinate(vc.lowerClose);
                 if (yLOpen != null && yLClose != null) {
@@ -677,7 +1174,7 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             }
         }
 
-        // 3. Breakout Signal Markers (▲ Bullish / ▼ Bearish)
+        // 3. Breakout Signal Markers
         if (signals && signals.length > 0) {
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
@@ -689,13 +1186,11 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 if (y == null) continue;
 
                 if (sig.type === 'bullish') {
-                    // Green Arrow Up below candle
                     ctx.fillStyle = colGreen;
                     ctx.shadowColor = colGreen;
                     ctx.shadowBlur = 8;
                     ctx.fillText('▲', x, y + 16);
                 } else {
-                    // Red Arrow Down above candle
                     ctx.fillStyle = colRed;
                     ctx.shadowColor = colRed;
                     ctx.shadowBlur = 8;
@@ -706,50 +1201,58 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         }
     }
 
-    function renderSupertrendOverlay(ctx, res, timeScale, candleSeries, W, H) {
-        const { supertrend, direction, signals, candles } = res;
+    function renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H) {
+        const { plots, signals, candles } = res;
         const n = candles.length;
-        if (n < 2) return;
 
-        ctx.lineWidth = 2;
-        let prevX = null;
-        let prevY = null;
-
-        for (let i = 0; i < n; i++) {
-            const x = timeScale.timeToCoordinate(candles[i].time);
-            if (x == null) continue;
-            const y = candleSeries.priceToCoordinate(supertrend[i]);
-            if (y == null) continue;
-
-            if (prevX != null && Math.abs(x - prevX) < 100) {
-                ctx.strokeStyle = direction[i] === 1 ? '#00ffbb' : '#ff1100';
+        // 1. Draw plot lines
+        if (plots && plots.length > 0) {
+            for (const p of plots) {
+                ctx.lineWidth = p.width || 2;
+                ctx.strokeStyle = p.color || '#38bdf8';
                 ctx.beginPath();
-                ctx.moveTo(prevX, prevY);
-                ctx.lineTo(x, y);
+                let started = false;
+
+                for (let i = 0; i < n; i++) {
+                    const val = p.data[i];
+                    if (val == null || isNaN(val)) continue;
+                    const x = timeScale.timeToCoordinate(candles[i].time);
+                    const y = candleSeries.priceToCoordinate(val);
+                    if (x == null || y == null) continue;
+
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
                 ctx.stroke();
             }
-            prevX = x;
-            prevY = y;
         }
 
-        // Signals
-        if (signals) {
+        // 2. Draw plotshape signals
+        if (signals && signals.length > 0) {
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
+
             for (const sig of signals) {
                 const x = timeScale.timeToCoordinate(sig.time);
                 if (x == null || x < 0 || x > W) continue;
                 const y = candleSeries.priceToCoordinate(sig.price);
                 if (y == null) continue;
+
                 ctx.fillStyle = sig.color;
+                ctx.shadowColor = sig.color;
+                ctx.shadowBlur = 8;
                 ctx.fillText(sig.text, x, sig.type === 'bullish' ? y + 14 : y - 6);
+                ctx.shadowBlur = 0;
             }
         }
     }
 
     // ── Persistence & Remote Cloud Sync ─────────────────────────────────────────
     async function loadConfig() {
-        // 1. Try local cache first for instant 0ms load
         try {
             const local = localStorage.getItem('tv_indicators_config');
             if (local) {
@@ -760,7 +1263,6 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             console.warn('[TvPineEngine] Error loading local config:', e);
         }
 
-        // 2. Fetch from VPS server for cross-device synchronization
         try {
             const resp = await fetch('/api/user/indicators');
             if (resp.ok) {
@@ -781,11 +1283,18 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         if (!data) return;
         if (data.enabled !== undefined) state.enabled = Boolean(data.enabled);
         if (data.target) state.target = data.target;
-        if (data.active_preset && PRESETS[data.active_preset]) {
-            state.activePresetId = data.active_preset;
-            const p = PRESETS[data.active_preset];
-            state.currentCode = p.code;
-            state.inputs = { ...p.inputs, ...(data.inputs || {}) };
+        if (data.custom_indicators) state.customIndicators = data.custom_indicators;
+
+        const presetId = data.active_preset || 'algoalpha_breakout_channels';
+        state.activePresetId = presetId;
+
+        if (PRESETS[presetId]) {
+            state.currentCode = PRESETS[presetId].code;
+            state.inputs = { ...PRESETS[presetId].inputs, ...(data.inputs || {}) };
+        } else if (state.customIndicators[presetId]) {
+            const ci = state.customIndicators[presetId];
+            state.currentCode = ci.code;
+            state.inputs = { ...ci.inputs, ...(data.inputs || {}) };
         }
     }
 
@@ -796,15 +1305,15 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             enabled: state.enabled,
             target: state.target,
             inputs: state.inputs,
+            user_code: state.currentCode,
+            custom_indicators: state.customIndicators,
             updated_at: new Date().toISOString()
         };
 
-        // Save locally
         try {
             localStorage.setItem('tv_indicators_config', JSON.stringify(payload));
         } catch (e) {}
 
-        // Sync to cloud VPS
         try {
             const resp = await fetch('/api/user/indicators', {
                 method: 'POST',
@@ -852,15 +1361,17 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
             <!-- Body -->
             <div class="tvi-body">
-                <!-- Preset & Scope Row -->
+                <!-- Preset & Scope Row with "+ New" & "Delete" controls -->
                 <div class="tvi-field-row">
                     <div class="tvi-field-group">
-                        <label class="tvi-lbl">Indicator Preset</label>
-                        <select id="tvi-preset-select" class="tvi-select">
-                            <option value="algoalpha_breakout_channels">Smart Money Breakout Channels [AlgoAlpha]</option>
-                            <option value="supertrend">Supertrend [ATR Multiplier]</option>
-                            <option value="vwap_bands">VWAP + SD Bands</option>
-                        </select>
+                        <div class="tvi-lbl-row">
+                            <label class="tvi-lbl">Indicator / Script</label>
+                            <div class="tvi-script-actions">
+                                <button id="tvi-btn-new-script" class="tvi-mini-btn" title="Create New Pine Indicator">+ New</button>
+                                <button id="tvi-btn-del-script" class="tvi-mini-btn danger" title="Delete Custom Script">🗑</button>
+                            </div>
+                        </div>
+                        <select id="tvi-preset-select" class="tvi-select"></select>
                     </div>
                     <div class="tvi-field-group">
                         <label class="tvi-lbl">Apply To</label>
@@ -875,9 +1386,7 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                 <!-- Parameters Box -->
                 <div class="tvi-section">
                     <div class="tvi-sec-title">Settings & Inputs</div>
-                    <div id="tvi-inputs-container" class="tvi-inputs-grid">
-                        <!-- Populated dynamically based on preset -->
-                    </div>
+                    <div id="tvi-inputs-container" class="tvi-inputs-grid"></div>
                 </div>
 
                 <!-- Pine Script Code Editor -->
@@ -909,7 +1418,35 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
         document.body.insertAdjacentHTML('beforeend', drawerHtml);
         attachEvents();
+        refreshPresetDropdown();
         renderInputsGrid();
+    }
+
+    function refreshPresetDropdown() {
+        const sel = document.getElementById('tvi-preset-select');
+        if (!sel) return;
+
+        let html = '<optgroup label="Built-in Presets">';
+        for (const [key, p] of Object.entries(PRESETS)) {
+            html += `<option value="${key}" ${state.activePresetId === key ? 'selected' : ''}>${p.name}</option>`;
+        }
+        html += '</optgroup>';
+
+        if (Object.keys(state.customIndicators).length > 0) {
+            html += '<optgroup label="My Custom Indicators">';
+            for (const [key, ci] of Object.entries(state.customIndicators)) {
+                html += `<option value="${key}" ${state.activePresetId === key ? 'selected' : ''}>${ci.name}</option>`;
+            }
+            html += '</optgroup>';
+        }
+
+        sel.innerHTML = html;
+
+        // Toggle delete button visibility based on whether it is custom
+        const btnDel = document.getElementById('tvi-btn-del-script');
+        if (btnDel) {
+            btnDel.style.display = state.customIndicators[state.activePresetId] ? 'inline-block' : 'none';
+        }
     }
 
     function renderInputsGrid() {
@@ -951,18 +1488,51 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
                     <input type="color" id="inp-col-red" class="tvi-color-inp" value="${state.inputs.red || '#ff1100'}" />
                 </div>
             `;
-        } else if (state.activePresetId === 'supertrend') {
-            container.innerHTML = `
-                <div class="tvi-inp-row">
-                    <label class="tvi-inp-lbl">ATR Period</label>
-                    <input type="number" id="inp-st-period" class="tvi-inp" value="${state.inputs.atr_period || 10}" min="1" max="100" />
-                </div>
-                <div class="tvi-inp-row">
-                    <label class="tvi-inp-lbl">Multiplier</label>
-                    <input type="number" step="0.1" id="inp-st-mult" class="tvi-inp" value="${state.inputs.multiplier || 3.0}" min="0.5" max="10" />
-                </div>
-            `;
+            return;
         }
+
+        // Generic dynamic inputs parsing from the script code
+        const parsedInputs = parsePineInputsFromScript(state.currentCode);
+        const keys = Object.keys(parsedInputs);
+
+        if (keys.length === 0) {
+            container.innerHTML = '<div style="color:#64748b; font-size:11px; grid-column:span 2;">No input.* parameters found in script.</div>';
+            return;
+        }
+
+        let html = '';
+        for (const k of keys) {
+            const inp = parsedInputs[k];
+            const curVal = state.inputs[k] !== undefined ? state.inputs[k] : inp.val;
+
+            if (inp.type === 'bool') {
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <input type="checkbox" data-var="${inp.name}" class="tvi-dyn-inp" ${curVal ? 'checked' : ''} />
+                    </div>`;
+            } else if (inp.type === 'color') {
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <input type="color" data-var="${inp.name}" class="tvi-dyn-inp tvi-color-inp" value="${curVal}" />
+                    </div>`;
+            } else if (inp.type === 'int' || inp.type === 'float') {
+                const step = inp.type === 'float' ? '0.1' : '1';
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <input type="number" step="${step}" data-var="${inp.name}" class="tvi-dyn-inp tvi-inp" value="${curVal}" />
+                    </div>`;
+            } else {
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <input type="text" data-var="${inp.name}" class="tvi-dyn-inp tvi-inp" value="${curVal}" />
+                    </div>`;
+            }
+        }
+        container.innerHTML = html;
     }
 
     function collectInputsFromUI() {
@@ -982,11 +1552,94 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
             if (selVolMode) state.inputs.vol_mode = selVolMode.value;
             if (colG) state.inputs.green = colG.value;
             if (colR) state.inputs.red = colR.value;
-        } else if (state.activePresetId === 'supertrend') {
-            const p = document.getElementById('inp-st-period');
-            const m = document.getElementById('inp-st-mult');
-            if (p) state.inputs.atr_period = parseInt(p.value) || 10;
-            if (m) state.inputs.multiplier = parseFloat(m.value) || 3.0;
+            return;
+        }
+
+        const dynInputs = document.querySelectorAll('.tvi-dyn-inp');
+        dynInputs.forEach(el => {
+            const varName = el.getAttribute('data-var');
+            if (!varName) return;
+            if (el.type === 'checkbox') {
+                state.inputs[varName] = el.checked;
+            } else if (el.type === 'number') {
+                state.inputs[varName] = parseFloat(el.value);
+            } else {
+                state.inputs[varName] = el.value;
+            }
+        });
+    }
+
+    function createNewIndicator() {
+        const name = prompt('Enter a name for the new Pine Script indicator:', 'My Custom Indicator');
+        if (!name || !name.trim()) return;
+
+        const id = 'custom_' + Date.now();
+        const starterCode = `//@version=6
+indicator("${name.trim()}", overlay=true)
+
+// Inputs
+fast_len = input.int(9, "Fast EMA Length")
+slow_len = input.int(21, "Slow EMA Length")
+green = input.color(#00ffbb, "Bullish Color")
+red = input.color(#ff1100, "Bearish Color")
+
+// Calculations
+ema_fast = ta.ema(close, fast_len)
+ema_slow = ta.ema(close, slow_len)
+
+// Plots
+plot(ema_fast, "Fast EMA", color=green, linewidth=2)
+plot(ema_slow, "Slow EMA", color=red, linewidth=2)
+
+// Breakout / Signal Triggers
+buySig = ta.crossover(ema_fast, ema_slow)
+sellSig = ta.crossunder(ema_fast, ema_slow)
+
+plotshape(buySig, "BUY", shape.labelup, location.belowbar, green, text="BUY")
+plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")`;
+
+        state.customIndicators[id] = {
+            id: id,
+            name: name.trim(),
+            code: starterCode,
+            inputs: { fast_len: 9, slow_len: 21, green: '#00ffbb', red: '#ff1100' }
+        };
+
+        state.activePresetId = id;
+        state.currentCode = starterCode;
+        state.inputs = { ...state.customIndicators[id].inputs };
+
+        const editor = document.getElementById('tvi-code-editor');
+        if (editor) editor.value = starterCode;
+
+        refreshPresetDropdown();
+        renderInputsGrid();
+        triggerRecompute();
+        saveConfig();
+        showToast(`✓ Created new indicator: ${name}`);
+    }
+
+    function deleteCurrentIndicator() {
+        if (!state.customIndicators[state.activePresetId]) {
+            alert('Built-in presets cannot be deleted.');
+            return;
+        }
+        if (confirm(`Are you sure you want to delete "${state.customIndicators[state.activePresetId].name}"?`)) {
+            const delName = state.customIndicators[state.activePresetId].name;
+            delete state.customIndicators[state.activePresetId];
+
+            state.activePresetId = 'algoalpha_breakout_channels';
+            state.currentCode = PRESETS.algoalpha_breakout_channels.code;
+            state.inputs = { ...PRESETS.algoalpha_breakout_channels.inputs };
+
+            const editor = document.getElementById('tvi-code-editor');
+            if (editor) editor.value = state.currentCode;
+
+            refreshPresetDropdown();
+            renderInputsGrid();
+            triggerRecompute();
+            saveConfig();
+            showToast(`✓ Deleted indicator: ${delName}`);
         }
     }
 
@@ -1000,6 +1653,8 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         const masterToggle = document.getElementById('tvi-master-toggle');
         const btnCompile = document.getElementById('tvi-btn-compile');
         const btnSave = document.getElementById('tvi-btn-save');
+        const btnNew = document.getElementById('tvi-btn-new-script');
+        const btnDel = document.getElementById('tvi-btn-del-script');
 
         function openDrawer() {
             backdrop.classList.remove('hidden');
@@ -1024,19 +1679,28 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         if (btnClose) btnClose.addEventListener('click', closeDrawer);
         if (backdrop) backdrop.addEventListener('click', closeDrawer);
 
+        if (btnNew) btnNew.addEventListener('click', createNewIndicator);
+        if (btnDel) btnDel.addEventListener('click', deleteCurrentIndicator);
+
         if (presetSelect) {
-            presetSelect.value = state.activePresetId;
             presetSelect.addEventListener('change', (e) => {
                 const id = e.target.value;
+                state.activePresetId = id;
+
                 if (PRESETS[id]) {
-                    state.activePresetId = id;
                     state.currentCode = PRESETS[id].code;
                     state.inputs = { ...PRESETS[id].inputs };
-                    const editor = document.getElementById('tvi-code-editor');
-                    if (editor) editor.value = state.currentCode;
-                    renderInputsGrid();
-                    triggerRecompute();
+                } else if (state.customIndicators[id]) {
+                    state.currentCode = state.customIndicators[id].code;
+                    state.inputs = { ...state.customIndicators[id].inputs };
                 }
+
+                const editor = document.getElementById('tvi-code-editor');
+                if (editor) editor.value = state.currentCode;
+
+                refreshPresetDropdown();
+                renderInputsGrid();
+                triggerRecompute();
             });
         }
 
@@ -1056,9 +1720,15 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
         if (btnCompile) {
             btnCompile.addEventListener('click', () => {
-                collectInputsFromUI();
                 const editor = document.getElementById('tvi-code-editor');
-                if (editor) state.currentCode = editor.value;
+                if (editor) {
+                    state.currentCode = editor.value;
+                    if (state.customIndicators[state.activePresetId]) {
+                        state.customIndicators[state.activePresetId].code = editor.value;
+                    }
+                }
+                collectInputsFromUI();
+                renderInputsGrid();
                 triggerRecompute();
                 showToast('✓ Compiled and rendered successfully');
             });
@@ -1066,6 +1736,13 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
 
         if (btnSave) {
             btnSave.addEventListener('click', () => {
+                const editor = document.getElementById('tvi-code-editor');
+                if (editor) {
+                    state.currentCode = editor.value;
+                    if (state.customIndicators[state.activePresetId]) {
+                        state.customIndicators[state.activePresetId].code = editor.value;
+                    }
+                }
                 collectInputsFromUI();
                 saveConfig();
             });
@@ -1102,7 +1779,8 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         if (state.compileStats) {
             const s = state.compileStats;
             msgEl.className = 'tvi-status-ready';
-            msgEl.innerHTML = `✓ <strong>${s.preset}</strong> compiled in <strong>${s.elapsedMs}ms</strong> (${s.numCandles} bars) • Channels: <strong>${s.activeChannels}</strong> • Signals: <strong>${s.signalsCount}</strong>`;
+            const detailStr = s.plotsCount > 0 ? `Lines: <strong>${s.plotsCount}</strong> • Signals: <strong>${s.signalsCount}</strong>` : `Channels: <strong>${s.activeChannels}</strong> • Signals: <strong>${s.signalsCount}</strong>`;
+            msgEl.innerHTML = `✓ <strong>${s.preset}</strong> compiled in <strong>${s.elapsedMs}ms</strong> (${s.numCandles} bars) • ${detailStr}`;
         } else {
             msgEl.className = 'tvi-status-ready';
             msgEl.textContent = '✓ Ready to compile and apply to chart';
@@ -1120,10 +1798,10 @@ band2_mult = input.float(2.0, "Band 2 Multiplier")`
         computeIndicatorsForStation,
         renderStationIndicators,
         recompute: triggerRecompute,
-        getState: () => state
+        getState: () => state,
+        createNewIndicator
     };
 
-    // Auto-initialize when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => window.TvPineEngine.init());
     } else {
