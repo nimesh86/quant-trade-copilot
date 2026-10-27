@@ -439,14 +439,25 @@ def resolve_token_for_kite_symbol(symbol: str) -> Tuple[Optional[int], Optional[
 
 # ── Expiry Dates & Option Chain Matrix ────────────────────────────────────────
 
+_expiries_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+EXPIRIES_CACHE_TTL = 300.0  # 5 minutes in-memory cache
+
+
 def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
     """
     Return sorted list of active future expiry dates for the given underlying from Kite instruments,
     plus recent traded historical session expiries from DB so historical sessions can be analyzed.
+    Cached in-memory for 5 minutes for sub-millisecond response time.
     """
+    und_upper = underlying.strip().upper()
+    now = time.time()
+    if und_upper in _expiries_cache:
+        ts, cached_exps = _expiries_cache[und_upper]
+        if now - ts < EXPIRIES_CACHE_TTL:
+            return cached_exps
+
     insts = _load_instruments()
     today = _get_ist_now().date()
-    und_upper = underlying.strip().upper()
     
     try:
         from trading_engine.config import get_index_spec
@@ -474,7 +485,7 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
             "is_near": days <= 4,
         })
 
-    # Include recent traded weekly expiries from DB minute_candles
+    # Include recent traded weekly expiries from DB minute_candles with chunk pruning
     try:
         from sqlalchemy import create_engine, text
         db_engine = create_engine(os.environ.get("DB_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"))
@@ -483,6 +494,7 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
                 SELECT DISTINCT substring(symbol from '^' || :und || '26([1-9OND][0-9]{2})') as exp_code
                 FROM minute_candles
                 WHERE symbol ~ ('^' || :und || '26[1-9OND][0-9]{2}[0-9]{5}(CE|PE)$')
+                  AND timestamp >= NOW() - INTERVAL '45 days'
                 ORDER BY 1 DESC
                 LIMIT 5;
             """)
@@ -501,7 +513,6 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
                         d_iso = d_val.strftime("%Y-%m-%d")
                         d_str = d_val.strftime("%d %b %Y")
                         if not any(x["date"] == d_iso for x in res):
-                            is_latest = len(traded_items) == 0
                             traded_items.append({
                                 "date": d_iso,
                                 "display": f"{d_str} (Traded Historical)",
@@ -511,13 +522,12 @@ def get_available_expiries(underlying: str = "NIFTY") -> List[Dict[str, Any]]:
                             })
                     except Exception:
                         pass
-            # Append historical traded sessions after active future expiries
-            # so active upcoming expiries (e.g. 27 Oct 2026) are always first and default
             for item in traded_items:
                 res.append(item)
     except Exception as e:
         print(f"ContractDataManager: error checking DB expiries: {e}", flush=True)
 
+    _expiries_cache[und_upper] = (now, res)
     return res
 
 
@@ -675,6 +685,10 @@ def resolve_spot_price(underlying: str, expiry: Optional[str] = None) -> float:
     return fallback_px
 
 
+_option_chain_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+OPTION_CHAIN_CACHE_TTL = 3.0  # 3 seconds cache
+
+
 def get_option_chain_data(
     underlying: str = "NIFTY",
     expiry: Optional[str] = None,
@@ -684,10 +698,19 @@ def get_option_chain_data(
     Build real-time Option Chain for the underlying and expiry date.
     Returns full list of strikes centered around dynamic ATM with live LTPs.
     Falls back to TimescaleDB historical candles when market is closed or contracts expired.
+    Cached in-memory for 3 seconds to eliminate redundant DB & API calls.
     """
+    und_upper = underlying.strip().upper()
+    now = time.time()
+
+    cache_key = f"{und_upper}:{expiry or ''}:{round(spot_price or 0.0, 1)}"
+    if cache_key in _option_chain_cache:
+        ts, cached_oc = _option_chain_cache[cache_key]
+        if now - ts < OPTION_CHAIN_CACHE_TTL:
+            return cached_oc
+
     insts = _load_instruments()
     today = _get_ist_now().date()
-    und_upper = underlying.strip().upper()
 
     # Default expiry to closest active future expiry
     if not expiry:
@@ -796,7 +819,7 @@ def get_option_chain_data(
         except Exception as e:
             print(f"ContractDataManager: DB option chain fallback error: {e}", flush=True)
 
-    # Fill any missing LTPs (from market closed, pre-market, or historical sessions)
+    # Fill any missing LTPs with partition pruning (last 3 days)
     missing_syms = []
     for s_data in strike_map.values():
         for side in ("call", "put"):
@@ -812,6 +835,7 @@ def get_option_chain_data(
                     SELECT DISTINCT ON (symbol) symbol, close
                     FROM minute_candles
                     WHERE symbol = ANY(:syms)
+                      AND timestamp >= NOW() - INTERVAL '3 days'
                     ORDER BY symbol, timestamp DESC;
                 """)
                 c_rows = conn.execute(q_closes, {"syms": missing_syms}).fetchall()
@@ -823,6 +847,7 @@ def get_option_chain_data(
                         SELECT DISTINCT ON (symbol) symbol, close
                         FROM option_minute_candles
                         WHERE symbol = ANY(:syms)
+                          AND timestamp >= NOW() - INTERVAL '3 days'
                         ORDER BY symbol, timestamp DESC;
                     """)
                     c_rows2 = conn.execute(q_closes2, {"syms": rem_syms}).fetchall()
@@ -868,7 +893,7 @@ def get_option_chain_data(
     else:
         chain = []
 
-    return {
+    res = {
         "underlying": und_upper,
         "expiry": expiry,
         "spot": round(spot_price, 2),
@@ -877,6 +902,9 @@ def get_option_chain_data(
         "total_strikes": len(sorted_strikes),
         "chain": chain,
     }
+    _option_chain_cache[cache_key] = (now, res)
+    return res
+
 
 
 # ── Symbol Search ─────────────────────────────────────────────────────────────
@@ -1077,10 +1105,25 @@ def fetch_contract_candles(
     If target_date is specified, loads for that date.
     If market is closed (weekend, holiday, pre-market) or today has 0 candles:
     Automatically falls back to the most recent available trading day's data!
+    Cached in-memory for sub-millisecond retrieval.
     """
     today_str = get_today_str()
     now_ist = _get_ist_now()
     is_weekend = now_ist.weekday() >= 5
+    explicit_date_requested = bool(target_date and str(target_date).lower() != "today" and str(target_date) != today_str)
+
+    # 0. Fast-path in-memory session cache
+    if not explicit_date_requested:
+        with _lock:
+            cached = _session_candles.get(trading_symbol)
+            if cached and len(cached) > 0:
+                return {
+                    "symbol": trading_symbol,
+                    "date": today_str,
+                    "count": len(cached),
+                    "is_last_available_day": False,
+                    "candles": list(cached),
+                }
 
     # 1. Resolve DB Engine
     if db_engine is None:
@@ -1090,14 +1133,13 @@ def fetch_contract_candles(
         except Exception:
             pass
 
-    explicit_date_requested = bool(target_date and str(target_date).lower() != "today" and str(target_date) != today_str)
     if explicit_date_requested:
         active_date = target_date
     else:
         active_date = None
     is_last_day = False
 
-    # If target_date is not an explicit past date and it's a weekday, check if today has candles in DB
+    # If target_date is not an explicit past date and it's a weekday, check if today has candles in DB with chunk pruning
     if not explicit_date_requested and not is_weekend and db_engine is not None:
         try:
             from sqlalchemy import text
@@ -1105,7 +1147,9 @@ def fetch_contract_candles(
                 for tbl in ["minute_candles", "option_minute_candles"]:
                     q_cnt = text(f"""
                         SELECT count(*) FROM {tbl}
-                        WHERE symbol = :sym AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today
+                        WHERE symbol = :sym
+                          AND timestamp >= NOW() - INTERVAL '24 hours'
+                          AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today
                     """)
                     cnt = conn.execute(q_cnt, {"sym": trading_symbol, "today": today_str}).scalar()
                     if cnt and cnt > 0:
@@ -1121,13 +1165,17 @@ def fetch_contract_candles(
             with db_engine.connect() as conn:
                 q_max = text("""
                     SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                    FROM minute_candles WHERE symbol = :sym
+                    FROM minute_candles
+                    WHERE symbol = :sym
+                      AND timestamp >= NOW() - INTERVAL '30 days';
                 """)
                 max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
                 if not max_d:
                     q_max2 = text("""
                         SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                        FROM option_minute_candles WHERE symbol = :sym
+                        FROM option_minute_candles
+                        WHERE symbol = :sym
+                          AND timestamp >= NOW() - INTERVAL '30 days';
                     """)
                     max_d = conn.execute(q_max2, {"sym": trading_symbol}).scalar()
                 if max_d:
@@ -1139,22 +1187,25 @@ def fetch_contract_candles(
     if not active_date:
         active_date = today_str
 
-    # 2. Query candles for active_date from DB
+    # 2. Query candles for active_date from DB with exact partition bounds
     candles = []
     if db_engine is not None:
         try:
             from sqlalchemy import text
             import pandas as pd
+            start_ts = f"{active_date} 00:00:00+05:30"
+            end_ts = f"{active_date} 23:59:59+05:30"
             with db_engine.connect() as conn:
                 for tbl in ["minute_candles", "option_minute_candles"]:
                     sql = text(f"""
                         SELECT timestamp, open, high, low, close, volume
                         FROM {tbl}
                         WHERE symbol = :sym
-                          AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                          AND timestamp >= :start_ts
+                          AND timestamp <= :end_ts
                         ORDER BY timestamp ASC
                     """)
-                    df = pd.read_sql(sql, conn, params={"sym": trading_symbol, "d": active_date})
+                    df = pd.read_sql(sql, conn, params={"sym": trading_symbol, "start_ts": start_ts, "end_ts": end_ts})
                     if not df.empty:
                         candles = _df_to_candle_list(df)
                         break
@@ -1295,6 +1346,10 @@ def fetch_contract_candles(
                 "volume": vol
             })
             p = c_close
+
+    if candles and active_date == today_str:
+        with _lock:
+            _session_candles[trading_symbol] = list(candles)
 
     market_status = "OPEN" if is_market_open() else "CLOSED"
     return {

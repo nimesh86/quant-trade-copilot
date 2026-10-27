@@ -757,10 +757,25 @@ async function selectUnderlying(und) {
 
     C.selectedExpiry = null;
     MasterState.selectedExpiry = null;
-    await initExpirySelector();
-    await fetchOptionChain();
+
+    // Reset station symbols so newly selected underlying ATM strike pair is automatically loaded
+    if (typeof Stations !== 'undefined') {
+        if (Stations.CE) Stations.CE.symbol = null;
+        if (Stations.PE) Stations.PE.symbol = null;
+    }
+
+    showLoading(true);
+    try {
+        await Promise.all([
+            initExpirySelector(),
+            fetchOptionChain()
+        ]);
+    } finally {
+        showLoading(false);
+    }
 }
 window.selectUnderlying = selectUnderlying;
+
 
 async function fetchOptionChain() {
     const tbody = document.getElementById('oc-tbody');

@@ -2123,10 +2123,10 @@ async def contract_candles(
     Automatically returns the last available trading day's data!
     """
     try:
-        res = fetch_contract_candles(symbol, target_date=date, db_engine=state.db_engine)
-        # Enrich with live order flow / depth quote if available
-        quote = get_contract_quote(symbol)
-        res["quote"] = quote
+        res = await asyncio.to_thread(fetch_contract_candles, symbol, date, state.db_engine)
+        # Fast non-blocking quote from in-memory price bus
+        ltp = get_live_ltp(symbol)
+        res["quote"] = {"symbol": symbol, "ltp": ltp} if ltp else None
         return res
     except Exception as e:
         print(f"contract_candles error for {symbol}: {e}", flush=True)
