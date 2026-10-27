@@ -434,6 +434,10 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         target: 'both', // 'both', 'CE', 'PE'
         activePresetId: 'algoalpha_breakout_channels',
         customIndicators: {}, // id -> { id, name, code, inputs }
+        stationEnabled: {
+            CE: { algoalpha_breakout_channels: true },
+            PE: { algoalpha_breakout_channels: true }
+        },
         currentCode: ALGOALPHA_FULL_SCRIPT,
         inputs: { ...PRESETS.algoalpha_breakout_channels.inputs },
         lastCompileTime: null,
@@ -1016,39 +1020,37 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
     // ── Station Computation Dispatcher ──────────────────────────────────────────
     function computeIndicatorsForStation(station) {
         if (!station || !station.rawCandles || station.rawCandles.length < 5) return;
-        if (!state.enabled) {
-            station.tvIndicatorResult = null;
-            return;
+        const st = (station.type || '').toUpperCase();
+        if (!state.stationEnabled[st]) {
+            state.stationEnabled[st] = { algoalpha_breakout_channels: true };
         }
-
-        const stationType = (station.type || '').toUpperCase();
-        if (state.target !== 'both' && state.target.toUpperCase() !== stationType) {
-            station.tvIndicatorResult = null;
-            return;
-        }
+        const enabledMap = state.stationEnabled[st];
 
         const t0 = performance.now();
-        let result = null;
+        const results = [];
+        const allIndicators = { ...PRESETS, ...state.customIndicators };
 
-        if (state.activePresetId === 'algoalpha_breakout_channels') {
-            result = computeAlgoAlphaBreakoutChannels(station.rawCandles, state.inputs);
-        } else {
-            result = computeGenericPineScript(station.rawCandles, state.currentCode, state.inputs);
+        for (const [id, ind] of Object.entries(allIndicators)) {
+            const isEnabled = enabledMap[id] === true || (enabledMap[id] === undefined && id === 'algoalpha_breakout_channels');
+            if (!isEnabled) continue;
+
+            let res = null;
+            if (id === 'algoalpha_breakout_channels') {
+                res = computeAlgoAlphaBreakoutChannels(station.rawCandles, state.inputs);
+            } else {
+                res = computeGenericPineScript(station.rawCandles, ind.code, ind.inputs || state.inputs);
+            }
+            if (res) results.push(res);
         }
 
+        station.tvIndicatorResults = results;
         const elapsed = (performance.now() - t0).toFixed(1);
-        station.tvIndicatorResult = result;
 
-        if (result && (!state.compileStats || stationType === 'CE')) {
-            const activeCount = (result.activeBoxes ? result.activeBoxes.length : 0);
-            const sigCount = (result.signals ? result.signals.length : 0);
-            const plotCount = (result.plots ? result.plots.length : 0);
+        if (results.length > 0 && (!state.compileStats || st === 'CE')) {
             state.compileStats = {
                 elapsedMs: elapsed,
                 numCandles: station.rawCandles.length,
-                activeChannels: activeCount,
-                signalsCount: sigCount,
-                plotsCount: plotCount,
+                activeCount: results.length,
                 preset: state.activePresetId
             };
             updateDrawerStatus();
@@ -1058,20 +1060,20 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
     // ── HTML5 Canvas Overlay Renderer ───────────────────────────────────────────
     function renderStationIndicators(station, ctx, W, H) {
         if (!station || !station.chart || !station.candleSeries) return;
-        if (!state.enabled || !station.tvIndicatorResult) return;
+        const results = station.tvIndicatorResults;
+        if (!results || results.length === 0) return;
 
-        const res = station.tvIndicatorResult;
         const timeScale = station.chart.timeScale();
         const candleSeries = station.candleSeries;
 
         ctx.save();
-
-        if (res.type === 'algoalpha_breakout_channels') {
-            renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H);
-        } else if (res.type === 'generic_pine') {
-            renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H);
+        for (const res of results) {
+            if (res.type === 'algoalpha_breakout_channels') {
+                renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H);
+            } else if (res.type === 'generic_pine') {
+                renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H);
+            }
         }
-
         ctx.restore();
     }
 
@@ -1284,6 +1286,7 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         if (data.enabled !== undefined) state.enabled = Boolean(data.enabled);
         if (data.target) state.target = data.target;
         if (data.custom_indicators) state.customIndicators = data.custom_indicators;
+        if (data.station_enabled) state.stationEnabled = data.station_enabled;
 
         const presetId = data.active_preset || 'algoalpha_breakout_channels';
         state.activePresetId = presetId;
@@ -1296,6 +1299,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             state.currentCode = ci.code;
             state.inputs = { ...ci.inputs, ...(data.inputs || {}) };
         }
+
+        refreshStationPopovers();
     }
 
     async function saveConfig() {
@@ -1307,6 +1312,7 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             inputs: state.inputs,
             user_code: state.currentCode,
             custom_indicators: state.customIndicators,
+            station_enabled: state.stationEnabled,
             updated_at: new Date().toISOString()
         };
 
@@ -1326,6 +1332,55 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         } catch (e) {
             console.warn('[TvPineEngine] Cloud sync failed:', e);
         }
+    }
+
+    function refreshStationPopovers() {
+        const stations = ['CE', 'PE'];
+        const allIndicators = [];
+        for (const [key, p] of Object.entries(PRESETS)) {
+            allIndicators.push({ id: key, name: p.name });
+        }
+        for (const [key, ci] of Object.entries(state.customIndicators)) {
+            allIndicators.push({ id: key, name: ci.name });
+        }
+
+        for (const st of stations) {
+            const container = document.getElementById(`${st.toLowerCase()}-pine-indicators-list`);
+            if (!container) continue;
+
+            if (!state.stationEnabled[st]) {
+                state.stationEnabled[st] = { algoalpha_breakout_channels: true };
+            }
+
+            let html = '';
+            for (const ind of allIndicators) {
+                const isChecked = state.stationEnabled[st][ind.id] === true || (state.stationEnabled[st][ind.id] === undefined && ind.id === 'algoalpha_breakout_channels');
+                html += `
+                    <label class="popover-item pine-item" title="${ind.name}">
+                        <input type="checkbox" data-station="${st}" data-id="${ind.id}" ${isChecked ? 'checked' : ''} />
+                        <span>${ind.name}</span>
+                    </label>`;
+            }
+            container.innerHTML = html;
+        }
+
+        // Attach checkbox change event
+        document.querySelectorAll('.pine-popover-list input[type="checkbox"]').forEach(chk => {
+            chk.onchange = (e) => {
+                const st = e.target.getAttribute('data-station');
+                const id = e.target.getAttribute('data-id');
+                if (!state.stationEnabled[st]) state.stationEnabled[st] = {};
+                state.stationEnabled[st][id] = e.target.checked;
+
+                if (window.Stations && window.Stations[st]) {
+                    computeIndicatorsForStation(window.Stations[st]);
+                    if (typeof window.renderStationSMFCanvas === 'function') {
+                        window.renderStationSMFCanvas(window.Stations[st]);
+                    }
+                }
+                saveConfig();
+            };
+        });
     }
 
     function showToast(msg) {
@@ -1612,7 +1667,13 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
         const editor = document.getElementById('tvi-code-editor');
         if (editor) editor.value = starterCode;
 
+        if (!state.stationEnabled.CE) state.stationEnabled.CE = {};
+        if (!state.stationEnabled.PE) state.stationEnabled.PE = {};
+        state.stationEnabled.CE[id] = true;
+        state.stationEnabled.PE[id] = true;
+
         refreshPresetDropdown();
+        refreshStationPopovers();
         renderInputsGrid();
         triggerRecompute();
         saveConfig();
@@ -1625,8 +1686,11 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
             return;
         }
         if (confirm(`Are you sure you want to delete "${state.customIndicators[state.activePresetId].name}"?`)) {
-            const delName = state.customIndicators[state.activePresetId].name;
-            delete state.customIndicators[state.activePresetId];
+            const delId = state.activePresetId;
+            const delName = state.customIndicators[delId].name;
+            delete state.customIndicators[delId];
+            if (state.stationEnabled.CE) delete state.stationEnabled.CE[delId];
+            if (state.stationEnabled.PE) delete state.stationEnabled.PE[delId];
 
             state.activePresetId = 'algoalpha_breakout_channels';
             state.currentCode = PRESETS.algoalpha_breakout_channels.code;
@@ -1636,6 +1700,7 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
             if (editor) editor.value = state.currentCode;
 
             refreshPresetDropdown();
+            refreshStationPopovers();
             renderInputsGrid();
             triggerRecompute();
             saveConfig();
@@ -1792,11 +1857,13 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
         init() {
             loadConfig().then(() => {
                 mountUI();
+                refreshStationPopovers();
                 triggerRecompute();
             });
         },
         computeIndicatorsForStation,
         renderStationIndicators,
+        refreshStationPopovers,
         recompute: triggerRecompute,
         getState: () => state,
         createNewIndicator

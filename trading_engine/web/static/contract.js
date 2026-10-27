@@ -6918,6 +6918,9 @@ function bindStationControls(station) {
     if (btnIndicators && indicatorsPanel) {
         btnIndicators.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (window.TvPineEngine && typeof window.TvPineEngine.refreshStationPopovers === 'function') {
+                window.TvPineEngine.refreshStationPopovers();
+            }
             indicatorsPanel.classList.toggle('hidden');
         });
         document.addEventListener('click', (e) => {
