@@ -569,7 +569,31 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             return out;
         },
 
-        atr(candles, len) {
+        rma(series, len) {
+            const n = series.length;
+            const out = new Array(n);
+            if (n === 0) return out;
+            const alpha = 1 / len;
+            let sum = 0;
+            for (let i = 0; i < Math.min(len, n); i++) {
+                sum += series[i];
+            }
+            let prev = sum / Math.min(len, n);
+            out[0] = series[0];
+            for (let i = 1; i < n; i++) {
+                if (i < len) {
+                    let s = 0;
+                    for (let j = 0; j <= i; j++) s += series[j];
+                    prev = s / (i + 1);
+                } else {
+                    prev = alpha * series[i] + (1 - alpha) * prev;
+                }
+                out[i] = prev;
+            }
+            return out;
+        },
+
+        tr(candles) {
             const n = candles.length;
             const tr = new Array(n);
             for (let i = 0; i < n; i++) {
@@ -585,7 +609,12 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                     );
                 }
             }
-            return PineTA.sma(tr, len);
+            return tr;
+        },
+
+        atr(candles, len) {
+            const trArr = PineTA.tr(candles);
+            return PineTA.rma(trArr, len);
         },
 
         crossover(a, b) {
@@ -614,65 +643,33 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
     };
 
     // ── Dynamic Pine Script Input Parser ────────────────────────────────────────
-    function parsePineInputsFromScript(scriptCode) {
-        const parsed = {};
-        if (!scriptCode) return parsed;
-        const lines = scriptCode.split('\n');
+    function stripQuotes(str) {
+        if (!str || typeof str !== 'string') return '';
+        return str.replace(/^["']|["']$/g, '').trim();
+    }
 
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.startsWith('//') || trimmed.length === 0) continue;
-
-            // Match input.type(def, title, ...) or input(def, title, ...)
-            const m = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*input(?:\.([a-z]+))?\s*\((.*)\)/);
-            if (m) {
-                const varName = m[1];
-                const type = m[2] || 'float';
-                const argsStr = m[3];
-                const rawArgs = splitPineArgs(argsStr);
-                const rawDef = rawArgs[0] ? rawArgs[0].trim() : '';
-                const rawTitle = rawArgs[1] ? rawArgs[1].replace(/["']/g, '').trim() : varName;
-
-                let val = rawDef;
-                let inputType = 'text';
-
-                if (type === 'int' || (!m[2] && /^-?\d+$/.test(rawDef))) {
-                    val = parseInt(rawDef) || 0;
-                    inputType = 'int';
-                } else if (type === 'float' || (!m[2] && /^-?\d+\.\d+$/.test(rawDef))) {
-                    val = parseFloat(rawDef) || 0.0;
-                    inputType = 'float';
-                } else if (type === 'bool' || rawDef === 'true' || rawDef === 'false') {
-                    val = rawDef === 'true';
-                    inputType = 'bool';
-                } else if (type === 'color' || rawDef.startsWith('#')) {
-                    val = rawDef.startsWith('#') ? rawDef.split(/[\s,)]/)[0] : '#00ffbb';
-                    inputType = 'color';
-                } else if (type === 'string' || rawDef.startsWith('"') || rawDef.startsWith("'")) {
-                    val = rawDef.replace(/["']/g, '');
-                    inputType = 'string';
-                }
-
-                parsed[varName] = {
-                    name: varName,
-                    title: rawTitle,
-                    type: inputType,
-                    val: val
-                };
-            }
-        }
-        return parsed;
+    function formatVarNameToTitle(name) {
+        if (!name) return '';
+        return name
+            .replace(/_/g, ' ')
+            .replace(/([a-z])([A-Z])/g, '$1 $2')
+            .replace(/\b\w/g, c => c.toUpperCase());
     }
 
     function splitPineArgs(argsStr) {
         const args = [];
         let cur = '';
         let inQuotes = false;
+        let quoteChar = '';
         let depth = 0;
         for (let i = 0; i < argsStr.length; i++) {
             const ch = argsStr[i];
-            if (ch === '"' || ch === "'") inQuotes = !inQuotes;
-            if (!inQuotes) {
+            if (!inQuotes && (ch === '"' || ch === "'")) {
+                inQuotes = true;
+                quoteChar = ch;
+            } else if (inQuotes && ch === quoteChar && argsStr[i - 1] !== '\\') {
+                inQuotes = false;
+            } else if (!inQuotes) {
                 if (ch === '(' || ch === '[') depth++;
                 else if (ch === ')' || ch === ']') depth--;
                 else if (ch === ',' && depth === 0) {
@@ -685,6 +682,162 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         }
         if (cur.trim()) args.push(cur.trim());
         return args;
+    }
+
+    function parseSinglePineInput(varName, funcType, argsStr) {
+        const rawArgs = splitPineArgs(argsStr);
+        let title = '';
+        let defval = undefined;
+        let type = funcType || '';
+        let step = null;
+        let minval = null;
+        let maxval = null;
+        let options = null;
+
+        let positionalIdx = 0;
+        for (const raw of rawArgs) {
+            const trimmed = raw.trim();
+            const kwMatch = trimmed.match(/^([a-zA-Z0-9_]+)\s*=\s*([\s\S]*)$/);
+            if (kwMatch) {
+                const key = kwMatch[1].toLowerCase();
+                const val = kwMatch[2].trim();
+                if (key === 'title' || key === 'name') {
+                    title = stripQuotes(val);
+                } else if (key === 'defval' || key === 'def') {
+                    defval = val;
+                } else if (key === 'type') {
+                    type = val.replace(/^input\./i, '').toLowerCase();
+                } else if (key === 'step') {
+                    step = parseFloat(val);
+                } else if (key === 'minval') {
+                    minval = parseFloat(val);
+                } else if (key === 'maxval') {
+                    maxval = parseFloat(val);
+                } else if (key === 'options') {
+                    try {
+                        options = JSON.parse(val.replace(/'/g, '"'));
+                    } catch (e) {
+                        options = val.replace(/[\[\]]/g, '').split(',').map(s => stripQuotes(s.trim()));
+                    }
+                }
+            } else {
+                if (positionalIdx === 0 && defval === undefined) {
+                    defval = trimmed;
+                } else if (positionalIdx === 1 && !title) {
+                    title = stripQuotes(trimmed);
+                } else if (positionalIdx === 2 && !type) {
+                    type = trimmed.replace(/^input\./i, '').toLowerCase();
+                }
+                positionalIdx++;
+            }
+        }
+
+        if (!title) {
+            title = formatVarNameToTitle(varName);
+        }
+
+        let inputType = 'text';
+        let cleanVal = defval;
+
+        if (type.includes('bool')) {
+            inputType = 'bool';
+            cleanVal = defval === 'true' || defval === true;
+        } else if (type.includes('int')) {
+            inputType = 'int';
+            cleanVal = parseInt(defval) || 0;
+        } else if (type.includes('float') || type.includes('price')) {
+            inputType = 'float';
+            cleanVal = parseFloat(defval) || 0.0;
+        } else if (type.includes('source')) {
+            inputType = 'source';
+            cleanVal = (defval || 'hl2').toLowerCase();
+        } else if (type.includes('color')) {
+            inputType = 'color';
+            cleanVal = (defval && defval.startsWith('#')) ? defval.split(/[\s,)]/)[0] : '#00ffbb';
+        } else if (type.includes('string') || type.includes('resolution') || type.includes('timeframe')) {
+            inputType = (options && options.length) ? 'options' : 'string';
+            cleanVal = stripQuotes(defval || '');
+        } else {
+            if (defval === 'true' || defval === 'false' || typeof defval === 'boolean') {
+                inputType = 'bool';
+                cleanVal = defval === 'true' || defval === true;
+            } else if (typeof defval === 'string' && ['hl2', 'close', 'open', 'high', 'low', 'ohlc4', 'hlc3'].includes(defval.toLowerCase())) {
+                inputType = 'source';
+                cleanVal = defval.toLowerCase();
+            } else if (typeof defval === 'string' && /^-?\d+$/.test(defval)) {
+                inputType = 'int';
+                cleanVal = parseInt(defval);
+            } else if (typeof defval === 'string' && /^-?\d*\.\d+$/.test(defval)) {
+                inputType = 'float';
+                cleanVal = parseFloat(defval);
+            } else if (typeof defval === 'string' && defval.startsWith('#')) {
+                inputType = 'color';
+                cleanVal = defval.split(/[\s,)]/)[0];
+            } else if (options && options.length > 0) {
+                inputType = 'options';
+                cleanVal = stripQuotes(defval || options[0]);
+            } else {
+                inputType = 'text';
+                cleanVal = stripQuotes(defval || '');
+            }
+        }
+
+        return {
+            name: varName,
+            title: title,
+            type: inputType,
+            val: cleanVal,
+            step: step,
+            minval: minval,
+            maxval: maxval,
+            options: options
+        };
+    }
+
+    function parsePineInputsFromScript(scriptCode) {
+        const parsed = {};
+        if (!scriptCode) return parsed;
+
+        const inputKeywordRegex = /([a-zA-Z0-9_]+)\s*[:=]+\s*input(?:\.([a-zA-Z0-9_]+))?\s*\(/g;
+        let match;
+
+        while ((match = inputKeywordRegex.exec(scriptCode)) !== null) {
+            const varName = match[1];
+            const funcType = match[2] || '';
+            const startIndex = inputKeywordRegex.lastIndex;
+
+            let depth = 1;
+            let inQuotes = false;
+            let quoteChar = '';
+            let endIndex = -1;
+
+            for (let i = startIndex; i < scriptCode.length; i++) {
+                const ch = scriptCode[i];
+                if (!inQuotes && (ch === '"' || ch === "'")) {
+                    inQuotes = true;
+                    quoteChar = ch;
+                } else if (inQuotes && ch === quoteChar && scriptCode[i - 1] !== '\\') {
+                    inQuotes = false;
+                } else if (!inQuotes) {
+                    if (ch === '(') depth++;
+                    else if (ch === ')') {
+                        depth--;
+                        if (depth === 0) {
+                            endIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (endIndex !== -1) {
+                const argsStr = scriptCode.substring(startIndex, endIndex);
+                parsed[varName] = parseSinglePineInput(varName, funcType, argsStr);
+                inputKeywordRegex.lastIndex = endIndex + 1;
+            }
+        }
+
+        return parsed;
     }
 
     // ── Dedicated AlgoAlpha Breakout Channels Runner ─────────────────────────────
@@ -934,6 +1087,110 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         const opens = candles.map(c => c.open);
         const volumes = candles.map(c => c.volume || 1);
         const times = candles.map(c => c.time);
+
+        // Check for Supertrend indicator script (Pine v4 or v5/v6)
+        const isSupertrend = /supertrend/i.test(scriptCode) || 
+            (/\bMultiplier\b/i.test(scriptCode) && /\b(?:up1|dn1|trend)\b/i.test(scriptCode));
+
+        if (isSupertrend) {
+            const periods = parseInt(inputs.Periods || inputs.atr_period || inputs.period || 10) || 10;
+            const multiplier = parseFloat(inputs.Multiplier || inputs.multiplier || 3.0) || 3.0;
+            const srcType = String(inputs.src || 'hl2').toLowerCase();
+            const changeATR = inputs.changeATR !== undefined ? Boolean(inputs.changeATR) : true;
+            const showsignals = inputs.showsignals !== undefined ? Boolean(inputs.showsignals) : true;
+
+            const src = new Array(n);
+            for (let i = 0; i < n; i++) {
+                if (srcType === 'close') src[i] = closes[i];
+                else if (srcType === 'open') src[i] = opens[i];
+                else if (srcType === 'high') src[i] = highs[i];
+                else if (srcType === 'low') src[i] = lows[i];
+                else if (srcType === 'hlc3') src[i] = (highs[i] + lows[i] + closes[i]) / 3;
+                else if (srcType === 'ohlc4') src[i] = (opens[i] + highs[i] + lows[i] + closes[i]) / 4;
+                else src[i] = (highs[i] + lows[i]) / 2; // default hl2
+            }
+
+            const tr = PineTA.tr(candles);
+            const atr = changeATR ? PineTA.rma(tr, periods) : PineTA.sma(tr, periods);
+
+            const up = new Array(n);
+            const dn = new Array(n);
+            const trend = new Array(n);
+
+            let prevUp = 0;
+            let prevDn = 0;
+            let prevTrend = 1;
+
+            for (let i = 0; i < n; i++) {
+                const curAtr = atr[i] || 0;
+                const basicUp = src[i] - (multiplier * curAtr);
+                const basicDn = src[i] + (multiplier * curAtr);
+
+                if (i === 0) {
+                    up[i] = basicUp;
+                    dn[i] = basicDn;
+                    trend[i] = 1;
+                    prevUp = basicUp;
+                    prevDn = basicDn;
+                    prevTrend = 1;
+                    continue;
+                }
+
+                const prevClose = closes[i - 1];
+                up[i] = prevClose > prevUp ? Math.max(basicUp, prevUp) : basicUp;
+                dn[i] = prevClose < prevDn ? Math.min(basicDn, prevDn) : basicDn;
+
+                let curTrend = prevTrend;
+                if (prevTrend === -1 && closes[i] > prevDn) {
+                    curTrend = 1;
+                } else if (prevTrend === 1 && closes[i] < prevUp) {
+                    curTrend = -1;
+                }
+                trend[i] = curTrend;
+                prevUp = up[i];
+                prevDn = dn[i];
+                prevTrend = curTrend;
+            }
+
+            const upPlotData = new Array(n);
+            const dnPlotData = new Array(n);
+            const signals = [];
+
+            for (let i = 0; i < n; i++) {
+                upPlotData[i] = trend[i] === 1 ? up[i] : null;
+                dnPlotData[i] = trend[i] === -1 ? dn[i] : null;
+
+                if (i > 0 && showsignals) {
+                    if (trend[i] === 1 && trend[i - 1] === -1) {
+                        signals.push({
+                            time: times[i],
+                            price: up[i],
+                            type: 'bullish',
+                            text: 'BUY',
+                            color: '#00ffbb'
+                        });
+                    } else if (trend[i] === -1 && trend[i - 1] === 1) {
+                        signals.push({
+                            time: times[i],
+                            price: dn[i],
+                            type: 'bearish',
+                            text: 'SELL',
+                            color: '#ff1100'
+                        });
+                    }
+                }
+            }
+
+            return {
+                type: 'generic_pine',
+                plots: [
+                    { title: 'Up Trend', color: '#00ffbb', width: 2, data: upPlotData },
+                    { title: 'Down Trend', color: '#ff1100', width: 2, data: dnPlotData }
+                ],
+                signals: signals,
+                candles: candles
+            };
+        }
 
         const plots = [];
         const signals = [];
@@ -1263,10 +1520,16 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
 
                 for (let i = 0; i < n; i++) {
                     const val = p.data[i];
-                    if (val == null || isNaN(val)) continue;
+                    if (val == null || isNaN(val)) {
+                        started = false;
+                        continue;
+                    }
                     const x = timeScale.timeToCoordinate(candles[i].time);
                     const y = candleSeries.priceToCoordinate(val);
-                    if (x == null || y == null) continue;
+                    if (x == null || y == null) {
+                        started = false;
+                        continue;
+                    }
 
                     if (!started) {
                         ctx.moveTo(x, y);
@@ -1620,6 +1883,9 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         let html = '';
         for (const k of keys) {
             const inp = parsedInputs[k];
+            if (state.inputs[k] === undefined) {
+                state.inputs[k] = inp.val;
+            }
             const curVal = state.inputs[k] !== undefined ? state.inputs[k] : inp.val;
 
             if (inp.type === 'bool') {
@@ -1628,6 +1894,28 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                         <label class="tvi-inp-lbl">${inp.title}</label>
                         <input type="checkbox" data-var="${inp.name}" class="tvi-dyn-inp" ${curVal ? 'checked' : ''} />
                     </div>`;
+            } else if (inp.type === 'source') {
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <select data-var="${inp.name}" class="tvi-dyn-inp tvi-inp">
+                            <option value="hl2" ${curVal === 'hl2' ? 'selected' : ''}>hl2 ((H+L)/2)</option>
+                            <option value="close" ${curVal === 'close' ? 'selected' : ''}>close</option>
+                            <option value="open" ${curVal === 'open' ? 'selected' : ''}>open</option>
+                            <option value="high" ${curVal === 'high' ? 'selected' : ''}>high</option>
+                            <option value="low" ${curVal === 'low' ? 'selected' : ''}>low</option>
+                            <option value="hlc3" ${curVal === 'hlc3' ? 'selected' : ''}>hlc3 ((H+L+C)/3)</option>
+                            <option value="ohlc4" ${curVal === 'ohlc4' ? 'selected' : ''}>ohlc4 ((O+H+L+C)/4)</option>
+                        </select>
+                    </div>`;
+            } else if (inp.type === 'options' && inp.options && inp.options.length) {
+                html += `
+                    <div class="tvi-inp-row">
+                        <label class="tvi-inp-lbl">${inp.title}</label>
+                        <select data-var="${inp.name}" class="tvi-dyn-inp tvi-inp">
+                            ${inp.options.map(opt => `<option value="${opt}" ${curVal === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                        </select>
+                    </div>`;
             } else if (inp.type === 'color') {
                 html += `
                     <div class="tvi-inp-row">
@@ -1635,11 +1923,13 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                         <input type="color" data-var="${inp.name}" class="tvi-dyn-inp tvi-color-inp" value="${curVal}" />
                     </div>`;
             } else if (inp.type === 'int' || inp.type === 'float') {
-                const step = inp.type === 'float' ? '0.1' : '1';
+                const step = inp.step != null ? inp.step : (inp.type === 'float' ? '0.1' : '1');
+                const minAttr = inp.minval != null ? `min="${inp.minval}"` : '';
+                const maxAttr = inp.maxval != null ? `max="${inp.maxval}"` : '';
                 html += `
                     <div class="tvi-inp-row">
                         <label class="tvi-inp-lbl">${inp.title}</label>
-                        <input type="number" step="${step}" data-var="${inp.name}" class="tvi-dyn-inp tvi-inp" value="${curVal}" />
+                        <input type="number" step="${step}" ${minAttr} ${maxAttr} data-var="${inp.name}" class="tvi-dyn-inp tvi-inp" value="${curVal}" />
                     </div>`;
             } else {
                 html += `
@@ -1650,6 +1940,14 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             }
         }
         container.innerHTML = html;
+
+        // Attach live input & change listeners to dynamic inputs
+        container.querySelectorAll('.tvi-dyn-inp').forEach(el => {
+            el.addEventListener('change', () => {
+                collectInputsFromUI();
+                triggerRecompute();
+            });
+        });
     }
 
     function collectInputsFromUI() {
@@ -1844,6 +2142,23 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
                 state.target = e.target.value;
                 triggerRecompute();
             });
+        }
+
+        const editor = document.getElementById('tvi-code-editor');
+        if (editor) {
+            let debounceTimer = null;
+            const handleEditorCodeChange = () => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    state.currentCode = editor.value;
+                    if (state.customIndicators[state.activePresetId]) {
+                        state.customIndicators[state.activePresetId].code = editor.value;
+                    }
+                    renderInputsGrid();
+                }, 250);
+            };
+            editor.addEventListener('input', handleEditorCodeChange);
+            editor.addEventListener('paste', () => setTimeout(handleEditorCodeChange, 50));
         }
 
         if (masterToggle) {
