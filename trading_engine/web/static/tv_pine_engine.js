@@ -338,8 +338,11 @@ alertcondition(bearishBreakout, "Bearish Breakout", "Price has broken out below 
                 shw_vol: true,
                 vol_mode: 'Comparison',
                 vol_scale: 0.5,
+                zone_opacity: 55,
                 green: '#00ffbb',
-                red: '#ff1100'
+                red: '#ff1100',
+                vol_up_color: '#38bdf8',
+                vol_down_color: '#f59e0b'
             },
             code: ALGOALPHA_FULL_SCRIPT
         },
@@ -443,6 +446,20 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         lastCompileTime: null,
         compileStats: null
     };
+
+    // ── Color Utilities ────────────────────────────────────────────────────────
+    function hexToRgba(hex, alpha) {
+        if (!hex) return `rgba(0, 255, 187, ${alpha})`;
+        if (hex.startsWith('rgba') || hex.startsWith('rgb')) return hex;
+        let c = hex.replace('#', '');
+        if (c.length === 3) c = c.split('').map(x => x + x).join('');
+        const num = parseInt(c, 16);
+        if (isNaN(num)) return `rgba(0, 255, 187, ${alpha})`;
+        const r = (num >> 16) & 255;
+        const g = (num >> 8) & 255;
+        const b = num & 255;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
 
     // ── Pine Technical Analysis Library (Pure JS Vectorized) ────────────────────
     const PineTA = {
@@ -838,40 +855,55 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                 }
             }
 
-            if (activeBoxes.length > 0 && shw_vol) {
-                const primaryBox = activeBoxes[0];
-                const mid = primaryBox.centerY;
-                const chHeight = (primaryBox.top - primaryBox.bottom) * vol_scale;
-                const smVol = Math.max(1, smoothedvol[i] || 1);
+        }
 
-                if (vol_mode === 'Comparison') {
-                    const uvH = (uv[i] / smVol) * (chHeight / 4);
-                    const dvH = (dv[i] / smVol) * (chHeight / 4);
-                    volCandles.push({
-                        time: candles[i].time,
-                        upperOpen: mid,
-                        upperClose: mid + uvH,
-                        upperHigh: mid + uvH,
-                        upperLow: mid,
-                        lowerOpen: mid,
-                        lowerClose: mid - dvH,
-                        lowerHigh: mid,
-                        lowerLow: mid - dvH
-                    });
-                } else if (vol_mode === 'Delta') {
-                    const dH = Math.abs(vold[i] / smVol) * (chHeight / 4);
-                    const isPos = vold[i] >= 0;
-                    volCandles.push({
-                        time: candles[i].time,
-                        upperOpen: mid,
-                        upperClose: isPos ? mid + dH : mid,
-                        upperHigh: isPos ? mid + dH : mid,
-                        upperLow: mid,
-                        lowerOpen: mid,
-                        lowerClose: !isPos ? mid - dH : mid,
-                        lowerHigh: mid,
-                        lowerLow: !isPos ? mid - dH : mid
-                    });
+        // Generate volume analysis bars for ALL candles across every channel (active + completed)
+        // This guarantees NO candles within any channel are ever missing volume bars!
+        if (shw_vol) {
+            const allBoxesForVol = [...completedBoxes, ...activeBoxes];
+            const processedTimes = new Set();
+
+            for (const b of allBoxesForVol) {
+                const mid = b.centerY;
+                const chHeight = (b.top - b.bottom) * vol_scale;
+
+                for (let cIdx = b.startIdx; cIdx <= b.endIdx && cIdx < n; cIdx++) {
+                    const cTime = candles[cIdx].time;
+                    if (processedTimes.has(cTime)) continue;
+                    processedTimes.add(cTime);
+
+                    const smVol = Math.max(1, smoothedvol[cIdx] || 1);
+
+                    if (vol_mode === 'Comparison') {
+                        const uvH = (uv[cIdx] / smVol) * (chHeight / 4);
+                        const dvH = (dv[cIdx] / smVol) * (chHeight / 4);
+                        volCandles.push({
+                            time: cTime,
+                            upperOpen: mid,
+                            upperClose: mid + uvH,
+                            lowerOpen: mid,
+                            lowerClose: mid - dvH
+                        });
+                    } else if (vol_mode === 'Delta') {
+                        const dH = Math.abs(vold[cIdx] / smVol) * (chHeight / 4);
+                        const isPos = vold[cIdx] >= 0;
+                        volCandles.push({
+                            time: cTime,
+                            upperOpen: mid,
+                            upperClose: isPos ? mid + dH : mid,
+                            lowerOpen: mid,
+                            lowerClose: !isPos ? mid - dH : mid
+                        });
+                    } else {
+                        const vH = ((volumes[cIdx] || 0) / smVol) * (chHeight / 4);
+                        volCandles.push({
+                            time: cTime,
+                            upperOpen: mid,
+                            upperClose: mid + vH,
+                            lowerOpen: mid,
+                            lowerClose: mid - vH
+                        });
+                    }
                 }
             }
         }
@@ -883,7 +915,11 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             signals,
             volCandles,
             colGreen,
-            colRed
+            colRed,
+            zoneOpacity: inputs.zone_opacity || 55,
+            volUpColor: inputs.vol_up_color || '#38bdf8',
+            volDownColor: inputs.vol_down_color || '#f59e0b',
+            shw_vol: shw_vol
         };
     }
 
@@ -1080,6 +1116,10 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
     function renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H) {
         const { activeBoxes, completedBoxes, signals, volCandles, colGreen, colRed } = res;
         const allBoxes = [...completedBoxes.slice(-6), ...activeBoxes];
+        const opacityFrac = Math.max(0.1, Math.min(1.0, (parseFloat(res.zoneOpacity) || 55) / 100));
+        const activeAlpha = opacityFrac;
+        const completedAlpha = opacityFrac * 0.45;
+        const borderAlpha = Math.min(1.0, opacityFrac + 0.35);
 
         for (const box of allBoxes) {
             const x1 = timeScale.timeToCoordinate(box.startTime);
@@ -1105,23 +1145,23 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             ctx.fillStyle = box.active ? 'rgba(148, 163, 184, 0.08)' : 'rgba(100, 116, 139, 0.04)';
             ctx.fillRect(drawX1, Math.min(yTop, yBottom), boxWidth, boxHeight);
 
-            // B. Upper Zone (Red Tint)
+            // B. Upper Zone (Red Tint - Resistance)
             if (yTopZone != null) {
                 const uH = Math.abs(yTopZone - yTop);
-                ctx.fillStyle = box.active ? 'rgba(255, 17, 0, 0.22)' : 'rgba(255, 17, 0, 0.08)';
+                ctx.fillStyle = hexToRgba(colRed, box.active ? activeAlpha : completedAlpha);
                 ctx.fillRect(drawX1, Math.min(yTop, yTopZone), boxWidth, uH);
-                ctx.strokeStyle = box.active ? 'rgba(255, 17, 0, 0.5)' : 'rgba(255, 17, 0, 0.2)';
-                ctx.lineWidth = 1;
+                ctx.strokeStyle = hexToRgba(colRed, box.active ? borderAlpha : completedAlpha);
+                ctx.lineWidth = 1.5;
                 ctx.strokeRect(drawX1, Math.min(yTop, yTopZone), boxWidth, uH);
             }
 
-            // C. Lower Zone (Green Tint)
+            // C. Lower Zone (Green Tint - Support)
             if (yBottomZone != null) {
                 const lH = Math.abs(yBottom - yBottomZone);
-                ctx.fillStyle = box.active ? 'rgba(0, 255, 187, 0.20)' : 'rgba(0, 255, 187, 0.08)';
+                ctx.fillStyle = hexToRgba(colGreen, box.active ? activeAlpha : completedAlpha);
                 ctx.fillRect(drawX1, Math.min(yBottom, yBottomZone), boxWidth, lH);
-                ctx.strokeStyle = box.active ? 'rgba(0, 255, 187, 0.5)' : 'rgba(0, 255, 187, 0.2)';
-                ctx.lineWidth = 1;
+                ctx.strokeStyle = hexToRgba(colGreen, box.active ? borderAlpha : completedAlpha);
+                ctx.lineWidth = 1.5;
                 ctx.strokeRect(drawX1, Math.min(yBottom, yBottomZone), boxWidth, lH);
             }
 
@@ -1152,26 +1192,32 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             }
         }
 
-        // 2. Volume Analysis Candles Inside Active Channel
-        if (volCandles && volCandles.length > 0) {
+        // 2. Distinct Volume Analysis Pillars Inside Channels (Sky Blue & Amber Gold)
+        if (volCandles && volCandles.length > 0 && res.shw_vol !== false) {
+            const volUpCol = hexToRgba(res.volUpColor || '#38bdf8', 0.65);
+            const volDnCol = hexToRgba(res.volDownColor || '#f59e0b', 0.65);
+            const barW = 5;
+
             for (const vc of volCandles) {
                 const x = timeScale.timeToCoordinate(vc.time);
-                if (x == null || x < 0 || x > W) continue;
+                if (x == null || x < -10 || x > W + 10) continue;
 
+                // Upper comparison volume bar (Bullish Delta / Up Volume -> Sky Blue)
                 const yUOpen = candleSeries.priceToCoordinate(vc.upperOpen);
                 const yUClose = candleSeries.priceToCoordinate(vc.upperClose);
                 if (yUOpen != null && yUClose != null) {
-                    ctx.fillStyle = colGreen;
-                    const barH = Math.max(1, Math.abs(yUClose - yUOpen));
-                    ctx.fillRect(x - 1.5, Math.min(yUOpen, yUClose), 3, barH);
+                    const barH = Math.max(1.5, Math.abs(yUClose - yUOpen));
+                    ctx.fillStyle = volUpCol;
+                    ctx.fillRect(x - barW / 2, Math.min(yUOpen, yUClose), barW, barH);
                 }
 
+                // Lower comparison volume bar (Bearish Delta / Down Volume -> Amber Gold)
                 const yLOpen = candleSeries.priceToCoordinate(vc.lowerOpen);
                 const yLClose = candleSeries.priceToCoordinate(vc.lowerClose);
                 if (yLOpen != null && yLClose != null) {
-                    ctx.fillStyle = colRed;
-                    const barH = Math.max(1, Math.abs(yLClose - yLOpen));
-                    ctx.fillRect(x - 1.5, Math.min(yLOpen, yLClose), 3, barH);
+                    const barH = Math.max(1.5, Math.abs(yLClose - yLOpen));
+                    ctx.fillStyle = volDnCol;
+                    ctx.fillRect(x - barW / 2, Math.min(yLOpen, yLClose), barW, barH);
                 }
             }
         }
@@ -1535,12 +1581,28 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                     </select>
                 </div>
                 <div class="tvi-inp-row">
-                    <label class="tvi-inp-lbl">Bullish Color</label>
+                    <label class="tvi-inp-lbl">Zone Opacity %</label>
+                    <input type="number" id="inp-zone-opacity" class="tvi-inp" value="${state.inputs.zone_opacity || 55}" min="10" max="100" step="5" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Show Volume Bars</label>
+                    <input type="checkbox" id="inp-shw-vol" ${state.inputs.shw_vol !== false ? 'checked' : ''} />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Bullish Zone Color</label>
                     <input type="color" id="inp-col-green" class="tvi-color-inp" value="${state.inputs.green || '#00ffbb'}" />
                 </div>
                 <div class="tvi-inp-row">
-                    <label class="tvi-inp-lbl">Bearish Color</label>
+                    <label class="tvi-inp-lbl">Bearish Zone Color</label>
                     <input type="color" id="inp-col-red" class="tvi-color-inp" value="${state.inputs.red || '#ff1100'}" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Volume Up Color</label>
+                    <input type="color" id="inp-col-vol-up" class="tvi-color-inp" value="${state.inputs.vol_up_color || '#38bdf8'}" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Volume Down Color</label>
+                    <input type="color" id="inp-col-vol-down" class="tvi-color-inp" value="${state.inputs.vol_down_color || '#f59e0b'}" />
                 </div>
             `;
             return;
@@ -1599,6 +1661,10 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             const selVolMode = document.getElementById('inp-vol-mode');
             const colG = document.getElementById('inp-col-green');
             const colR = document.getElementById('inp-col-red');
+            const opEl = document.getElementById('inp-zone-opacity');
+            const shwVolEl = document.getElementById('inp-shw-vol');
+            const volUpEl = document.getElementById('inp-col-vol-up');
+            const volDownEl = document.getElementById('inp-col-vol-down');
 
             if (lNorm) state.inputs.length_ = parseInt(lNorm.value) || 100;
             if (lBox) state.inputs.length = parseInt(lBox.value) || 14;
@@ -1607,6 +1673,10 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             if (selVolMode) state.inputs.vol_mode = selVolMode.value;
             if (colG) state.inputs.green = colG.value;
             if (colR) state.inputs.red = colR.value;
+            if (opEl) state.inputs.zone_opacity = parseInt(opEl.value) || 55;
+            if (shwVolEl) state.inputs.shw_vol = shwVolEl.checked;
+            if (volUpEl) state.inputs.vol_up_color = volUpEl.value;
+            if (volDownEl) state.inputs.vol_down_color = volDownEl.value;
             return;
         }
 
