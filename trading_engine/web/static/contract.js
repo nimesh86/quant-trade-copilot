@@ -7215,6 +7215,11 @@ async function loadStationCandles(station, contract, optDate) {
         }));
         station.candleSeries.setData(colored);
 
+        // Compute TradingView Pine Script Indicators
+        if (window.TvPineEngine && typeof window.TvPineEngine.computeIndicatorsForStation === 'function') {
+            window.TvPineEngine.computeIndicatorsForStation(station);
+        }
+
         let deResult = null;
         if (station.dynamicExitEnabled) {
             deResult = computeSMFDynamicExit(agg, smf, 'V5');
@@ -8206,6 +8211,11 @@ function renderStationSMFCanvas(station) {
 
     // 2. Draw Interactive Limit Order Long Position Box & Handles
     renderStationTradingOverlay(station, ctx, W, H);
+
+    // 3. Draw TradingView Pine Script Indicator Overlays
+    if (window.TvPineEngine && typeof window.TvPineEngine.renderStationIndicators === 'function') {
+        window.TvPineEngine.renderStationIndicators(station, ctx, W, H);
+    }
 }
 
 function connectStationWS(station) {
@@ -8304,6 +8314,9 @@ function connectStationWS(station) {
                         station.rawCandles.push(oneMinCandle);
                     }
                     station.candleSeries.update(oneMinCandle);
+                    if (window.TvPineEngine && typeof window.TvPineEngine.computeIndicatorsForStation === 'function') {
+                        window.TvPineEngine.computeIndicatorsForStation(station);
+                    }
                 }
 
                 // Live update position PnL if open

@@ -4893,3 +4893,418 @@ body.replay-mode-active #stations-stream {
     --toast-glow: rgba(0, 229, 255, 0.28);
     --toast-color: #00e5ff;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* +TvI TradingView Indicators Studio & Button Styling                         */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.pinescript-btn {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.25), rgba(16, 185, 129, 0.15)) !important;
+    border: 1px solid rgba(0, 255, 187, 0.45) !important;
+    color: #e2e8f0 !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.3px;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pinescript-btn:hover {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.45), rgba(16, 185, 129, 0.35)) !important;
+    border-color: #00ffbb !important;
+    box-shadow: 0 0 10px rgba(0, 255, 187, 0.35) !important;
+    transform: translateY(-1px);
+}
+
+.tvi-serif-i {
+    font-family: "Georgia", "Times New Roman", "DejaVu Serif", serif !important;
+    font-weight: 900 !important;
+    font-size: 1.15em !important;
+    color: #00ffbb !important;
+    text-shadow: 0 0 6px rgba(0, 255, 187, 0.6);
+    line-height: 1;
+    display: inline-block;
+    padding-left: 0.5px;
+}
+
+/* Slide-out Backdrop */
+.tvi-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 7, 18, 0.65);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 9998;
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.tvi-backdrop.visible {
+    opacity: 1;
+}
+
+/* Slide-out Drawer */
+.tvi-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 480px;
+    max-width: 95vw;
+    background: #0b1120;
+    border-left: 1px solid rgba(0, 255, 187, 0.25);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.85), 0 0 20px rgba(0, 255, 187, 0.08);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tvi-drawer.open {
+    transform: translateX(0);
+}
+
+/* Drawer Header */
+.tvi-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: rgba(15, 23, 42, 0.95);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tvi-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tvi-badge {
+    background: rgba(0, 255, 187, 0.15);
+    border: 1px solid rgba(0, 255, 187, 0.4);
+    color: #e2e8f0;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+
+.tvi-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f1f5f9;
+    letter-spacing: 0.3px;
+}
+
+.tvi-hdr-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Toggle Switch */
+.tvi-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    user-select: none;
+}
+
+.tvi-toggle-label input {
+    display: none;
+}
+
+.tvi-toggle-slider {
+    width: 32px;
+    height: 18px;
+    background: #334155;
+    border-radius: 20px;
+    position: relative;
+    transition: background 0.2s ease;
+}
+
+.tvi-toggle-slider::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.tvi-toggle-label input:checked + .tvi-toggle-slider {
+    background: #10b981;
+}
+
+.tvi-toggle-label input:checked + .tvi-toggle-slider::after {
+    transform: translateX(14px);
+}
+
+.tvi-icon-btn {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s;
+}
+
+.tvi-icon-btn:hover {
+    color: #f87171;
+}
+
+/* Drawer Body */
+.tvi-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.tvi-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.tvi-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.tvi-lbl {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #94a3b8;
+    letter-spacing: 0.5px;
+}
+
+.tvi-select {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #f1f5f9;
+    font-size: 12px;
+    border-radius: 6px;
+    padding: 6px 8px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.tvi-select:focus {
+    border-color: #00ffbb;
+}
+
+/* Sections */
+.tvi-section {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tvi-sec-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tvi-sec-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #38bdf8;
+    letter-spacing: 0.5px;
+}
+
+.tvi-badge-version {
+    font-size: 9px;
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 700;
+}
+
+/* Dynamic Inputs Grid */
+.tvi-inputs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+}
+
+.tvi-inp-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.tvi-inp-lbl {
+    font-size: 11px;
+    color: #cbd5e1;
+}
+
+.tvi-inp {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #f1f5f9;
+    font-size: 11px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    width: 80px;
+    text-align: right;
+    outline: none;
+}
+
+.tvi-inp:focus {
+    border-color: #00ffbb;
+}
+
+.tvi-color-inp {
+    width: 32px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+}
+
+/* Code Editor */
+.tvi-editor-sec {
+    flex: 1;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+}
+
+.tvi-editor {
+    flex: 1;
+    min-height: 200px;
+    background: #060b13;
+    border: 1px solid rgba(0, 255, 187, 0.2);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-family: "JetBrains Mono", "Fira Code", Consolas, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    resize: vertical;
+    white-space: pre;
+    tab-size: 4;
+    outline: none;
+}
+
+.tvi-editor:focus {
+    border-color: #00ffbb;
+    box-shadow: 0 0 10px rgba(0, 255, 187, 0.15);
+}
+
+/* Console Status */
+.tvi-console {
+    background: #070c14;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 11px;
+    font-family: monospace;
+}
+
+.tvi-status-ready {
+    color: #10b981;
+}
+
+.tvi-status-off {
+    color: #94a3b8;
+}
+
+/* Footer Toolbar */
+.tvi-footer {
+    display: flex;
+    gap: 10px;
+    padding: 12px 16px;
+    background: rgba(15, 23, 42, 0.95);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tvi-btn {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+}
+
+.tvi-btn-primary {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+.tvi-btn-primary:hover {
+    background: linear-gradient(135deg, #047857, #059669);
+    transform: translateY(-1px);
+}
+
+.tvi-btn-secondary {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #cbd5e1;
+}
+
+.tvi-btn-secondary:hover {
+    background: #334155;
+    color: #ffffff;
+}
+
+/* Toast */
+.tvi-toast {
+    position: absolute;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(16, 185, 129, 0.92);
+    color: #ffffff;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s ease;
+    z-index: 10000;
+}
+
+.tvi-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+

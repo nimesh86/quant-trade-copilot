@@ -2148,6 +2148,62 @@ async def contract_quote(symbol: str = Query(...)):
     return q or {"symbol": symbol, "error": "Quote not available"}
 
 
+USER_INDICATORS_FILE = PROJECT_ROOT / "data" / "user_tv_indicators.json"
+
+
+@app.get("/api/user/indicators")
+async def get_user_indicators():
+    """Fetch saved TradingView Pine Script indicators and preset defaults."""
+    try:
+        if USER_INDICATORS_FILE.exists():
+            with open(USER_INDICATORS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data
+    except Exception as e:
+        print(f"Error reading user indicators: {e}", flush=True)
+
+    # Return default preset structure
+    return {
+        "status": "ok",
+        "active_preset": "algoalpha_breakout_channels",
+        "enabled": True,
+        "target": "both",
+        "indicators": {
+            "algoalpha_breakout_channels": {
+                "id": "algoalpha_breakout_channels",
+                "name": "Smart Money Breakout Channels [AlgoAlpha]",
+                "enabled": True,
+                "target": "both",
+                "inputs": {
+                    "length_": 100,
+                    "length": 14,
+                    "overlap": False,
+                    "strong": True,
+                    "shw_vol": True,
+                    "vol_mode": "Comparison",
+                    "vol_scale": 0.5,
+                    "green": "#00ffbb",
+                    "red": "#ff1100"
+                }
+            }
+        }
+    }
+
+
+@app.post("/api/user/indicators")
+async def save_user_indicators(req: Request):
+    """Persist user indicators and settings to disk for cross-device sync."""
+    try:
+        payload = await req.json()
+        USER_INDICATORS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(USER_INDICATORS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        return {"status": "ok", "message": "Indicators synced successfully"}
+    except Exception as e:
+        print(f"Error saving user indicators: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/ws/contracts")
 async def contract_ws_endpoint(websocket: WebSocket, symbol: str = Query(...)):
     """
