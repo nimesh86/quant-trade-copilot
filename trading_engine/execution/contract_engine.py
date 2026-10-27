@@ -480,7 +480,8 @@ class ContractTradingEngine:
         }
 
     def reset_account(self, capital: Optional[float] = None) -> Dict[str, Any]:
-        """Resets paper account balance and trade logs."""
+        if capital:
+            self.initial_capital = float(capital)
         self.capital = float(capital or self.initial_capital)
         self.active_position = None
         self.active_positions.clear()
