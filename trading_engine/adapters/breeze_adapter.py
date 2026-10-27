@@ -256,6 +256,22 @@ class BreezeBrokerAdapter:
         if symbol in self._subscribed_symbols and symbol in self._symbol_to_tokens:
             return True
 
+        # Fast-path for spot indices
+        if symbol in ("SENSEX", "BSESEN", "BSE:SENSEX", "BSE SENSEX"):
+            quotes_tok = "1.1!SENSEX"
+            depth_tok = "1.2!SENSEX"
+            self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+            self._token_to_symbol[quotes_tok] = "SENSEX"
+            self._token_to_symbol["1.1!SENSEX"] = "SENSEX"
+            self._token_to_symbol["1.2!SENSEX"] = "SENSEX"
+            self._token_to_symbol["SENSEX"] = "SENSEX"
+            self._token_to_symbol["BSE SENSEX"] = "SENSEX"
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed SENSEX spot feed (token={quotes_tok})")
+            return True
+
         params = to_breeze_params(symbol)
         if not params:
             logger.warning(f"BreezeBrokerAdapter: Could not parse symbol {symbol} for subscription.")
@@ -281,9 +297,37 @@ class BreezeBrokerAdapter:
                 get_market_depth=True
             )
 
-            if isinstance(quotes_tok, Exception) or not quotes_tok:
-                logger.warning(f"BreezeBrokerAdapter: get_stock_token_value error for {symbol}: {quotes_tok}")
-                return False
+            if isinstance(quotes_tok, Exception) or not quotes_tok or "False" in str(quotes_tok):
+                # Resilient fallback from breeze.stock_script_dict_list
+                exc = params.get("exchange_code", "NFO").upper()
+                idx = 5 if exc == "BFO" else 4
+                prefix_code = "8." if exc == "BFO" else "4."
+                stk = params["stock_code"]
+                strike_val = int(float(params["strike_price"])) if params.get("strike_price") else 0
+                r_code = "CE" if "call" in str(params.get("right", "")).lower() else "PE"
+                
+                script_dict = getattr(breeze, "stock_script_dict_list", [{},{},{},{},{},{}])[idx]
+                prefix = f"OPT-{stk}-"
+                suffix = f"-{strike_val}-{r_code}"
+                matches = [(k, v) for k, v in script_dict.items() if k.startswith(prefix) and k.endswith(suffix)]
+                
+                chosen_token = None
+                if matches:
+                    if expiry_str:
+                        for k, v in matches:
+                            if expiry_str.lower() in k.lower():
+                                chosen_token = v
+                                break
+                    if not chosen_token:
+                        chosen_token = matches[0][1]
+                
+                if chosen_token:
+                    quotes_tok = f"{prefix_code}1!{chosen_token}"
+                    depth_tok = f"{prefix_code}2!{chosen_token}"
+                    logger.info(f"BreezeBrokerAdapter: Resiliently matched token for {symbol} -> {quotes_tok}")
+                else:
+                    logger.warning(f"BreezeBrokerAdapter: get_stock_token_value error for {symbol}: {quotes_tok}")
+                    return False
 
             # Store bidirectional mapping
             self._symbol_to_tokens[symbol] = (str(quotes_tok), str(depth_tok))
@@ -344,15 +388,22 @@ class BreezeBrokerAdapter:
         canonical_symbol = self._token_to_symbol.get(sym_token) or self._token_to_symbol.get(token_num)
 
         if not canonical_symbol:
-            stk_name = data.get("stock_name") or data.get("stock_code")
-            strike = data.get("strike_price")
-            right = data.get("right")
-            exp = data.get("expiry_date")
-            if stk_name and strike and right:
-                from trading_engine.adapters.symbol_translator import to_canonical_symbol
-                canonical_symbol = to_canonical_symbol(stk_name, strike, right, exp)
-            elif stk_name:
-                canonical_symbol = stk_name
+            if sym_token in ("BSE SENSEX", "SENSEX", "BSESEN"):
+                canonical_symbol = "SENSEX"
+            elif sym_token in ("NSE NIFTY", "NIFTY 50", "NIFTY"):
+                canonical_symbol = "NIFTY"
+            elif sym_token in ("NIFTY BANK", "BANKNIFTY"):
+                canonical_symbol = "BANKNIFTY"
+            else:
+                stk_name = data.get("stock_name") or data.get("stock_code")
+                strike = data.get("strike_price")
+                right = data.get("right")
+                exp = data.get("expiry_date")
+                if stk_name and strike and right:
+                    from trading_engine.adapters.symbol_translator import to_canonical_symbol
+                    canonical_symbol = to_canonical_symbol(stk_name, strike, right, exp)
+                elif stk_name:
+                    canonical_symbol = stk_name
 
         if not canonical_symbol:
             return

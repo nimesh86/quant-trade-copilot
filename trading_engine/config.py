@@ -93,7 +93,7 @@ INDEX_SPEC_REGISTRY = {
         "kite_spot": "BSE:SENSEX",
         "kite_fut_prefix": "SENSEX",
         "kite_token": 265,
-        "breeze_stock_code": "BSX",
+        "breeze_stock_code": "BSESEN",
         "exchange_code": "BFO",
         "cash_exchange": "BSE",
         "strike_gap": 100,

@@ -2693,13 +2693,22 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
         symbol = tick.get("symbol")
         if not symbol:
             return
+        if symbol in ("BSE SENSEX", "BSESEN", "BSE:SENSEX"):
+            symbol = "SENSEX"
         ltp = float(tick.get("price") or 0.0)
         if ltp <= 0:
             return
         ts = tick.get("timestamp") or datetime.now().isoformat()
 
+        # Update current spot for active indices
+        if symbol in ("NIFTY", "NIFTY 50", "SENSEX", "BANKNIFTY"):
+            state.current_spot = ltp
+
         # 1. Update in-memory price bus
         push_to_price_bus(symbol, ltp, ts)
+        if symbol == "SENSEX":
+            push_to_price_bus("BSE:SENSEX", ltp, ts)
+            push_to_price_bus("BSESEN", ltp, ts)
 
         # 2. Decoupled background SL / Target / Limit execution
         # Evaluates open positions and pending orders regardless of current UI screen

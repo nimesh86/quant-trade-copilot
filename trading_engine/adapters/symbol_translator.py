@@ -18,8 +18,9 @@ STOCK_CODE_MAP = {
     "FINNIFTY": "NIFFIN",
     "NIFTY FIN SERVICE": "NIFFIN",
     "MIDCPNIFTY": "NIFMID",
-    "SENSEX": "BSX",
-    "BSX": "BSX",
+    "SENSEX": "BSESEN",
+    "BSESEN": "BSESEN",
+    "BSX": "BSESEN",
     "BANKEX": "BKX",
     "BKX": "BKX",
 }
@@ -30,6 +31,7 @@ REVERSE_STOCK_CODE_MAP = {
     "CNXBAN": "BANKNIFTY",
     "NIFFIN": "FINNIFTY",
     "NIFMID": "MIDCPNIFTY",
+    "BSESEN": "SENSEX",
     "BSX": "SENSEX",
     "BKX": "BANKEX",
 }
@@ -81,16 +83,16 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             day_num = int(num_part[:2])
             strike = float(num_part[2:])
         else:
-            day_num = 28
+            day_num = 29
             strike = float(num_part)
 
         year_full = 2000 + year_short
         month_num = MONTH_MAP.get(month_str, 1)
 
         try:
-            exp_date = datetime(year_full, month_num, min(day_num, 28))
+            exp_date = datetime(year_full, month_num, min(day_num, 31))
         except Exception:
-            exp_date = datetime(year_full, month_num, 28)
+            exp_date = datetime(year_full, month_num, 29)
 
         right = "Call" if opt_type == "CE" else "Put"
         breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
@@ -199,9 +201,9 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
         }
 
     # Pattern 5: Spot Index (e.g. NIFTY 50, NIFTY, BANKNIFTY, SENSEX)
-    for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSX", "FINNIFTY", "MIDCPNIFTY"):
+    for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSESEN", "BSX", "FINNIFTY", "MIDCPNIFTY"):
         if clean_sym == spot_name or clean_sym.startswith(spot_name):
-            und = "SENSEX" if "SENSEX" in spot_name or "BSX" in spot_name else (
+            und = "SENSEX" if ("SENSEX" in spot_name or "BSESEN" in spot_name or "BSX" in spot_name) else (
                 "BANKNIFTY" if "BANK" in spot_name else (
                     "FINNIFTY" if "FIN" in spot_name else (
                         "MIDCPNIFTY" if "MID" in spot_name else "NIFTY"

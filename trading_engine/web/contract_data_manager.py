@@ -584,6 +584,23 @@ def resolve_spot_price(underlying: str, expiry: Optional[str] = None) -> float:
                     return px
         except Exception:
             pass
+    elif broker == "breeze":
+        try:
+            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+            breeze = default_breeze_adapter.connect()
+            if breeze:
+                stk = spec.get("breeze_stock_code", und_upper)
+                exc = spec.get("cash_exchange", "BSE" if "SENSEX" in und_upper else "NSE")
+                q = breeze.get_quotes(exchange_code=exc, stock_code=stk, product_type="cash")
+                if q and q.get("Success"):
+                    for item in q["Success"]:
+                        p = item.get("ltp") or item.get("last_traded_price")
+                        if p and float(p) > 0:
+                            px = float(p)
+                            _spot_cache[und_upper] = (now, px)
+                            return px
+        except Exception:
+            pass
 
     # 3. Database query (TimescaleDB)
     try:
