@@ -162,9 +162,11 @@ class KiteBrokerAdapter:
             oi = int(tick.get("oi", 0) or 0)
             tick_data = {
                 "symbol": symbol,
+                "price": ltp,
                 "last": ltp,
                 "volume": vol,
                 "oi": oi,
+                "timestamp": datetime.now().isoformat(),
                 "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
@@ -210,6 +212,7 @@ class KiteBrokerAdapter:
             try:
                 self.kws.subscribe([token])
                 self.kws.set_mode(self.kws.MODE_FULL, [token])
+                print(f"KiteBrokerAdapter: Subscribed {symbol} (token={token}) on live feed.", flush=True)
                 return True
             except Exception as e:
                 print(f"KiteBrokerAdapter: Subscribe failed for {symbol} (token={token}): {e}", flush=True)

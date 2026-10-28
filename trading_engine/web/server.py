@@ -2873,10 +2873,10 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
             return
         if symbol in ("BSE SENSEX", "BSESEN", "BSE:SENSEX"):
             symbol = "SENSEX"
-        ltp = float(tick.get("price") or 0.0)
+        ltp = float(tick.get("price") or tick.get("last") or 0.0)
         if ltp <= 0:
             return
-        ts = tick.get("timestamp") or datetime.now().isoformat()
+        ts = tick.get("timestamp") or tick.get("datetime") or datetime.now().isoformat()
 
         # Update current spot for active indices
         if symbol in ("NIFTY", "NIFTY 50", "SENSEX", "BANKNIFTY"):
