@@ -2656,6 +2656,95 @@ async def breeze_oauth_callback(request: Request, apisession: Optional[str] = No
     return HTMLResponse(content=html)
 
 
+@app.get("/api/broker/kite/login")
+async def kite_login_redirect():
+    """Redirects user to official Zerodha Kite Connect login page."""
+    from trading_engine.core.keyvault import get_secret
+    api_key = get_secret("KITE_API_KEY")
+    if not api_key:
+        return HTMLResponse("<h3>⚠️ Error: KITE_API_KEY is not configured in KeyVault.</h3>", status_code=400)
+    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}"
+    return RedirectResponse(url=login_url)
+
+
+@app.api_route("/api/broker/kite/callback", methods=["GET", "POST"])
+async def kite_oauth_callback(request: Request, request_token: Optional[str] = None):
+    """
+    OAuth callback endpoint for Zerodha Kite Connect login.
+    Exchanges request_token for daily access_token, encrypts it into KeyVault,
+    switches active broker to 'kite', and immediately initiates the Kite live WebSocket stream.
+    """
+    token = request_token or request.query_params.get("request_token")
+    if not token:
+        try:
+            body = await request.json()
+            token = body.get("request_token")
+        except Exception:
+            pass
+
+    if not token:
+        return HTMLResponse(
+            "<h3>⚠️ Error: No request_token parameter received from Zerodha Kite.</h3>",
+            status_code=400
+        )
+
+    from trading_engine.core.keyvault import get_secret, set_secret
+    api_key = get_secret("KITE_API_KEY")
+    api_secret = get_secret("KITE_API_SECRET")
+
+    if not (api_key and api_secret):
+        return HTMLResponse(
+            "<h3>⚠️ Error: KITE_API_KEY or KITE_API_SECRET missing in KeyVault.</h3>",
+            status_code=500
+        )
+
+    try:
+        from kiteconnect import KiteConnect
+        kc = KiteConnect(api_key=api_key)
+        session_data = kc.generate_session(str(token).strip(), api_secret=api_secret)
+        access_token = session_data["access_token"]
+        set_secret("KITE_ACCESS_TOKEN", access_token)
+        set_secret("ACTIVE_BROKER", "kite")
+
+        # Hot-reload Kite client and WebSocket
+        _cdm.reset_kite()
+        _cdm._get_kite()
+        from trading_engine.adapters.kite_adapter import default_kite_adapter
+        default_kite_adapter.reset()
+        default_kite_adapter.connect()
+        if default_kite_adapter.is_connected:
+            default_kite_adapter.start_websocket(on_broker_websocket_tick)
+    except Exception as e:
+        return HTMLResponse(f"<h3>❌ Failed to generate Kite session: {e}</h3>", status_code=500)
+
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Kite Authentication Success</title>
+        <meta http-equiv="refresh" content="3; url=/" />
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+            .card { background: #1e293b; padding: 2rem 3rem; border-radius: 12px; border: 1px solid #334155; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+            h2 { color: #10b981; margin-bottom: 0.5rem; }
+            p { color: #94a3b8; font-size: 0.95rem; }
+            .btn { display: inline-block; margin-top: 1rem; padding: 0.6rem 1.2rem; background: #3b82f6; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>✅ Zerodha Kite Authenticated Successfully!</h2>
+            <p>Your daily access token has been generated and encrypted into KeyVault.</p>
+            <p>Live WebSocket market stream is now active.</p>
+            <p>Redirecting to dashboard in 3 seconds...</p>
+            <a href="/" class="btn">Return to Dashboard</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
 @app.post("/api/vault/active-broker")
 async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
     """
