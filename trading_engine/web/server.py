@@ -37,8 +37,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body, HTTPEx
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
-from trading_engine.core.keyvault import get_secret, set_secret
-
 # Ensure trading_engine directory and project root are on sys.path
 ENGINE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = ENGINE_DIR.parent
@@ -49,6 +47,8 @@ if str(ENGINE_DIR) not in sys.path:
 WEB_DIR = Path(__file__).resolve().parent
 if str(WEB_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_DIR))
+
+from trading_engine.core.keyvault import get_secret, set_secret
 
 try:
     import trading_engine.web.contract_data_manager as _cdm
