@@ -32,7 +32,18 @@ class BreezeBrokerAdapter:
         self._token_to_symbol: Dict[str, str] = {}
         self._symbol_to_tokens: Dict[str, Tuple[str, str]] = {}
         self.ws_connected = False
+        self._last_connect_attempt = 0.0
+        self._connect_cooldown = 30.0
+        self._limit_exceeded = False
 
+    def reset(self):
+        """Resets adapter state and clears connection cooldowns."""
+        global _breeze_client
+        _breeze_client = None
+        self.client = None
+        self.is_connected = False
+        self._last_connect_attempt = 0.0
+        self._limit_exceeded = False
 
     def is_configured(self) -> bool:
         """Returns True if all required Breeze credentials exist in KeyVault."""
@@ -48,6 +59,14 @@ class BreezeBrokerAdapter:
             self.client = _breeze_client
             self.is_connected = True
             return _breeze_client
+
+        # Cooldown guard: prevent repeated rapid calls exhausting daily API quota
+        now = time.time()
+        cooldown = 120.0 if self._limit_exceeded else self._connect_cooldown
+        if now - self._last_connect_attempt < cooldown:
+            return None
+
+        self._last_connect_attempt = now
 
         if not self.is_configured():
             logger.warning("BreezeBrokerAdapter: Incomplete credentials in KeyVault.")
@@ -70,9 +89,15 @@ class BreezeBrokerAdapter:
             _breeze_client = breeze
             self.client = breeze
             self.is_connected = True
+            self._limit_exceeded = False
             return breeze
         except Exception as e:
-            logger.error(f"BreezeBrokerAdapter: Failed to generate session: {e}")
+            err_str = str(e)
+            if "Limit exceed" in err_str:
+                self._limit_exceeded = True
+                logger.error(f"BreezeBrokerAdapter: Daily API call limit exceeded on ICICI Direct Breeze API: {e}")
+            else:
+                logger.error(f"BreezeBrokerAdapter: Failed to generate session: {e}")
             self.is_connected = False
             return None
 
