@@ -597,11 +597,12 @@ def resolve_spot_price(underlying: str, expiry: Optional[str] = None) -> float:
     elif broker == "breeze":
         try:
             from trading_engine.adapters.breeze_adapter import default_breeze_adapter
-            breeze = default_breeze_adapter.connect()
-            if breeze:
-                stk = spec.get("breeze_stock_code", und_upper)
-                exc = spec.get("cash_exchange", "BSE" if "SENSEX" in und_upper else "NSE")
-                q = breeze.get_quotes(exchange_code=exc, stock_code=stk, product_type="cash")
+            if default_breeze_adapter.is_connected:
+                breeze = default_breeze_adapter.connect()
+                if breeze:
+                    stk = spec.get("breeze_stock_code", und_upper)
+                    exc = spec.get("cash_exchange", "BSE" if "SENSEX" in und_upper else "NSE")
+                    q = breeze.get_quotes(exchange_code=exc, stock_code=stk, product_type="cash")
                 if q and q.get("Success"):
                     for item in q["Success"]:
                         p = item.get("ltp") or item.get("last_traded_price")
@@ -1375,6 +1376,8 @@ def _fetch_from_breeze(trading_symbol: str) -> List[Dict]:
     """Fetch today's 1-minute candles from ICICI Direct Breeze historical API."""
     try:
         from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        if not default_breeze_adapter.is_connected:
+            return []
         today_str = _get_ist_now().strftime("%Y-%m-%d")
         print(f"ContractDataManager: Fetching Breeze historical for {trading_symbol} on {today_str}", flush=True)
         raw_candles = default_breeze_adapter.get_historical_candles(

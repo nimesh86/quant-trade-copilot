@@ -2810,14 +2810,16 @@ async def run_broker_websocket_stream():
     while True:
         try:
             from trading_engine.adapters.breeze_adapter import default_breeze_adapter
-            if default_breeze_adapter.is_configured():
-                if not default_breeze_adapter.is_connected or not default_breeze_adapter.ws_connected:
+            # Only monitor socket health if an authenticated session is ALREADY established.
+            # Never attempt session generation in a background watchdog loop.
+            if default_breeze_adapter.is_configured() and default_breeze_adapter.is_connected:
+                if not default_breeze_adapter.ws_connected:
                     connected = await asyncio.to_thread(default_breeze_adapter.start_websocket, on_broker_websocket_tick)
                     if connected:
                         print("BrokerWebSocketStream: Breeze WebSocket stream active and connected.", flush=True)
         except Exception as e:
             print(f"BrokerWebSocketStream: WebSocket stream watchdog error: {e}", flush=True)
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(15.0)
 
 
 async def run_broker_subscription_manager():
