@@ -2474,6 +2474,7 @@ async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
     from trading_engine.core.keyvault import set_secret
     set_secret("KITE_API_KEY", api_key)
     set_secret("KITE_ACCESS_TOKEN", access_token)
+    set_secret("ACTIVE_BROKER", "kite")
 
     try:
         _cdm.reset_kite()
@@ -2481,9 +2482,18 @@ async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
     except Exception as e:
         print(f"Server: Error reloading Kite client: {e}", flush=True)
 
+    try:
+        from trading_engine.adapters.kite_adapter import default_kite_adapter
+        default_kite_adapter.reset()
+        default_kite_adapter.connect()
+        if default_kite_adapter.is_connected:
+            default_kite_adapter.start_websocket(on_broker_websocket_tick)
+    except Exception as e:
+        print(f"Server: Error starting Kite adapter on credentials update: {e}", flush=True)
+
     return {
         "status": "success",
-        "message": "Kite credentials encrypted and saved to KeyVault. Live client reloaded."
+        "message": "Kite credentials encrypted and saved to KeyVault. Kite live stream activated."
     }
 
 
@@ -2660,8 +2670,13 @@ async def set_active_broker_endpoint(payload: Dict[str, Any] = Body(...)):
 
     try:
         _cdm.reset_all_brokers()
+        adapter = get_active_broker_adapter()
+        if adapter.is_configured():
+            adapter.connect()
+            if adapter.is_connected:
+                adapter.start_websocket(on_broker_websocket_tick)
     except Exception as e:
-        print(f"Server: Error resetting broker clients: {e}", flush=True)
+        print(f"Server: Error resetting/connecting broker clients: {e}", flush=True)
 
     return {
         "status": "success",
@@ -2800,23 +2815,35 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
         pass
 
 
+def get_active_broker_adapter():
+    """Returns the adapter singleton for the currently active broker."""
+    broker = (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
+    if broker == "kite":
+        from trading_engine.adapters.kite_adapter import default_kite_adapter
+        return default_kite_adapter
+    else:
+        from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        return default_breeze_adapter
+
+
 async def run_broker_websocket_stream():
     """
     Dedicated broker WebSocket manager with continuous auto-reconnection watchdog.
-    Connects to ICICI Direct Breeze WebSocket with ZERO REST polling.
+    Connects to active broker WebSocket (Kite or Breeze) with ZERO REST polling.
     Continuously monitors socket health and auto-reconnects on session refresh or network drops.
     """
     print("BrokerWebSocketStream: Initializing broker WebSocket stream watchdog (0 REST calls)...", flush=True)
     while True:
         try:
-            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+            adapter = get_active_broker_adapter()
             # Only monitor socket health if an authenticated session is ALREADY established.
             # Never attempt session generation in a background watchdog loop.
-            if default_breeze_adapter.is_configured() and default_breeze_adapter.is_connected:
-                if not default_breeze_adapter.ws_connected:
-                    connected = await asyncio.to_thread(default_breeze_adapter.start_websocket, on_broker_websocket_tick)
+            if adapter.is_configured() and adapter.is_connected:
+                if not adapter.ws_connected:
+                    connected = await asyncio.to_thread(adapter.start_websocket, on_broker_websocket_tick)
                     if connected:
-                        print("BrokerWebSocketStream: Breeze WebSocket stream active and connected.", flush=True)
+                        broker_name = (get_secret("ACTIVE_BROKER") or "kite").upper()
+                        print(f"BrokerWebSocketStream: {broker_name} WebSocket stream active and connected.", flush=True)
         except Exception as e:
             print(f"BrokerWebSocketStream: WebSocket stream watchdog error: {e}", flush=True)
         await asyncio.sleep(15.0)
@@ -2835,8 +2862,8 @@ async def run_broker_subscription_manager():
 
     while True:
         try:
-            from trading_engine.adapters.breeze_adapter import default_breeze_adapter
-            if default_breeze_adapter.is_connected and default_breeze_adapter.ws_connected:
+            adapter = get_active_broker_adapter()
+            if adapter.is_connected and adapter.ws_connected:
                 # Monitored = all open positions in contract_engine + pending orders + UI active symbols + core indices
                 engine_syms = set(contract_engine.get_monitored_symbols())
                 ui_syms = set(get_all_subscribed_symbols())
@@ -2845,14 +2872,14 @@ async def run_broker_subscription_manager():
                 # Subscribe new symbols
                 to_sub = desired_symbols - subscribed_symbols
                 for sym in to_sub:
-                    success = await asyncio.to_thread(default_breeze_adapter.subscribe_feeds, sym)
+                    success = await asyncio.to_thread(adapter.subscribe_feeds, sym)
                     if success:
                         subscribed_symbols.add(sym)
 
                 # Unsubscribe old (only if NOT in engine positions/orders AND NOT in UI AND NOT core)
                 to_unsub = subscribed_symbols - desired_symbols
                 for sym in to_unsub:
-                    await asyncio.to_thread(default_breeze_adapter.unsubscribe_feeds, sym)
+                    await asyncio.to_thread(adapter.unsubscribe_feeds, sym)
                     subscribed_symbols.discard(sym)
         except Exception:
             pass

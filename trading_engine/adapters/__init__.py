@@ -4,6 +4,7 @@ from .paper_adapter import PaperAdapter
 from .live_adapter import LiveAdapter
 from .strategy_detector_adapter import StrategyDetectorAdapter
 from .breeze_adapter import BreezeBrokerAdapter, default_breeze_adapter
+from .kite_adapter import KiteBrokerAdapter, default_kite_adapter
 
 __all__ = [
     "BaseAdapter",
@@ -12,5 +13,7 @@ __all__ = [
     "LiveAdapter",
     "StrategyDetectorAdapter",
     "BreezeBrokerAdapter",
-    "default_breeze_adapter"
+    "default_breeze_adapter",
+    "KiteBrokerAdapter",
+    "default_kite_adapter"
 ]

@@ -179,6 +179,11 @@ def reset_all_brokers():
         default_breeze_adapter.reset()
     except Exception:
         pass
+    try:
+        from trading_engine.adapters.kite_adapter import default_kite_adapter
+        default_kite_adapter.reset()
+    except Exception:
+        pass
 
 
 # ── Instrument Token Resolution ───────────────────────────────────────────────
