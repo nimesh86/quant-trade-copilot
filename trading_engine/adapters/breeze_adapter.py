@@ -7,6 +7,7 @@ Handles authentication, 1-minute historical candle catch-up, quotes, and live fe
 
 import os
 import sys
+import time
 import logging
 from datetime import datetime, date
 from typing import Dict, List, Optional, Any, Callable, Tuple, Set
