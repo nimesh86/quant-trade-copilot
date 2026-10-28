@@ -35,8 +35,9 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Body, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from trading_engine.core.keyvault import get_secret, set_secret
 
 # Ensure trading_engine directory and project root are on sys.path
 ENGINE_DIR = Path(__file__).resolve().parent.parent
