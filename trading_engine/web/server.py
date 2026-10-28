@@ -2029,6 +2029,14 @@ async def on_startup():
         state.tunnel_task = asyncio.create_task(run_tunnel_supervisor())
     from trading_engine.execution.autonomous_runner import autonomous_runner
     state.autonomous_runner_task = asyncio.create_task(autonomous_runner.run_loop())
+    try:
+        adapter = get_active_broker_adapter()
+        if adapter.is_configured():
+            await asyncio.to_thread(adapter.connect)
+            if adapter.is_connected:
+                await asyncio.to_thread(adapter.start_websocket, on_broker_websocket_tick)
+    except Exception as e:
+        print(f"Startup: Error connecting active broker adapter: {e}", flush=True)
 
 
 @app.on_event("shutdown")
@@ -2926,14 +2934,14 @@ async def run_broker_websocket_stream():
     while True:
         try:
             adapter = get_active_broker_adapter()
-            # Only monitor socket health if an authenticated session is ALREADY established.
-            # Never attempt session generation in a background watchdog loop.
-            if adapter.is_configured() and adapter.is_connected:
-                if not adapter.ws_connected:
+            broker = (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
+            if adapter.is_configured():
+                if not adapter.is_connected and broker == "kite":
+                    await asyncio.to_thread(adapter.connect)
+                if adapter.is_connected and not adapter.ws_connected:
                     connected = await asyncio.to_thread(adapter.start_websocket, on_broker_websocket_tick)
                     if connected:
-                        broker_name = (get_secret("ACTIVE_BROKER") or "kite").upper()
-                        print(f"BrokerWebSocketStream: {broker_name} WebSocket stream active and connected.", flush=True)
+                        print(f"BrokerWebSocketStream: {broker.upper()} WebSocket stream active and connected.", flush=True)
         except Exception as e:
             print(f"BrokerWebSocketStream: WebSocket stream watchdog error: {e}", flush=True)
         await asyncio.sleep(15.0)
