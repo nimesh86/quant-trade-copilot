@@ -325,6 +325,89 @@ alertcondition(newChannelFormed, "New Channel Formation", "A new breakout channe
 alertcondition(bullishBreakout, "Bullish Breakout", "Price has broken out above the channel (bullish signal)")
 alertcondition(bearishBreakout, "Bearish Breakout", "Price has broken out below the channel (bearish signal)")`;
 
+    const BSS_PRO_V3_FULL_SCRIPT = `//@version=5
+indicator("BSS Pro v3 - Buyer/Seller Strength, Targets, SL & Exit", shorttitle="BSS Pro v3", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// =====================================================================
+//  INPUTS
+// =====================================================================
+g0 = "0. Mode & Signal Source"
+tradeMode = input.string("Option buyer (long premium only)", "Trade mode", options=["Option buyer (long premium only)", "Normal (BUY & SELL on this chart)"], group=g0, tooltip="Option buyer: only BUY signals on this chart (a falling premium is just 'no trade'). Normal: BUY and SELL both, for index / futures / stock charts.")
+useSrc    = input.bool(false, "Take signals from another symbol", group=g0, tooltip="Example: sit on an option premium chart but generate signals from Nifty futures. Entries, exits and buyer/seller % come from the source symbol; stop loss, targets and prices stay on THIS chart.")
+srcSymIn  = input.symbol("NSE:NIFTY1!", "Signal source symbol", group=g0)
+optType   = input.string("Auto", "This chart's option type (only used with another source)", options=["Auto", "CALL", "PUT"], group=g0, tooltip="CALL: BUY when the source is bullish. PUT: BUY when the source is bearish. Auto reads CALL / PUT from the symbol description.")
+
+g1 = "1. Trend & Signal"
+emaFastLen = input.int(21, "Fast EMA", minval=2, group=g1)
+emaSlowLen = input.int(50, "Slow EMA", minval=5, group=g1)
+rsiLen     = input.int(14, "RSI length", minval=2, group=g1)
+stLen      = input.int(10, "Supertrend ATR length", minval=1, group=g1)
+stMult     = input.float(3.0, "Supertrend multiplier", minval=0.5, step=0.1, group=g1)
+
+g2 = "2. Buyer / Seller Pressure"
+pressLen = input.int(14, "Pressure lookback (bars)", minval=3, group=g2)
+domThr   = input.float(58.0, "Min dominant side % to give signal", minval=50.0, maxval=90.0, step=1.0, group=g2)
+useLtf   = input.bool(true, "Use intrabar volume for the buyer/seller split", group=g2, tooltip="Splits each candle's volume using the smaller candles inside it (more accurate). Needs the chart timeframe to be above the intrabar timeframe below, e.g. a 5m chart with 1m. If you use a 1m chart, turn this off AND set the intrabar timeframe to a value below your chart.")
+ltfTf    = input.string("1", "Intrabar timeframe", options=["1", "3", "5"], group=g2)
+minRank  = input.float(40.0, "Min relative strength rank (0-100)", minval=0.0, maxval=100.0, step=5.0, group=g2, tooltip="How lopsided the buyer/seller split is compared with the last 100 bars. 0 = off. Filters out signals where the % is only barely above the gate.")
+
+g3 = "3. Entry Quality"
+useCandle = input.bool(true, "Signal candle must close in trade direction", group=g3)
+maxExtAtr = input.float(1.5, "Max distance from fast EMA (x ATR)", minval=0.3, step=0.1, group=g3)
+rsiHi     = input.float(70.0, "BUY blocked if RSI above (trend entries)", minval=55.0, maxval=95.0, group=g3)
+rsiLo     = input.float(30.0, "SELL blocked if RSI below (trend entries)", minval=5.0, maxval=45.0, group=g3)
+reqPb     = input.bool(true, "Trend entries need a recent pullback to the fast EMA", group=g3)
+pbBars    = input.int(8, "Pullback look-back (bars)", minval=2, group=g3)
+pbAtr     = input.float(0.6, "Pullback touch zone (x ATR)", minval=0.1, step=0.1, group=g3)
+useBrk    = input.bool(true, "Also allow BREAKOUT entries (catch early thrusts)", group=g3, tooltip="Strong candle closing above the previous N-bar high (or below the low) with buyer/seller dominance. Bypasses the pullback / RSI / distance filters so fast moves are not missed.")
+brkLen    = input.int(20, "Breakout look-back (bars)", minval=5, group=g3)
+brkBody   = input.float(0.5, "Breakout candle body (x ATR)", minval=0.1, step=0.1, group=g3)
+minRR     = input.float(0.8, "Min reward:risk to T1", minval=0.0, step=0.1, group=g3)
+
+g4 = "4. Stop Loss & Trailing"
+atrLen    = input.int(14, "ATR length", minval=1, group=g4)
+swingLen  = input.int(10, "Swing lookback for SL", minval=2, group=g4)
+minSlAtr  = input.float(0.6, "Min SL distance (x ATR)", minval=0.2, step=0.1, group=g4)
+maxSlAtr  = input.float(2.5, "Max SL distance (x ATR)", minval=0.5, step=0.1, group=g4)
+maxSlPct  = input.float(12.0, "Hard cap on SL distance (% of entry, 0 = off)", minval=0.0, step=0.5, group=g4, tooltip="Stops an option premium SL from being 18-25% away. Applied after the ATR rules.")
+trailOn   = input.bool(true, "Trail the stop after T1", group=g4, tooltip="After T1: stop moves to entry. After T2: stop moves to T1. It also trails the best price by the distance below.")
+trailR    = input.float(1.0, "Trailing distance (x initial risk)", minval=0.3, step=0.1, group=g4)
+
+g5 = "5. Targets"
+tgtMode  = input.string("R-multiple", "Target mode", options=["R-multiple", "Fibonacci extension"], group=g5, tooltip="R-multiple: targets are multiples of the initial risk. Fibonacci extension: ratios of the recent swing range, capped at 'Max target' R.")
+r1       = input.float(1.0, "T1 (R)", minval=0.2, step=0.1, group=g5)
+r2       = input.float(2.0, "T2 (R)", minval=0.2, step=0.1, group=g5)
+r3       = input.float(3.0, "Max (R)", minval=0.2, step=0.1, group=g5)
+fibLen   = input.int(50, "Fib mode: swing range lookback", minval=10, group=g5)
+f1       = input.float(0.382, "Fib mode: T1 ratio", step=0.001, group=g5)
+f2       = input.float(0.618, "Fib mode: T2 ratio", step=0.001, group=g5)
+f3       = input.float(1.0,   "Fib mode: Max ratio", step=0.001, group=g5)
+maxTgtR  = input.float(4.0, "Fib mode: cap targets at (R)", minval=1.0, step=0.5, group=g5)
+maxBars  = input.int(60, "Time stop: close trade after N bars", minval=5, group=g5)
+minSamples = input.int(20, "Samples needed before showing a chance %", minval=5, group=g5, tooltip="Below this many finished trades the script shows raw counts (e.g. 'hits 3/8') instead of a percentage.")
+
+g6 = "6. Look & Feel"
+markerOff  = input.float(0.7, "Marker distance from candle (x ATR)", minval=0.1, step=0.1, group=g6)
+showRibbon = input.bool(true, "EMA ribbon (of this chart)", group=g6)
+showZones  = input.bool(true, "Risk / reward zones", group=g6)
+zoneToMax  = input.bool(false, "Draw reward zone up to Max (otherwise up to T2)", group=g6)
+keepOldLbl = input.bool(false, "Keep level labels on completed trades", group=g6)
+showTable  = input.bool(true, "Info panel", group=g6)
+tblPosIn   = input.string("Top left", "Panel position", options=["Top left", "Top right", "Bottom left", "Bottom right"], group=g6)
+colBuy     = input.color(#089981, "BUY marker", group=g6)
+colSell    = input.color(#F23645, "SELL marker", group=g6)
+colSlBuy   = input.color(#FF9800, "Stop loss - BUY trade", group=g6)
+colSlSell  = input.color(#AB47BC, "Stop loss - SELL trade", group=g6)
+colTgtBuy  = input.color(#00C853, "Targets - BUY trade", group=g6)
+colTgtSell = input.color(#29B6F6, "Targets - SELL trade", group=g6)
+colExit    = input.color(#FFD54F, "EXIT marker", group=g6)
+
+// =====================================================================
+//  PLOTS & ALERTS
+// =====================================================================
+// Executed via high-precision client Pine Engine
+`;
+
     // ── Built-in Preset Registry ────────────────────────────────────────────────
     const PRESETS = {
         algoalpha_breakout_channels: {
@@ -345,6 +428,63 @@ alertcondition(bearishBreakout, "Bearish Breakout", "Price has broken out below 
                 vol_down_color: '#f59e0b'
             },
             code: ALGOALPHA_FULL_SCRIPT
+        },
+        bss_pro_v3: {
+            id: 'bss_pro_v3',
+            name: 'BSS Pro v3 [Buyer/Seller Strength, Targets, SL & Exit]',
+            inputs: {
+                tradeMode: 'Option buyer (long premium only)',
+                useSrc: false,
+                srcSymIn: 'NSE:NIFTY1!',
+                optType: 'Auto',
+                emaFastLen: 21,
+                emaSlowLen: 50,
+                rsiLen: 14,
+                stLen: 10,
+                stMult: 3.0,
+                pressLen: 14,
+                domThr: 58.0,
+                useLtf: false,
+                ltfTf: '1',
+                minRank: 40.0,
+                useCandle: true,
+                maxExtAtr: 1.5,
+                rsiHi: 70.0,
+                rsiLo: 30.0,
+                reqPb: true,
+                pbBars: 8,
+                pbAtr: 0.6,
+                useBrk: true,
+                brkLen: 20,
+                brkBody: 0.5,
+                minRR: 0.8,
+                atrLen: 14,
+                swingLen: 10,
+                minSlAtr: 0.6,
+                maxSlAtr: 2.5,
+                maxSlPct: 12.0,
+                trailOn: true,
+                trailR: 1.0,
+                tgtMode: 'R-multiple',
+                r1: 1.0,
+                r2: 2.0,
+                r3: 3.0,
+                maxBars: 60,
+                minSamples: 20,
+                markerOff: 0.7,
+                showRibbon: true,
+                showZones: true,
+                showTable: true,
+                tblPosIn: 'Top left',
+                colBuy: '#089981',
+                colSell: '#F23645',
+                colSlBuy: '#FF9800',
+                colSlSell: '#AB47BC',
+                colTgtBuy: '#00C853',
+                colTgtSell: '#29B6F6',
+                colExit: '#FFD54F'
+            },
+            code: BSS_PRO_V3_FULL_SCRIPT
         },
         supertrend: {
             id: 'supertrend',
@@ -639,6 +779,98 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                 if (valA < valB && prevA >= prevB) out[i] = true;
             }
             return out;
+        },
+
+        rsi(series, len) {
+            const n = series.length;
+            const out = new Array(n).fill(50);
+            if (n < 2) return out;
+            const u = new Array(n).fill(0);
+            const d = new Array(n).fill(0);
+            for (let i = 1; i < n; i++) {
+                const diff = series[i] - series[i - 1];
+                u[i] = diff > 0 ? diff : 0;
+                d[i] = diff < 0 ? -diff : 0;
+            }
+            const rmaU = PineTA.rma(u, len);
+            const rmaD = PineTA.rma(d, len);
+            for (let i = 0; i < n; i++) {
+                if (!rmaD[i] || rmaD[i] === 0) {
+                    out[i] = 100;
+                } else {
+                    const rs = rmaU[i] / rmaD[i];
+                    out[i] = 100 - (100 / (1 + rs));
+                }
+            }
+            return out;
+        },
+
+        percentrank(series, len) {
+            const n = series.length;
+            const out = new Array(n).fill(50);
+            for (let i = 0; i < n; i++) {
+                const start = Math.max(0, i - len);
+                const countBars = i - start;
+                if (countBars <= 0) {
+                    out[i] = 50;
+                    continue;
+                }
+                let countLessEqual = 0;
+                const cur = series[i];
+                for (let j = start; j < i; j++) {
+                    if (series[j] <= cur) countLessEqual++;
+                }
+                out[i] = (countLessEqual / countBars) * 100;
+            }
+            return out;
+        },
+
+        supertrend(candles, multiplier, period) {
+            const n = candles.length;
+            const tr = PineTA.tr(candles);
+            const atr = PineTA.rma(tr, period);
+            const src = candles.map(c => (c.high + c.low) / 2);
+            const closes = candles.map(c => c.close);
+            const up = new Array(n);
+            const dn = new Array(n);
+            const trend = new Array(n);
+
+            let prevUp = 0;
+            let prevDn = 0;
+            let prevTrend = 1;
+
+            for (let i = 0; i < n; i++) {
+                const curAtr = atr[i] || 0;
+                const basicUp = src[i] - (multiplier * curAtr);
+                const basicDn = src[i] + (multiplier * curAtr);
+
+                if (i === 0) {
+                    up[i] = basicUp;
+                    dn[i] = basicDn;
+                    trend[i] = 1;
+                    prevUp = basicUp;
+                    prevDn = basicDn;
+                    prevTrend = 1;
+                    continue;
+                }
+
+                const prevClose = closes[i - 1];
+                up[i] = prevClose > prevUp ? Math.max(basicUp, prevUp) : basicUp;
+                dn[i] = prevClose < prevDn ? Math.min(basicDn, prevDn) : basicDn;
+
+                let curTrend = prevTrend;
+                if (prevTrend === -1 && closes[i] > prevDn) {
+                    curTrend = 1;
+                } else if (prevTrend === 1 && closes[i] < prevUp) {
+                    curTrend = -1;
+                }
+                trend[i] = curTrend;
+                prevUp = up[i];
+                prevDn = dn[i];
+                prevTrend = curTrend;
+            }
+
+            return { up, dn, trend };
         }
     };
 
@@ -1076,10 +1308,406 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         };
     }
 
+    // ── Dedicated BSS Pro v3 Indicator Runner ──────────────────────────────────
+    function computeBSSProV3(candles, rawInputs, stationType) {
+        const n = candles.length;
+        if (n < 5) return null;
+
+        const inputs = rawInputs || {};
+        const tradeMode = inputs.tradeMode || 'Option buyer (long premium only)';
+        const buyerMode = tradeMode.includes('Option buyer');
+        const emaFastLen = Math.max(2, parseInt(inputs.emaFastLen) || 21);
+        const emaSlowLen = Math.max(5, parseInt(inputs.emaSlowLen) || 50);
+        const rsiLen = Math.max(2, parseInt(inputs.rsiLen) || 14);
+        const stLen = Math.max(1, parseInt(inputs.stLen) || 10);
+        const stMult = Math.max(0.5, parseFloat(inputs.stMult) || 3.0);
+        const pressLen = Math.max(3, parseInt(inputs.pressLen) || 14);
+        const domThr = Math.max(50, Math.min(95, parseFloat(inputs.domThr) || 58.0));
+        const minRank = Math.max(0, Math.min(100, parseFloat(inputs.minRank) || 40.0));
+        const useCandle = inputs.useCandle !== false;
+        const maxExtAtr = parseFloat(inputs.maxExtAtr) || 1.5;
+        const rsiHi = parseFloat(inputs.rsiHi) || 70.0;
+        const rsiLo = parseFloat(inputs.rsiLo) || 30.0;
+        const reqPb = inputs.reqPb !== false;
+        const pbBars = Math.max(2, parseInt(inputs.pbBars) || 8);
+        const pbAtr = parseFloat(inputs.pbAtr) || 0.6;
+        const useBrk = inputs.useBrk !== false;
+        const brkLen = Math.max(5, parseInt(inputs.brkLen) || 20);
+        const brkBody = parseFloat(inputs.brkBody) || 0.5;
+        const minRR = parseFloat(inputs.minRR) || 0.8;
+        const atrLen = Math.max(1, parseInt(inputs.atrLen) || 14);
+        const swingLen = Math.max(2, parseInt(inputs.swingLen) || 10);
+        const minSlAtr = parseFloat(inputs.minSlAtr) || 0.6;
+        const maxSlAtr = parseFloat(inputs.maxSlAtr) || 2.5;
+        const maxSlPct = parseFloat(inputs.maxSlPct) || 12.0;
+        const trailOn = inputs.trailOn !== false;
+        const trailR = parseFloat(inputs.trailR) || 1.0;
+        const r1 = parseFloat(inputs.r1) || 1.0;
+        const r2 = parseFloat(inputs.r2) || 2.0;
+        const r3 = parseFloat(inputs.r3) || 3.0;
+        const maxBars = Math.max(5, parseInt(inputs.maxBars) || 60);
+        const showRibbon = inputs.showRibbon !== false;
+        const showTable = inputs.showTable !== false;
+        const tblPosIn = inputs.tblPosIn || 'Top left';
+
+        const colBuy = inputs.colBuy || '#089981';
+        const colSell = inputs.colSell || '#F23645';
+        const colSlBuy = inputs.colSlBuy || '#FF9800';
+        const colSlSell = inputs.colSlSell || '#AB47BC';
+        const colTgtBuy = inputs.colTgtBuy || '#00C853';
+        const colTgtSell = inputs.colTgtSell || '#29B6F6';
+        const colExit = inputs.colExit || '#FFD54F';
+
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const closes = candles.map(c => c.close);
+        const opens = candles.map(c => c.open);
+        const volumes = candles.map(c => c.volume || 1);
+        const times = candles.map(c => c.time);
+
+        // Core Technical Series
+        const atrArr = PineTA.atr(candles, atrLen);
+        const emaF = PineTA.ema(closes, emaFastLen);
+        const emaS = PineTA.ema(closes, emaSlowLen);
+        const rsiArr = PineTA.rsi(closes, rsiLen);
+        const stRes = PineTA.supertrend(candles, stMult, stLen);
+        const swLows = PineTA.lowest(lows, swingLen);
+        const swHighs = PineTA.highest(highs, swingLen);
+
+        // Buyer / Seller Volume Distribution
+        const buyVol = new Array(n);
+        const sellVol = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const rng = highs[i] - lows[i];
+            const vol = volumes[i] > 0 ? volumes[i] : 1.0;
+            const shapeBuy = rng > 0 ? (vol * (closes[i] - lows[i]) / rng) : (vol * 0.5);
+            buyVol[i] = shapeBuy;
+            sellVol[i] = vol - shapeBuy;
+        }
+
+        const buyPctArr = new Array(n);
+        const sellPctArr = new Array(n);
+        const domAbsArr = new Array(n);
+
+        let curBuySum = 0;
+        let curSellSum = 0;
+        for (let i = 0; i < n; i++) {
+            curBuySum += buyVol[i];
+            curSellSum += sellVol[i];
+            if (i >= pressLen) {
+                curBuySum -= buyVol[i - pressLen];
+                curSellSum -= sellVol[i - pressLen];
+            }
+            const totSum = curBuySum + curSellSum;
+            const bPct = totSum > 0 ? (curBuySum / totSum) * 100 : 50.0;
+            buyPctArr[i] = bPct;
+            sellPctArr[i] = 100.0 - bPct;
+            domAbsArr[i] = Math.abs(bPct - 50.0);
+        }
+
+        const rankArr = PineTA.percentrank(domAbsArr, 100);
+
+        // Trade State Machine
+        let tDir = 0; // 0: flat, 1: long, -1: short
+        let entry = 0;
+        let slP = 0;
+        let t1P = 0;
+        let t2P = 0;
+        let tMP = 0;
+        let riskPts = 0;
+        let runExt = 0;
+        let h1 = false;
+        let h2 = false;
+        let hM = false;
+        let trailActive = false;
+        let barsIn = 0;
+        let lastDir = 0;
+        let lastEvent = 'No signal yet';
+
+        let lTot = 0, l1 = 0, l2 = 0, lM = 0;
+        let sTot = 0, s1 = 0, s2 = 0, sM = 0;
+
+        const signals = [];
+        const trailSeries = new Array(n).fill(null);
+
+        for (let i = 1; i < n; i++) {
+            const a = atrArr[i] || 1.0;
+            const eFast = emaF[i];
+            const eSlow = emaS[i];
+            const r = rsiArr[i];
+            const isUpTrend = stRes.trend[i] === 1;
+
+            const bullC = closes[i] > opens[i] && closes[i] > closes[i - 1];
+            const bearC = closes[i] < opens[i] && closes[i] < closes[i - 1];
+
+            // Pullback criteria
+            let lowestLowDist = 999999;
+            let highestHighDist = -999999;
+            const pStart = Math.max(0, i - pbBars + 1);
+            for (let j = pStart; j <= i; j++) {
+                const lowDist = lows[j] - emaF[j];
+                const highDist = highs[j] - emaF[j];
+                if (lowDist < lowestLowDist) lowestLowDist = lowDist;
+                if (highDist > highestHighDist) highestHighDist = highDist;
+            }
+            const pbUp = lowestLowDist <= pbAtr * a;
+            const pbDn = highestHighDist >= -pbAtr * a;
+
+            // Trend criteria
+            const trUp = isUpTrend && eFast > eSlow && closes[i] > eFast && r > 50 && r < rsiHi;
+            const trDn = (!isUpTrend) && eFast < eSlow && closes[i] < eFast && r < 50 && r > rsiLo;
+
+            // Quality criteria
+            const quUp = (!useCandle || bullC) && (closes[i] - eFast) <= maxExtAtr * a && (!reqPb || pbUp);
+            const quDn = (!useCandle || bearC) && (eFast - closes[i]) <= maxExtAtr * a && (!reqPb || pbDn);
+
+            // Breakout criteria
+            const brkStart = Math.max(0, i - 1 - brkLen + 1);
+            let hiP = -999999;
+            let loP = 999999;
+            for (let j = brkStart; j < i; j++) {
+                if (highs[j] > hiP) hiP = highs[j];
+                if (lows[j] < loP) loP = lows[j];
+            }
+            const brUp = useBrk && closes[i] > hiP && bullC && (closes[i] - opens[i]) >= brkBody * a && closes[i] > eFast;
+            const brDn = useBrk && closes[i] < loP && bearC && (opens[i] - closes[i]) >= brkBody * a && closes[i] < eFast;
+
+            const rank = rankArr[i];
+            const rankOK = minRank <= 0 || (rank != null && rank >= minRank);
+            const dirOkUp = buyPctArr[i] >= domThr && rankOK;
+            const dirOkDn = sellPctArr[i] >= domThr && rankOK;
+
+            const upSig = (trUp && quUp && dirOkUp) || (brUp && dirOkUp);
+            const dnSig = (trDn && quDn && dirOkDn) || (brDn && dirOkDn);
+
+            // Option buyer mode mapping
+            const isPut = String(stationType).toUpperCase() === 'PE';
+            const mapPut = buyerMode && isPut;
+            const sigLong = mapPut ? dnSig : upSig;
+            const sigShort = (!buyerMode) && dnSig;
+            const isBreakout = mapPut ? (brDn && dirOkDn) : (brUp && dirOkUp);
+
+            // Stop Loss & Targets
+            const swLow = swLows[i];
+            const swHigh = swHighs[i];
+            const slL0 = Math.min(Math.max(swLow - 0.1 * a, closes[i] - maxSlAtr * a), closes[i] - minSlAtr * a);
+            const slS0 = Math.max(Math.min(swHigh + 0.1 * a, closes[i] + maxSlAtr * a), closes[i] + minSlAtr * a);
+            const slL = maxSlPct > 0 ? Math.max(slL0, closes[i] * (1.0 - maxSlPct / 100)) : slL0;
+            const slS = maxSlPct > 0 ? Math.min(slS0, closes[i] * (1.0 + maxSlPct / 100)) : slS0;
+            const riskL = Math.max(closes[i] - slL, 0.05);
+            const riskS = Math.max(slS - closes[i], 0.05);
+
+            const t1L = closes[i] + riskL * r1;
+            const t2L = closes[i] + riskL * r2;
+            const tML = closes[i] + riskL * r3;
+            const t1S = Math.max(closes[i] - riskS * r1, 0.05);
+            const t2S = Math.max(closes[i] - riskS * r2, 0.05);
+            const tMS = Math.max(closes[i] - riskS * r3, 0.05);
+
+            const rrL = (t1L - closes[i]) / riskL;
+            const rrS = (closes[i] - t1S) / riskS;
+
+            const longOK = sigLong && rrL >= minRR;
+            const shortOK = sigShort && rrS >= minRR;
+
+            // Manage Open Position
+            let closedNow = false;
+            if (tDir !== 0) {
+                barsIn += 1;
+                runExt = tDir === 1 ? Math.max(runExt, highs[i]) : Math.min(runExt, lows[i]);
+
+                const slHit = tDir === 1 ? lows[i] <= slP : highs[i] >= slP;
+                const hit1 = tDir === 1 ? highs[i] >= t1P : lows[i] <= t1P;
+                const hit2 = tDir === 1 ? highs[i] >= t2P : lows[i] <= t2P;
+                const hitM = tDir === 1 ? highs[i] >= tMP : lows[i] <= tMP;
+
+                if (slHit) {
+                    closedNow = true;
+                    lastEvent = trailActive ? 'Trailing stop hit' : 'Stop loss hit';
+                    signals.push({
+                        time: times[i],
+                        price: slP,
+                        type: 'exit_sl',
+                        text: trailActive ? 'TRAIL STOP' : 'SL HIT',
+                        color: tDir === 1 ? colSlBuy : colSlSell
+                    });
+                } else {
+                    if (hit1 && !h1) {
+                        h1 = true;
+                        lastEvent = 'T1 hit';
+                        signals.push({
+                            time: times[i],
+                            price: t1P,
+                            type: 'target_hit',
+                            text: '✔ T1',
+                            color: colTgtBuy
+                        });
+                    }
+                    if (hit2 && !h2) {
+                        h2 = true;
+                        lastEvent = 'T2 hit';
+                        signals.push({
+                            time: times[i],
+                            price: t2P,
+                            type: 'target_hit',
+                            text: '✔ T2',
+                            color: colTgtBuy
+                        });
+                    }
+                    if (hitM && !hM) {
+                        hM = true;
+                        closedNow = true;
+                        lastEvent = 'Max target hit';
+                        signals.push({
+                            time: times[i],
+                            price: tMP,
+                            type: 'target_hit',
+                            text: 'MAX TARGET',
+                            color: colTgtBuy
+                        });
+                    } else if (barsIn >= maxBars) {
+                        closedNow = true;
+                        lastEvent = 'Time stop';
+                        signals.push({
+                            time: times[i],
+                            price: closes[i],
+                            type: 'exit_time',
+                            text: 'TIME EXIT',
+                            color: colExit
+                        });
+                    }
+
+                    // Trailing Stop Ratchet
+                    if (!closedNow && trailOn && h1) {
+                        let cand = slP;
+                        if (tDir === 1) {
+                            cand = Math.max(slP, entry);
+                            if (h2) cand = Math.max(cand, t1P);
+                            cand = Math.max(cand, runExt - trailR * riskPts);
+                            cand = Math.min(cand, closes[i]);
+                            cand = Math.max(cand, slP);
+                        } else {
+                            cand = Math.min(slP, entry);
+                            if (h2) cand = Math.min(cand, t1P);
+                            cand = Math.min(cand, runExt + trailR * riskPts);
+                            cand = Math.max(cand, closes[i]);
+                            cand = Math.min(cand, slP);
+                        }
+                        if (cand !== slP) {
+                            slP = cand;
+                            trailActive = true;
+                        }
+                    }
+                }
+
+                if (trailActive) trailSeries[i] = slP;
+
+                if (closedNow) {
+                    if (tDir === 1) {
+                        lTot++;
+                        if (h1) l1++;
+                        if (h2) l2++;
+                        if (hM) lM++;
+                    } else {
+                        sTot++;
+                        if (h1) s1++;
+                        if (h2) s2++;
+                        if (hM) sM++;
+                    }
+                    tDir = 0;
+                }
+            }
+
+            // Open Trade when Flat
+            if (tDir === 0 && !closedNow && (longOK || shortOK)) {
+                tDir = longOK ? 1 : -1;
+                entry = closes[i];
+                slP = tDir === 1 ? slL : slS;
+                t1P = tDir === 1 ? t1L : t1S;
+                t2P = tDir === 1 ? t2L : t2S;
+                tMP = tDir === 1 ? tML : tMS;
+                riskPts = tDir === 1 ? riskL : riskS;
+                runExt = entry;
+                h1 = false;
+                h2 = false;
+                hM = false;
+                trailActive = false;
+                barsIn = 0;
+                lastDir = tDir;
+
+                const eType = isBreakout ? 'BREAKOUT' : 'TREND';
+                lastEvent = (tDir === 1 ? 'BUY (' : 'SELL (') + eType + ')';
+
+                signals.push({
+                    time: times[i],
+                    price: entry,
+                    type: tDir === 1 ? 'bullish_entry' : 'bearish_entry',
+                    text: (tDir === 1 ? '▲ BUY' : '▼ SELL') + ' · ' + eType,
+                    color: tDir === 1 ? colBuy : colSell,
+                    entry: entry,
+                    sl: slP,
+                    t1: t1P,
+                    t2: t2P
+                });
+            }
+        }
+
+        // Real-Time HUD Metrics
+        const lastIdx = n - 1;
+        const curBuyPct = buyPctArr[lastIdx] || 50.0;
+        const curSellPct = sellPctArr[lastIdx] || 50.0;
+        const curRank = rankArr[lastIdx] != null ? Math.round(rankArr[lastIdx]) : 50;
+        const curGrade = curRank >= 75 ? 'Strong' : curRank >= 40 ? 'Moderate' : 'Weak';
+        const curClose = closes[lastIdx];
+        const pnlNow = tDir !== 0 ? (tDir * (curClose - entry) / entry * 100.0) : 0;
+
+        const hudData = {
+            buyPct: curBuyPct,
+            sellPct: curSellPct,
+            rank: curRank,
+            grade: curGrade,
+            status: tDir === 1 ? '▲ LONG active' : tDir === -1 ? '▼ SHORT active' : '● Flat',
+            entry: tDir !== 0 ? entry : (lastDir !== 0 ? entry : null),
+            stop: tDir !== 0 ? slP : (lastDir !== 0 ? slP : null),
+            t1: tDir !== 0 ? t1P : (lastDir !== 0 ? t1P : null),
+            t2: tDir !== 0 ? t2P : (lastDir !== 0 ? t2P : null),
+            max: tDir !== 0 ? tMP : (lastDir !== 0 ? tMP : null),
+            pnlNow: tDir !== 0 ? pnlNow : null,
+            totalTrades: lastDir === 1 ? lTot : sTot,
+            t1Hits: lastDir === 1 ? l1 : s1,
+            lastEvent: lastEvent,
+            tblPosIn: tblPosIn,
+            showTable: showTable
+        };
+
+        return {
+            type: 'bss_pro_v3',
+            emaF: emaF,
+            emaS: emaS,
+            showRibbon: showRibbon,
+            colBuy: colBuy,
+            colSell: colSell,
+            colSlBuy: colSlBuy,
+            colSlSell: colSlSell,
+            colTgtBuy: colTgtBuy,
+            colTgtSell: colTgtSell,
+            trailSeries: trailSeries,
+            signals: signals,
+            hudData: hudData,
+            candles: candles
+        };
+    }
+
     // ── Universal Pine Script Runner & Transpiler ────────────────────────────────
     function computeGenericPineScript(candles, scriptCode, inputs) {
         const n = candles.length;
         if (n < 5) return null;
+
+        // Route BSS Pro v3 indicator script
+        const isBSSPro = /BSS\s*Pro/i.test(scriptCode) || /Buyer\/Seller Strength/i.test(scriptCode);
+        if (isBSSPro) {
+            return computeBSSProV3(candles, inputs);
+        }
 
         const highs = candles.map(c => c.high);
         const lows = candles.map(c => c.low);
@@ -1089,8 +1717,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         const times = candles.map(c => c.time);
 
         // Check for Supertrend indicator script (Pine v4 or v5/v6)
-        const isSupertrend = /supertrend/i.test(scriptCode) || 
-            (/\bMultiplier\b/i.test(scriptCode) && /\b(?:up1|dn1|trend)\b/i.test(scriptCode));
+        const isSupertrend = (!isBSSPro) && (/supertrend/i.test(scriptCode) || 
+            (/\bMultiplier\b/i.test(scriptCode) && /\b(?:up1|dn1|trend)\b/i.test(scriptCode)));
 
         if (isSupertrend) {
             const periods = parseInt(inputs.Periods || inputs.atr_period || inputs.period || 10) || 10;
@@ -1330,6 +1958,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             let res = null;
             if (id === 'algoalpha_breakout_channels') {
                 res = computeAlgoAlphaBreakoutChannels(station.rawCandles, state.inputs);
+            } else if (id === 'bss_pro_v3' || /BSS\s*Pro/i.test(ind.name || '') || /BSS\s*Pro/i.test(ind.code || '')) {
+                res = computeBSSProV3(station.rawCandles, ind.inputs || state.inputs, st);
             } else {
                 res = computeGenericPineScript(station.rawCandles, ind.code, ind.inputs || state.inputs);
             }
@@ -1363,6 +1993,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         for (const res of results) {
             if (res.type === 'algoalpha_breakout_channels') {
                 renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H);
+            } else if (res.type === 'bss_pro_v3') {
+                renderBSSProV3Overlay(ctx, res, timeScale, candleSeries, W, H);
             } else if (res.type === 'generic_pine') {
                 renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H);
             }
@@ -1503,6 +2135,262 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                 }
                 ctx.shadowBlur = 0;
             }
+        }
+    }
+
+    function drawRoundedRect(ctx, x, y, width, height, radius) {
+        if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(x, y, width, height, radius);
+            return;
+        }
+        const r = typeof radius === 'number' ? radius : 4;
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    function renderBSSProV3Overlay(ctx, res, timeScale, candleSeries, W, H) {
+        const { emaF, emaS, showRibbon, colBuy, colSell, trailSeries, signals, hudData, candles } = res;
+        const n = candles.length;
+
+        // 1. EMA Ribbon (21 Fast & 50 Slow) with dynamic cloud fill
+        if (showRibbon && emaF && emaS && emaF.length === n && emaS.length === n) {
+            for (let i = 1; i < n; i++) {
+                if (emaF[i - 1] == null || emaS[i - 1] == null || emaF[i] == null || emaS[i] == null) continue;
+
+                const x0 = timeScale.timeToCoordinate(candles[i - 1].time);
+                const x1 = timeScale.timeToCoordinate(candles[i].time);
+                if (x0 == null || x1 == null) continue;
+                if ((x0 < -50 && x1 < -50) || (x0 > W + 50 && x1 > W + 50)) continue;
+
+                const yF0 = candleSeries.priceToCoordinate(emaF[i - 1]);
+                const yS0 = candleSeries.priceToCoordinate(emaS[i - 1]);
+                const yF1 = candleSeries.priceToCoordinate(emaF[i]);
+                const yS1 = candleSeries.priceToCoordinate(emaS[i]);
+                if (yF0 == null || yS0 == null || yF1 == null || yS1 == null) continue;
+
+                const isBull = emaF[i] >= emaS[i];
+                ctx.fillStyle = hexToRgba(isBull ? colBuy : colSell, 0.16);
+                ctx.beginPath();
+                ctx.moveTo(x0, yF0);
+                ctx.lineTo(x1, yF1);
+                ctx.lineTo(x1, yS1);
+                ctx.lineTo(x0, yS0);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Draw Fast EMA stroke
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = colBuy;
+            ctx.beginPath();
+            let startedF = false;
+            for (let i = 0; i < n; i++) {
+                if (emaF[i] == null) continue;
+                const x = timeScale.timeToCoordinate(candles[i].time);
+                const y = candleSeries.priceToCoordinate(emaF[i]);
+                if (x == null || y == null) { startedF = false; continue; }
+                if (!startedF) { ctx.moveTo(x, y); startedF = true; }
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Draw Slow EMA stroke
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = hexToRgba(colSell, 0.85);
+            ctx.beginPath();
+            let startedS = false;
+            for (let i = 0; i < n; i++) {
+                if (emaS[i] == null) continue;
+                const x = timeScale.timeToCoordinate(candles[i].time);
+                const y = candleSeries.priceToCoordinate(emaS[i]);
+                if (x == null || y == null) { startedS = false; continue; }
+                if (!startedS) { ctx.moveTo(x, y); startedS = true; }
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // 2. Trailing Stop Step Line
+        if (trailSeries && trailSeries.length === n) {
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = res.colSlBuy || '#FF9800';
+            ctx.beginPath();
+            let startedT = false;
+            let lastY = null;
+            for (let i = 0; i < n; i++) {
+                const val = trailSeries[i];
+                if (val == null) { startedT = false; lastY = null; continue; }
+                const x = timeScale.timeToCoordinate(candles[i].time);
+                const y = candleSeries.priceToCoordinate(val);
+                if (x == null || y == null) { startedT = false; lastY = null; continue; }
+                if (!startedT) {
+                    ctx.moveTo(x, y);
+                    startedT = true;
+                } else {
+                    if (lastY != null) ctx.lineTo(x, lastY);
+                    ctx.lineTo(x, y);
+                }
+                lastY = y;
+            }
+            ctx.stroke();
+        }
+
+        // 3. Trade Entry & Target Signal Badges
+        if (signals && signals.length > 0) {
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (const sig of signals) {
+                const x = timeScale.timeToCoordinate(sig.time);
+                if (x == null || x < -20 || x > W + 20) continue;
+                const y = candleSeries.priceToCoordinate(sig.price);
+                if (y == null) continue;
+
+                const text = sig.text || '';
+                const textWidth = ctx.measureText(text).width;
+                const badgeW = Math.max(48, textWidth + 14);
+                const badgeH = 20;
+
+                if (sig.type === 'bullish_entry' || sig.type === 'bearish_entry') {
+                    const isBull = sig.type === 'bullish_entry';
+                    const badgeY = isBull ? y + 10 : y - badgeH - 10;
+                    ctx.fillStyle = sig.color || (isBull ? colBuy : colSell);
+                    ctx.shadowColor = sig.color || (isBull ? colBuy : colSell);
+                    ctx.shadowBlur = 8;
+                    drawRoundedRect(ctx, x - badgeW / 2, badgeY, badgeW, badgeH, 4);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(text, x, badgeY + badgeH / 2);
+                } else if (sig.type === 'target_hit') {
+                    const badgeY = y - badgeH - 6;
+                    ctx.fillStyle = '#00C853';
+                    ctx.shadowColor = '#00C853';
+                    ctx.shadowBlur = 6;
+                    drawRoundedRect(ctx, x - badgeW / 2, badgeY, badgeW, badgeH, 4);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(text, x, badgeY + badgeH / 2);
+                } else if (sig.type === 'exit_sl' || sig.type === 'exit_time') {
+                    const isSL = sig.type === 'exit_sl';
+                    const badgeY = y + 8;
+                    ctx.fillStyle = isSL ? '#FF9800' : '#FFD54F';
+                    drawRoundedRect(ctx, x - badgeW / 2, badgeY, badgeW, badgeH, 4);
+                    ctx.fill();
+
+                    ctx.fillStyle = isSL ? '#ffffff' : '#000000';
+                    ctx.fillText(text, x, badgeY + badgeH / 2);
+                }
+            }
+        }
+
+        // 4. BSS Pro v3 HUD Information Panel (Top Left / Right / Bottom)
+        if (hudData && hudData.showTable !== false) {
+            const h = hudData;
+            const cardW = 210;
+            const cardH = 224;
+            let startX = 16;
+            let startY = 16;
+            const pos = h.tblPosIn || 'Top left';
+            if (pos === 'Top right') {
+                startX = Math.max(16, W - cardW - 16);
+                startY = 16;
+            } else if (pos === 'Bottom left') {
+                startX = 16;
+                startY = Math.max(16, H - cardH - 16);
+            } else if (pos === 'Bottom right') {
+                startX = Math.max(16, W - cardW - 16);
+                startY = Math.max(16, H - cardH - 16);
+            }
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 10;
+            ctx.fillStyle = 'rgba(19, 23, 34, 0.94)';
+            drawRoundedRect(ctx, startX, startY, cardW, cardH, 6);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            ctx.strokeStyle = '#2A2E39';
+            ctx.lineWidth = 1;
+            drawRoundedRect(ctx, startX, startY, cardW, cardH, 6);
+            ctx.stroke();
+
+            // Card Header
+            ctx.fillStyle = '#2962FF';
+            ctx.beginPath();
+            if (ctx.roundRect) {
+                ctx.roundRect(startX, startY, cardW, 22, [6, 6, 0, 0]);
+            } else {
+                ctx.rect(startX, startY, cardW, 22);
+            }
+            ctx.fill();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('BSS PRO v3 · Buyer/Seller Strength', startX + cardW / 2, startY + 11);
+
+            let curY = startY + 31;
+            const rowH = 16;
+            function drawRow(label, value, valColor) {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+                ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(label, startX + 10, curY);
+
+                ctx.fillStyle = valColor || '#ffffff';
+                ctx.font = 'bold 10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(value, startX + cardW - 10, curY);
+                curY += rowH;
+            }
+
+            function getBar(pct, nChars) {
+                const f = Math.round((pct / 100.0) * nChars);
+                let s = '';
+                for (let i = 0; i < nChars; i++) s += (i < f ? '█' : '░');
+                return s;
+            }
+
+            drawRow('BUYERS', getBar(h.buyPct, 8) + ' ' + h.buyPct.toFixed(1) + '%', '#089981');
+            drawRow('SELLERS', getBar(h.sellPct, 8) + ' ' + h.sellPct.toFixed(1) + '%', '#F23645');
+
+            const gradeCol = h.grade === 'Strong' ? '#00E676' : (h.grade === 'Moderate' ? '#FFD54F' : '#94A3B8');
+            drawRow('STRENGTH', h.grade + ' (' + h.rank + '/100)', gradeCol);
+
+            const statCol = h.status.includes('LONG') ? '#089981' : (h.status.includes('SHORT') ? '#F23645' : '#94A3B8');
+            drawRow('TRADE', h.status, statCol);
+
+            drawRow('ENTRY', h.entry ? '₹' + h.entry.toFixed(2) : '-', '#ffffff');
+            drawRow('STOP', h.stop ? '₹' + h.stop.toFixed(2) : '-', '#FF9800');
+            drawRow('T1 (1R)', h.t1 ? '₹' + h.t1.toFixed(2) : '-', '#00C853');
+            drawRow('T2 (2R)', h.t2 ? '₹' + h.t2.toFixed(2) : '-', '#29B6F6');
+            drawRow('MAX (3R)', h.max ? '₹' + h.max.toFixed(2) : '-', '#00C853');
+
+            const pnlTxt = h.pnlNow != null ? (h.pnlNow >= 0 ? '+' : '') + h.pnlNow.toFixed(1) + '%' : '-';
+            const pnlCol = (h.pnlNow || 0) >= 0 ? '#00E676' : '#FF5252';
+            drawRow('LIVE P/L', pnlTxt, pnlCol);
+
+            drawRow('LAST EVENT', h.lastEvent || 'Flat', 'rgba(255, 255, 255, 0.7)');
+
+            ctx.restore();
         }
     }
 
@@ -2128,11 +3016,17 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
                     state.inputs = { ...state.customIndicators[id].inputs };
                 }
 
+                if (!state.stationEnabled.CE) state.stationEnabled.CE = {};
+                if (!state.stationEnabled.PE) state.stationEnabled.PE = {};
+                if (state.target === 'both' || state.target === 'CE') state.stationEnabled.CE[id] = true;
+                if (state.target === 'both' || state.target === 'PE') state.stationEnabled.PE[id] = true;
+
                 const editor = document.getElementById('tvi-code-editor');
                 if (editor) editor.value = state.currentCode;
 
                 refreshPresetDropdown();
                 renderInputsGrid();
+                refreshStationPopovers();
                 triggerRecompute();
             });
         }
@@ -2140,6 +3034,14 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
         if (targetSelect) {
             targetSelect.addEventListener('change', (e) => {
                 state.target = e.target.value;
+                const curId = state.activePresetId;
+                if (curId) {
+                    if (!state.stationEnabled.CE) state.stationEnabled.CE = {};
+                    if (!state.stationEnabled.PE) state.stationEnabled.PE = {};
+                    if (state.target === 'both' || state.target === 'CE') state.stationEnabled.CE[curId] = true;
+                    if (state.target === 'both' || state.target === 'PE') state.stationEnabled.PE[curId] = true;
+                }
+                refreshStationPopovers();
                 triggerRecompute();
             });
         }
@@ -2177,8 +3079,16 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
                         state.customIndicators[state.activePresetId].code = editor.value;
                     }
                 }
+                const curId = state.activePresetId;
+                if (curId) {
+                    if (!state.stationEnabled.CE) state.stationEnabled.CE = {};
+                    if (!state.stationEnabled.PE) state.stationEnabled.PE = {};
+                    if (state.target === 'both' || state.target === 'CE') state.stationEnabled.CE[curId] = true;
+                    if (state.target === 'both' || state.target === 'PE') state.stationEnabled.PE[curId] = true;
+                }
                 collectInputsFromUI();
                 renderInputsGrid();
+                refreshStationPopovers();
                 triggerRecompute();
                 showToast('✓ Compiled and rendered successfully');
             });
@@ -2248,6 +3158,9 @@ plotshape(sellSig, "SELL", shape.labeldown, location.abovebar, red, text="SELL")
         },
         computeIndicatorsForStation,
         renderStationIndicators,
+        computeBSSProV3,
+        computeAlgoAlphaBreakoutChannels,
+        PineTA,
         refreshStationPopovers,
         recompute: triggerRecompute,
         getState: () => state,

@@ -3,6 +3,7 @@ from trading_engine.execution.contract_engine import ContractTradingEngine
 
 def test_tc_math_001_exact_charges_calculation_winning_trade(clean_engine):
     """TC-MATH-001: Statutory Indian option charge breakdown on winning NIFTY trade."""
+    init_cap = clean_engine.capital
     clean_engine.place_order(
         symbol="NIFTY26OCT22700CE",
         side="BUY",
@@ -19,7 +20,7 @@ def test_tc_math_001_exact_charges_calculation_winning_trade(clean_engine):
     assert rec["pts_gained"] == round(150.0 - 100.05, 2)
     assert rec["charges"] > 40.0  # Brokerage (40) + STT + GST/SEBI
     assert rec["net_pnl"] == round(rec["gross_pnl"] - rec["charges"], 2)
-    assert clean_engine.capital == round(100000.0 + rec["net_pnl"], 2)
+    assert clean_engine.capital == round(init_cap + rec["net_pnl"], 2)
 
 def test_tc_math_002_exact_charges_losing_trade(clean_engine):
     """TC-MATH-002: Losing trade increases total loss by exact charges amount."""
