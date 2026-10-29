@@ -119,10 +119,10 @@
             }
 
             // Maintain clean, universal 'Key Vault' label with informative tooltip
-            const btnTexts = document.querySelectorAll(".vault-btn-text, #vault-btn-text");
-            btnTexts.forEach(el => {
-                el.textContent = "Key Vault";
-            });
+            const vaultBtnText = document.getElementById("vault-btn-text");
+            if (vaultBtnText) {
+                vaultBtnText.textContent = "Key Vault";
+            }
             const btnOpen = document.getElementById("btn-open-vault");
             if (btnOpen) {
                 const brokerLabel = active === "breeze" ? "ICICI Direct Breeze" : "Zerodha Kite";

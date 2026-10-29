@@ -965,11 +965,25 @@ function selectContract(contract) {
         ocPanel.classList.add('collapsed');
     }
 
-    // Extract strike number
-    const match = symbol.match(/(\d{4,6})(CE|PE)/i) || (contract.display_name && contract.display_name.match(/(\d{4,6})/));
+    // Extract strike number accurately without confusing day digits with strike
     let strike = MasterState.currentStrike;
-    if (match) {
-        strike = Number(match[1]);
+    if (contract.strike !== undefined && contract.strike !== null && !isNaN(Number(contract.strike))) {
+        strike = Number(contract.strike);
+    } else {
+        const clean = symbol.trim().toUpperCase();
+        const mWeekly = clean.match(/^[A-Z]+\d{2}[1-9OND]\d{2}(\d+)(CE|PE)$/);
+        const mMonthly = clean.match(/^[A-Z]+\d{2}[A-Z]{3}(\d+)(CE|PE)$/);
+        const mDisp = contract.display_name ? contract.display_name.match(/\b(\d{4,6})\b/) : null;
+        if (mWeekly) {
+            strike = Number(mWeekly[1]);
+        } else if (mMonthly) {
+            strike = Number(mMonthly[1]);
+        } else if (mDisp) {
+            strike = Number(mDisp[1]);
+        } else {
+            const m5 = clean.match(/(\d{4,5})(CE|PE)$/);
+            if (m5) strike = Number(m5[1]);
+        }
     }
 
     loadStrikePair(strike, MasterState.selectedExpiry, MasterState.selectedSessionDate);
@@ -1052,7 +1066,7 @@ async function loadContractCandles(symbol, optDate) {
             } catch (err) {
                 quoteErrorCount++;
             }
-        }, 5000);
+        }, 30000);
 
     } catch (e) {
         console.error('loadContractCandles error:', e);
@@ -4486,26 +4500,14 @@ function startReplay() {
     let baseCandles = ceCandles.length >= peCandles.length ? ceCandles : peCandles;
 
     if (!baseCandles || baseCandles.length < 5) {
-        // Automatically seed simulation candles if broker/DB data is not yet loaded
-        const nowSec = Math.floor(Date.now() / 1000) - 30 * 60;
-        baseCandles = [];
-        let p = 120.0;
-        for (let i = 0; i < 30; i++) {
-            const o = p;
-            const h = Math.round((o + 2.0) * 20) / 20;
-            const l = Math.round((o - 1.5) * 20) / 20;
-            const c = Math.round(((h + l) / 2) * 20) / 20;
-            baseCandles.push({ time: nowSec + i * 60, open: o, high: h, low: l, close: c, volume: 1000 });
-            p = c;
+        if (typeof showTopNotification === 'function') {
+            showTopNotification('Cannot start Replay: No authentic trade candles loaded for this contract.', 'warning');
+        } else if (typeof showToast === 'function') {
+            showToast('Cannot start Replay: No authentic trade candles loaded for this contract.', 'warning');
+        } else {
+            console.warn('Cannot start Replay: No authentic trade candles loaded for this contract.');
         }
-        if (Stations.CE) {
-            Stations.CE.rawCandles = [...baseCandles];
-            if (Stations.CE.candleSeries) Stations.CE.candleSeries.setData(Stations.CE.rawCandles);
-        }
-        if (Stations.PE) {
-            Stations.PE.rawCandles = [...baseCandles];
-            if (Stations.PE.candleSeries) Stations.PE.candleSeries.setData(Stations.PE.rawCandles);
-        }
+        return;
     }
 
     Replay.active = true;
@@ -4515,11 +4517,13 @@ function startReplay() {
     if (Stations.CE) {
         if (Stations.CE.rawCandles) Stations.CE.fullCandlesStore = [...Stations.CE.rawCandles];
         Stations.CE.manualTrades = [];
+        Stations.CE.allManualTradesArchive = [];
         Stations.CE.activePosition = null;
     }
     if (Stations.PE) {
         if (Stations.PE.rawCandles) Stations.PE.fullCandlesStore = [...Stations.PE.rawCandles];
         Stations.PE.manualTrades = [];
+        Stations.PE.allManualTradesArchive = [];
         Stations.PE.activePosition = null;
     }
 
@@ -4602,6 +4606,7 @@ function exitReplay() {
         if (station) {
             station.activePosition = null;
             station.manualTrades = [];
+            station.allManualTradesArchive = [];
             updateStationPosHud(station);
             updateStationFooter(station);
         }
@@ -4811,6 +4816,7 @@ function renderReplayStep() {
         const sliced = src.filter(c => Number(c.time) <= targetTime);
         if (sliced.length === 0) return;
         station.rawCandles = sliced;
+        syncStationReplayTradesToTime(station, targetTime);
 
         if (station.candleSeries) {
             const agg = aggregateCandles(sliced, MasterState.currentTf);
@@ -4845,6 +4851,40 @@ function renderReplayStep() {
             const markers = [];
             if (de && de.markers) markers.push(...de.markers);
             else if (smf && smf.smfMarkers) markers.push(...smf.smfMarkers);
+
+            if (station.manualTrades && station.manualTrades.length > 0) {
+                station.manualTrades.forEach(tr => {
+                    if (tr.entryTimestamp && tr.entryTimestamp <= targetTime) {
+                        markers.push({
+                            time: tr.entryTimestamp,
+                            position: 'belowBar',
+                            color: '#10b981',
+                            shape: 'arrowUp',
+                            text: `BUY @ ₹${tr.entryPrice}`
+                        });
+                    }
+                    if (tr.exitTimestamp && tr.exitTimestamp <= targetTime) {
+                        markers.push({
+                            time: tr.exitTimestamp,
+                            position: 'aboveBar',
+                            color: tr.isWin ? '#34d399' : '#f87171',
+                            shape: 'arrowDown',
+                            text: `${tr.exitReason} @ ₹${tr.exitPrice}`
+                        });
+                    }
+                });
+            }
+            if (station.activePosition && station.activePosition.entryTimestamp && station.activePosition.entryTimestamp <= targetTime) {
+                const ep = Number(station.activePosition.entry_price || station.activePosition.entryPrice || 0);
+                markers.push({
+                    time: station.activePosition.entryTimestamp,
+                    position: 'belowBar',
+                    color: '#06b6d4',
+                    shape: 'arrowUp',
+                    text: `BUY @ ₹${ep.toFixed(1)}`
+                });
+            }
+            markers.sort((a, b) => Number(a.time) - Number(b.time));
             station.candleSeries.setMarkers(markers);
 
             updateStationTopBar(station, agg);
@@ -5115,31 +5155,94 @@ function closeManualReplayPosition(exitPx, reason = 'MANUAL_EXIT') {
 function recordStationManualTrade(station, pos, exitPx, reason, candle) {
     if (!station || !pos) return;
     if (!station.manualTrades) station.manualTrades = [];
+    if (!station.allManualTradesArchive) station.allManualTradesArchive = [];
     const entryPx = pos.entry_price || pos.entryPrice || 0;
     const pts = Math.round((exitPx - entryPx) * 100) / 100;
     const units = pos.units || (station.tradingLots * station.lotUnits) || 65;
     const grossRs = pts * units;
     const charges = 55;
     const netCash = grossRs - charges;
+    const exitTs = candle ? Number(candle.time) : Math.floor(Date.now() / 1000);
+    const entryTs = Number(pos.entryTimestamp || pos.entryTime || exitTs);
     const exitTimeStr = candle ? formatReplayTime(candle.time) : '--';
     const entryTimeStr = pos.entryTime ? (typeof pos.entryTime === 'number' ? formatReplayTime(pos.entryTime) : pos.entryTime) : '--';
 
-    station.manualTrades.push({
-        tradeNum: station.manualTrades.length + 1,
-        symbol: station.symbol,
-        contractType: station.type,
-        side: 'BUY',
-        entryTime: entryTimeStr,
-        entryPrice: entryPx,
-        exitTime: exitTimeStr,
-        exitPrice: exitPx,
-        exitReason: reason,
-        pnlPts: pts,
-        grossRs: grossRs,
-        charges: charges,
-        netCash: netCash,
-        isWin: pts >= 0
-    });
+    // Find if this trade already exists in archive as isOpen
+    let tradeRecord = station.allManualTradesArchive.find(tr => tr.isOpen && tr.entryTimestamp === entryTs);
+    if (tradeRecord) {
+        tradeRecord.isOpen = false;
+        tradeRecord.exitTime = exitTimeStr;
+        tradeRecord.exitTimestamp = exitTs;
+        tradeRecord.exitPrice = exitPx;
+        tradeRecord.exitReason = reason;
+        tradeRecord.pnlPts = pts;
+        tradeRecord.grossRs = grossRs;
+        tradeRecord.charges = charges;
+        tradeRecord.netCash = netCash;
+        tradeRecord.isWin = pts >= 0;
+    } else {
+        tradeRecord = {
+            tradeNum: station.allManualTradesArchive.length + 1,
+            symbol: station.symbol,
+            contractType: station.type,
+            side: 'BUY',
+            entryTime: entryTimeStr,
+            entryTimestamp: entryTs,
+            entryPrice: entryPx,
+            exitTime: exitTimeStr,
+            exitTimestamp: exitTs,
+            exitPrice: exitPx,
+            exitReason: reason,
+            pnlPts: pts,
+            grossRs: grossRs,
+            charges: charges,
+            netCash: netCash,
+            isWin: pts >= 0,
+            isOpen: false,
+            originalPos: { ...pos }
+        };
+        station.allManualTradesArchive.push(tradeRecord);
+    }
+
+    if (!station.manualTrades.includes(tradeRecord)) {
+        station.manualTrades.push(tradeRecord);
+    }
+}
+
+function syncStationReplayTradesToTime(station, targetTime) {
+    if (!station || !Replay || !Replay.active) return;
+    targetTime = Number(targetTime);
+    if (!station.allManualTradesArchive) station.allManualTradesArchive = [];
+
+    station.activePosition = null;
+    const activeTrades = [];
+    let restoredPos = null;
+
+    for (const tr of station.allManualTradesArchive) {
+        const entryTs = Number(tr.entryTimestamp || 0);
+        const exitTs = tr.exitTimestamp ? Number(tr.exitTimestamp) : null;
+
+        if (entryTs > targetTime) {
+            // Entered in future relative to current slider position: revert/ignore
+            continue;
+        }
+
+        if (tr.isOpen || (exitTs !== null && exitTs > targetTime)) {
+            // Entered in past/now, but NOT YET closed at this targetTime:
+            // Restore as active open position!
+            if (tr.originalPos) {
+                restoredPos = { ...tr.originalPos };
+            }
+        } else if (exitTs !== null && exitTs <= targetTime) {
+            // Completed before or at targetTime
+            activeTrades.push(tr);
+        }
+    }
+
+    station.activePosition = restoredPos;
+    station.manualTrades = activeTrades;
+    updateStationPosHud(station);
+    updateStationFooter(station);
 }
 
 function setBacktestFilter(filter) {
@@ -5520,7 +5623,10 @@ function updateStationPosHud(station, state) {
     // Strictly resolve position belonging to this station ONLY (never cross-contaminate CE/PE)
     const tradeState = state || MasterState.tradingState || C.tradingState;
     let pos = null;
-    if (tradeState && tradeState.active_positions && station.symbol && tradeState.active_positions[station.symbol]) {
+    if (Replay && Replay.active) {
+        // In Replay mode, strictly isolate to replay practice position
+        pos = station.activePosition || null;
+    } else if (tradeState && tradeState.active_positions && station.symbol && tradeState.active_positions[station.symbol]) {
         pos = tradeState.active_positions[station.symbol];
     } else if (tradeState && tradeState.active_position && station.symbol && tradeState.active_position.symbol === station.symbol) {
         pos = tradeState.active_position;
@@ -5564,6 +5670,8 @@ function updateStationPosHud(station, state) {
             }
         }
     } else {
+        if (toolbar) toolbar.classList.remove('has-pos');
+        if (sExitBtn) sExitBtn.classList.add('hidden');
         if (sPosHud) sPosHud.classList.add('hidden');
     }
 
@@ -6782,6 +6890,9 @@ function bindStationControls(station) {
                     return;
                 }
 
+                const entryTs = curCandle ? Number(curCandle.time) : Math.floor(Date.now() / 1000);
+                station.allManualTradesArchive = (station.allManualTradesArchive || []).filter(tr => Number(tr.entryTimestamp) < entryTs);
+
                 const smf = station.smfResult;
                 const curAtr = (smf && smf.atr && smf.atr.length > 0) ? smf.atr[smf.atr.length - 1] : 3.0;
                 const sl = Math.round((curPx - curAtr * 1.5) * 20) / 20;
@@ -6794,6 +6905,7 @@ function bindStationControls(station) {
                     entry_price: curPx,
                     entryPrice: curPx,
                     entryTime: curCandle.time,
+                    entryTimestamp: entryTs,
                     lots: station.tradingLots,
                     units: units,
                     sl: sl,
@@ -6804,7 +6916,30 @@ function bindStationControls(station) {
                     isReplayManual: true
                 };
 
+                // Store open trade in archive for bidirectional timeline scrubbing
+                station.allManualTradesArchive.push({
+                    tradeNum: station.allManualTradesArchive.length + 1,
+                    symbol: station.symbol,
+                    contractType: station.type,
+                    side: 'BUY',
+                    entryTime: curCandle ? (typeof curCandle.time === 'number' ? formatReplayTime(curCandle.time) : curCandle.time) : '--',
+                    entryTimestamp: entryTs,
+                    entryPrice: curPx,
+                    exitTime: null,
+                    exitTimestamp: null,
+                    exitPrice: null,
+                    exitReason: null,
+                    pnlPts: 0,
+                    grossRs: 0,
+                    charges: 0,
+                    netCash: 0,
+                    isWin: false,
+                    isOpen: true,
+                    originalPos: { ...station.activePosition }
+                });
+
                 updateStationPosHud(station);
+                renderReplayStep();
                 flashExecutionAlert(`🟢 ${station.type} MANUAL BUY FILLED`, `Bought ${units} qty @ ₹${curPx.toFixed(1)} (SL ₹${sl} | T1 ₹${t1})`, 'success');
                 return;
             }
@@ -6847,7 +6982,7 @@ function bindStationControls(station) {
             if (!station.symbol) return;
             const curPx = station.rawCandles.length > 0 ? station.rawCandles[station.rawCandles.length - 1].close : 0;
 
-            // Handle Replay Mode locally
+            // Handle Replay Mode locally (never route to live server)
             if (Replay && Replay.active) {
                 if (station.activePosition) {
                     const pos = station.activePosition;
@@ -6858,9 +6993,13 @@ function bindStationControls(station) {
                     station.activePosition = null;
                     updateStationPosHud(station);
                     updateStationFooter(station);
+                    renderReplayStep();
                     flashExecutionAlert(`🏁 ${station.type} MANUAL EXIT`, `Closed @ ₹${curPx.toFixed(1)} (${netCash >= 0 ? '+' : ''}₹${Math.round(netCash).toLocaleString('en-IN')})`, 'success');
-                    return;
+                } else {
+                    updateStationPosHud(station);
+                    flashExecutionAlert(`ℹ️ REPLAY`, 'No active position to exit at this bar.', 'info');
                 }
+                return;
             }
 
             try {
@@ -7128,10 +7267,42 @@ async function loadStrikePair(strike, optExpiry, optDate) {
     }
 
     if (!ceContract || !ceContract.symbol) {
-        ceContract = { symbol: `${MasterState.underlying}24OCT${strike}CE`, display_name: `${MasterState.underlying} ${strike} CE`, expiry };
+        let symCE = `${MasterState.underlying}${strike}CE`;
+        let dispCE = `${MasterState.underlying} ${strike} CE`;
+        if (expiry) {
+            try {
+                const d = new Date(expiry);
+                if (!isNaN(d.getTime())) {
+                    const yr = String(d.getFullYear()).slice(-2);
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const monthMap = ['1','2','3','4','5','6','7','8','9','O','N','D'];
+                    const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                    const mCode = monthMap[d.getMonth()];
+                    symCE = `${MasterState.underlying}${yr}${mCode}${day}${strike}CE`;
+                    dispCE = `${MasterState.underlying} ${day} ${monthNames[d.getMonth()]} ${strike} CE`;
+                }
+            } catch (e) {}
+        }
+        ceContract = { symbol: symCE, display_name: dispCE, expiry };
     }
     if (!peContract || !peContract.symbol) {
-        peContract = { symbol: `${MasterState.underlying}24OCT${strike}PE`, display_name: `${MasterState.underlying} ${strike} PE`, expiry };
+        let symPE = `${MasterState.underlying}${strike}PE`;
+        let dispPE = `${MasterState.underlying} ${strike} PE`;
+        if (expiry) {
+            try {
+                const d = new Date(expiry);
+                if (!isNaN(d.getTime())) {
+                    const yr = String(d.getFullYear()).slice(-2);
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const monthMap = ['1','2','3','4','5','6','7','8','9','O','N','D'];
+                    const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+                    const mCode = monthMap[d.getMonth()];
+                    symPE = `${MasterState.underlying}${yr}${mCode}${day}${strike}PE`;
+                    dispPE = `${MasterState.underlying} ${day} ${monthNames[d.getMonth()]} ${strike} PE`;
+                }
+            } catch (e) {}
+        }
+        peContract = { symbol: symPE, display_name: dispPE, expiry };
     }
 
     Stations.CE.symbol = ceContract.symbol;

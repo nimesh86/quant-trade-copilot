@@ -78,6 +78,8 @@ get_all_subscribed_symbols = _cdm.get_all_subscribed_symbols
 get_contract_clients       = _cdm.get_contract_clients
 get_all_live_prices        = _cdm.get_all_live_prices
 get_contract_quote         = _cdm.get_contract_quote
+resolve_spot_price         = _cdm.resolve_spot_price
+update_live_index_spot     = _cdm.update_live_index_spot
 
 try:
     import trading_engine.web.trend_event_manager as _tem
@@ -2098,8 +2100,8 @@ async def contract_option_chain(
     expiry: Optional[str] = Query(None)
 ):
     und_upper = underlying.strip().upper()
-    spot = state.current_spot if und_upper == "NIFTY" and state.current_spot > 0 else None
-    data = get_option_chain_data(underlying=und_upper, expiry=expiry, spot_price=spot)
+    spot = resolve_spot_price(und_upper, expiry=expiry)
+    data = await asyncio.to_thread(get_option_chain_data, underlying=und_upper, expiry=expiry, spot_price=spot)
     return data
 
 
@@ -2879,8 +2881,9 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
         ts = tick.get("timestamp") or tick.get("datetime") or datetime.now().isoformat()
 
         # Update current spot for active indices
-        if symbol in ("NIFTY", "NIFTY 50", "SENSEX", "BANKNIFTY"):
+        if symbol in ("NIFTY", "NIFTY 50", "SENSEX", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "BSE:SENSEX", "BSESEN"):
             state.current_spot = ltp
+            update_live_index_spot(symbol, ltp)
 
         # 1. Update in-memory price bus
         push_to_price_bus(symbol, ltp, ts)
