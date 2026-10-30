@@ -1243,25 +1243,54 @@ def fetch_contract_candles(
     if not explicit_date_requested and not active_date and db_engine is not None:
         try:
             from sqlalchemy import text
+            is_pg = getattr(db_engine.dialect, "name", "") == "postgresql"
             with db_engine.connect() as conn:
-                q_max = text("""
-                    SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                    FROM minute_candles
-                    WHERE symbol = :sym
-                      AND timestamp >= NOW() - INTERVAL '30 days';
-                """)
-                max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
-                if not max_d:
-                    q_max2 = text("""
-                        SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                        FROM option_minute_candles
-                        WHERE symbol = :sym
-                          AND timestamp >= NOW() - INTERVAL '30 days';
-                    """)
-                    max_d = conn.execute(q_max2, {"sym": trading_symbol}).scalar()
-                if max_d:
-                    active_date = str(max_d)
-                    is_last_day = True
+                for tbl in ["minute_candles", "option_minute_candles"]:
+                    try:
+                        if is_pg:
+                            q_max = text(f"""
+                                SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
+                                FROM {tbl}
+                                WHERE symbol = :sym
+                                  AND timestamp >= NOW() - INTERVAL '30 days';
+                            """)
+                        else:
+                            q_max = text(f"SELECT max(date(timestamp)) FROM {tbl} WHERE symbol = :sym;")
+                        max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
+                        if max_d:
+                            active_date = str(max_d)
+                            is_last_day = True
+                            break
+                    except Exception:
+                        pass
+
+                # If still no date found, check tick_data for latest date
+                if not active_date:
+                    try:
+                        sym_aliases = [trading_symbol]
+                        if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
+                            sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
+                        elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
+                            sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
+                        elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
+                            sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
+                        ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
+                        p_map = {f"s{i}": s for i, s in enumerate(sym_aliases)}
+                        if is_pg:
+                            q_max_t = text(f"""
+                                SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
+                                FROM tick_data
+                                WHERE symbol IN ({ph})
+                                  AND timestamp >= NOW() - INTERVAL '30 days';
+                            """)
+                        else:
+                            q_max_t = text(f"SELECT max(date(timestamp)) FROM tick_data WHERE symbol IN ({ph});")
+                        max_d = conn.execute(q_max_t, p_map).scalar()
+                        if max_d:
+                            active_date = str(max_d)
+                            is_last_day = True
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"ContractDataManager: error finding latest date for {trading_symbol}: {e}", flush=True)
 
@@ -1290,6 +1319,69 @@ def fetch_contract_candles(
                     if not df.empty:
                         candles = _df_to_candle_list(df)
                         break
+
+                # 2b. Fallback to tick_data aggregation if minute_candles / option_minute_candles has 0 candles
+                if not candles:
+                    sym_aliases = [trading_symbol]
+                    if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
+                        sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
+                    elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
+                        sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
+                    elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
+                        sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
+
+                    tick_start = f"{active_date} 09:15:00+05:30"
+                    tick_end = f"{active_date} 15:30:00+05:30"
+                    ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
+                    params = {f"s{i}": s for i, s in enumerate(sym_aliases)}
+                    params["start_ts"] = tick_start
+                    params["end_ts"] = tick_end
+
+                    is_pg = getattr(db_engine.dialect, "name", "") == "postgresql"
+                    if is_pg:
+                        sql_tick = text(f"""
+                            SELECT 
+                                date_trunc('minute', timestamp) AS timestamp,
+                                (array_agg(price ORDER BY timestamp ASC))[1] AS open,
+                                MAX(price) AS high,
+                                MIN(price) AS low,
+                                (array_agg(price ORDER BY timestamp DESC))[1] AS close,
+                                CASE 
+                                    WHEN MAX(volume) > MIN(volume) THEN MAX(volume) - MIN(volume)
+                                    ELSE COUNT(*)
+                                END AS volume
+                            FROM tick_data
+                            WHERE symbol IN ({ph})
+                              AND timestamp >= :start_ts
+                              AND timestamp <= :end_ts
+                            GROUP BY date_trunc('minute', timestamp)
+                            ORDER BY timestamp ASC
+                        """)
+                        df_tick = pd.read_sql(sql_tick, conn, params=params)
+                    else:
+                        sql_tick = text(f"""
+                            SELECT timestamp, price, volume
+                            FROM tick_data
+                            WHERE symbol IN ({ph})
+                              AND timestamp >= :start_ts
+                              AND timestamp <= :end_ts
+                            ORDER BY timestamp ASC
+                        """)
+                        df_raw = pd.read_sql(sql_tick, conn, params=params)
+                        if not df_raw.empty:
+                            df_raw["ts_dt"] = pd.to_datetime(df_raw["timestamp"])
+                            resampled = df_raw.set_index("ts_dt").resample("1min").agg({
+                                "price": ["first", "max", "min", "last"],
+                                "volume": lambda x: int(x.max() - x.min()) if (len(x) > 0 and x.max() > x.min()) else len(x)
+                            }).dropna()
+                            resampled.columns = ["open", "high", "low", "close", "volume"]
+                            resampled["timestamp"] = resampled.index
+                            df_tick = resampled.reset_index(drop=True)[["timestamp", "open", "high", "low", "close", "volume"]]
+                        else:
+                            df_tick = pd.DataFrame()
+
+                    if not df_tick.empty:
+                        candles = _df_to_candle_list(df_tick)
         except Exception as e:
             print(f"ContractDataManager: DB candle fetch error for {trading_symbol}: {e}", flush=True)
 
@@ -1310,20 +1402,38 @@ def fetch_contract_candles(
         try:
             from sqlalchemy import text
             import pandas as pd
+            is_pg = getattr(db_engine.dialect, "name", "") == "postgresql"
             with db_engine.connect() as conn:
-                q_max = text("""
-                    SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                    FROM minute_candles WHERE symbol = :sym
-                """)
-                max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
-                if not max_d:
-                    q_max2 = text("""
-                        SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date)
-                        FROM option_minute_candles WHERE symbol = :sym
-                    """)
-                    max_d = conn.execute(q_max2, {"sym": trading_symbol}).scalar()
-                if max_d:
-                    fallback_date = str(max_d)
+                fallback_date = None
+                for tbl in ["minute_candles", "option_minute_candles"]:
+                    if is_pg:
+                        q_max = text(f"SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date) FROM {tbl} WHERE symbol = :sym")
+                    else:
+                        q_max = text(f"SELECT max(date(timestamp)) FROM {tbl} WHERE symbol = :sym")
+                    max_d = conn.execute(q_max, {"sym": trading_symbol}).scalar()
+                    if max_d:
+                        fallback_date = str(max_d)
+                        break
+
+                if not fallback_date:
+                    sym_aliases = [trading_symbol]
+                    if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
+                        sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
+                    elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
+                        sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
+                    elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
+                        sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
+                    ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
+                    p_map = {f"s{i}": s for i, s in enumerate(sym_aliases)}
+                    if is_pg:
+                        q_max_t = text(f"SELECT max((timestamp AT TIME ZONE 'Asia/Kolkata')::date) FROM tick_data WHERE symbol IN ({ph})")
+                    else:
+                        q_max_t = text(f"SELECT max(date(timestamp)) FROM tick_data WHERE symbol IN ({ph})")
+                    max_d = conn.execute(q_max_t, p_map).scalar()
+                    if max_d:
+                        fallback_date = str(max_d)
+
+                if fallback_date:
                     for tbl in ["minute_candles", "option_minute_candles"]:
                         sql = text(f"""
                             SELECT timestamp, open, high, low, close, volume
@@ -1338,6 +1448,66 @@ def fetch_contract_candles(
                             active_date = fallback_date
                             is_last_day = True
                             break
+
+                    if not candles:
+                        # Fallback to tick_data for fallback_date
+                        sym_aliases = [trading_symbol]
+                        if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
+                            sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
+                        elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
+                            sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
+                        elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
+                            sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
+                        ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
+                        params = {f"s{i}": s for i, s in enumerate(sym_aliases)}
+                        params["start_ts"] = f"{fallback_date} 09:15:00+05:30"
+                        params["end_ts"] = f"{fallback_date} 15:30:00+05:30"
+                        if is_pg:
+                            sql_tick = text(f"""
+                                SELECT 
+                                    date_trunc('minute', timestamp) AS timestamp,
+                                    (array_agg(price ORDER BY timestamp ASC))[1] AS open,
+                                    MAX(price) AS high,
+                                    MIN(price) AS low,
+                                    (array_agg(price ORDER BY timestamp DESC))[1] AS close,
+                                    CASE 
+                                        WHEN MAX(volume) > MIN(volume) THEN MAX(volume) - MIN(volume)
+                                        ELSE COUNT(*)
+                                    END AS volume
+                                FROM tick_data
+                                WHERE symbol IN ({ph})
+                                  AND timestamp >= :start_ts
+                                  AND timestamp <= :end_ts
+                                GROUP BY date_trunc('minute', timestamp)
+                                ORDER BY timestamp ASC
+                            """)
+                            df_tick = pd.read_sql(sql_tick, conn, params=params)
+                        else:
+                            sql_tick = text(f"""
+                                SELECT timestamp, price, volume
+                                FROM tick_data
+                                WHERE symbol IN ({ph})
+                                  AND timestamp >= :start_ts
+                                  AND timestamp <= :end_ts
+                                ORDER BY timestamp ASC
+                            """)
+                            df_raw = pd.read_sql(sql_tick, conn, params=params)
+                            if not df_raw.empty:
+                                df_raw["ts_dt"] = pd.to_datetime(df_raw["timestamp"])
+                                resampled = df_raw.set_index("ts_dt").resample("1min").agg({
+                                    "price": ["first", "max", "min", "last"],
+                                    "volume": lambda x: int(x.max() - x.min()) if (len(x) > 0 and x.max() > x.min()) else len(x)
+                                }).dropna()
+                                resampled.columns = ["open", "high", "low", "close", "volume"]
+                                resampled["timestamp"] = resampled.index
+                                df_tick = resampled.reset_index(drop=True)[["timestamp", "open", "high", "low", "close", "volume"]]
+                            else:
+                                df_tick = pd.DataFrame()
+
+                        if not df_tick.empty:
+                            candles = _df_to_candle_list(df_tick)
+                            active_date = fallback_date
+                            is_last_day = True
         except Exception as e:
             print(f"ContractDataManager: fallback fetch error for {trading_symbol}: {e}", flush=True)
 

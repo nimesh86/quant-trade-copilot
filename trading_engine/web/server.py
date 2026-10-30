@@ -1289,13 +1289,31 @@ async def get_simulation_dates():
         return {"dates": dates_copy[:30], "today": today_str}
 
     try:
-        q = text("""
-            SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS trade_date
-            FROM minute_candles
-            WHERE symbol = 'NIFTY-I'
-            ORDER BY trade_date DESC
-            LIMIT 30
-        """)
+        is_pg = getattr(state.db_engine.dialect, "name", "") == "postgresql"
+        if is_pg:
+            q = text("""
+                SELECT trade_date FROM (
+                    SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS trade_date
+                    FROM minute_candles
+                    WHERE symbol IN ('NIFTY-I', 'NIFTY', 'NIFTY 50')
+                    UNION
+                    SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date AS trade_date
+                    FROM tick_data
+                    WHERE timestamp >= NOW() - INTERVAL '30 days'
+                ) combined_dates
+                ORDER BY trade_date DESC
+                LIMIT 30
+            """)
+        else:
+            q = text("""
+                SELECT trade_date FROM (
+                    SELECT DISTINCT date(timestamp) AS trade_date FROM minute_candles
+                    UNION
+                    SELECT DISTINCT date(timestamp) AS trade_date FROM tick_data
+                ) combined_dates
+                ORDER BY trade_date DESC
+                LIMIT 30
+            """)
         with state.db_engine.connect() as conn:
             rows = conn.execute(q).fetchall()
         dates = [str(r[0]) for r in rows if r[0]]
