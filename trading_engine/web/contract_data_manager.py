@@ -1726,9 +1726,10 @@ def fetch_today_candles(trading_symbol: str, db_engine=None) -> List[Dict]:
 
 
 def _fetch_from_breeze(trading_symbol: str, target_date: Optional[str] = None) -> List[Dict]:
-    """Fetch 1-minute candles from ICICI Direct Breeze historical API."""
     try:
         from trading_engine.adapters.breeze_adapter import default_breeze_adapter
+        if not default_breeze_adapter.is_connected:
+            default_breeze_adapter.connect()
         if not default_breeze_adapter.is_connected:
             return []
         req_date = str(target_date).strip() if (target_date and len(str(target_date).strip()) == 10) else _get_ist_now().strftime("%Y-%m-%d")
@@ -1828,6 +1829,7 @@ def _fetch_from_kite(trading_symbol: str, db_engine=None, target_date: Optional[
 def _df_to_candle_list(df) -> List[Dict]:
     """Convert a pandas DataFrame with timestamp, open, high, low, close, volume to candle list."""
     candles = []
+    seen_times = set()
     try:
         from zoneinfo import ZoneInfo
         tz_ist = ZoneInfo("Asia/Kolkata")
@@ -1846,6 +1848,11 @@ def _df_to_candle_list(df) -> List[Dict]:
         else:
             unix_ts = int(ts)
             time_str = str(ts)
+
+        if time_str in seen_times:
+            continue
+        seen_times.add(time_str)
+
         candles.append({
             "time": time_str,
             "timestamp": unix_ts,
