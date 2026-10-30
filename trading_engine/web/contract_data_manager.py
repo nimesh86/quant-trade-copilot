@@ -1447,17 +1447,55 @@ def fetch_contract_candles(
         except Exception as e:
             print(f"ContractDataManager: DB candle fetch error for {trading_symbol}: {e}", flush=True)
 
-    # 3. If DB has no candles and active_date is today on a weekday, try active broker (Kite or Breeze)
-    if not candles and active_date == today_str and not is_weekend:
+    # 3. If DB has no candles or insufficient candles (< 250 bars in a 375-bar trading session),
+    # query active broker (Breeze or Kite) for the complete authentic session
+    if not candles or len(candles) < 250:
         broker = get_active_broker()
+        broker_candles = []
         if broker == "breeze":
-            candles = _fetch_from_breeze(trading_symbol)
-            if not candles:
-                candles = _fetch_from_kite(trading_symbol, db_engine)
+            broker_candles = _fetch_from_breeze(trading_symbol, target_date=active_date)
+            if not broker_candles:
+                broker_candles = _fetch_from_kite(trading_symbol, db_engine, target_date=active_date)
         else:
-            candles = _fetch_from_kite(trading_symbol, db_engine)
-            if not candles:
-                candles = _fetch_from_breeze(trading_symbol)
+            broker_candles = _fetch_from_kite(trading_symbol, db_engine, target_date=active_date)
+            if not broker_candles:
+                broker_candles = _fetch_from_breeze(trading_symbol, target_date=active_date)
+
+        if broker_candles and len(broker_candles) > len(candles):
+            candles = broker_candles
+            # Backfill to minute_candles so subsequent queries are sub-millisecond fast
+            if db_engine is not None and candles and active_date:
+                try:
+                    from sqlalchemy import text
+                    start_del = f"{active_date} 00:00:00+05:30"
+                    end_del = f"{active_date} 23:59:59+05:30"
+                    records = []
+                    for c in candles:
+                        c_ts = datetime.fromtimestamp(c["timestamp"]).strftime("%Y-%m-%d %H:%M:%S+05:30")
+                        records.append({
+                            "ts": c_ts,
+                            "sym": trading_symbol,
+                            "o": float(c["open"]),
+                            "h": float(c["high"]),
+                            "l": float(c["low"]),
+                            "c": float(c["close"]),
+                            "v": int(c["volume"])
+                        })
+                    with db_engine.begin() as conn:
+                        conn.execute(
+                            text("DELETE FROM minute_candles WHERE symbol = :sym AND timestamp >= :s_ts AND timestamp <= :e_ts"),
+                            {"sym": trading_symbol, "s_ts": start_del, "e_ts": end_del}
+                        )
+                        conn.execute(
+                            text("""
+                                INSERT INTO minute_candles (timestamp, symbol, open, high, low, close, volume)
+                                VALUES (:ts, :sym, :o, :h, :l, :c, :v)
+                            """),
+                            records
+                        )
+                    print(f"ContractDataManager: Backfilled {len(records)} candles to minute_candles for {trading_symbol} on {active_date}", flush=True)
+                except Exception as b_err:
+                    print(f"ContractDataManager: Backfill error (non-fatal): {b_err}", flush=True)
 
     # 4. Fallback if today still has 0 candles (e.g. pre-market or weekend)
     if not candles and not explicit_date_requested and db_engine is not None:
@@ -1687,18 +1725,18 @@ def fetch_today_candles(trading_symbol: str, db_engine=None) -> List[Dict]:
     return res.get("candles", [])
 
 
-def _fetch_from_breeze(trading_symbol: str) -> List[Dict]:
-    """Fetch today's 1-minute candles from ICICI Direct Breeze historical API."""
+def _fetch_from_breeze(trading_symbol: str, target_date: Optional[str] = None) -> List[Dict]:
+    """Fetch 1-minute candles from ICICI Direct Breeze historical API."""
     try:
         from trading_engine.adapters.breeze_adapter import default_breeze_adapter
         if not default_breeze_adapter.is_connected:
             return []
-        today_str = _get_ist_now().strftime("%Y-%m-%d")
-        print(f"ContractDataManager: Fetching Breeze historical for {trading_symbol} on {today_str}", flush=True)
+        req_date = str(target_date).strip() if (target_date and len(str(target_date).strip()) == 10) else _get_ist_now().strftime("%Y-%m-%d")
+        print(f"ContractDataManager: Fetching Breeze historical for {trading_symbol} on {req_date}", flush=True)
         raw_candles = default_breeze_adapter.get_historical_candles(
             symbol=trading_symbol,
-            from_date=today_str,
-            to_date=today_str,
+            from_date=req_date,
+            to_date=req_date,
             interval="1minute"
         )
         if not raw_candles:
@@ -1723,8 +1761,8 @@ def _fetch_from_breeze(trading_symbol: str) -> List[Dict]:
         return []
 
 
-def _fetch_from_kite(trading_symbol: str, db_engine=None) -> List[Dict]:
-    """Fetch today's 1-minute candles from Kite Connect historical API."""
+def _fetch_from_kite(trading_symbol: str, db_engine=None, target_date: Optional[str] = None) -> List[Dict]:
+    """Fetch 1-minute candles from Kite Connect historical API."""
     try:
         kite = _get_kite()
         if not kite:
@@ -1735,16 +1773,19 @@ def _fetch_from_kite(trading_symbol: str, db_engine=None) -> List[Dict]:
             print(f"ContractDataManager: No token found for {trading_symbol}", flush=True)
             return []
         
-        today = _get_ist_now().date()
-        try:
-            from zoneinfo import ZoneInfo
-            ist = ZoneInfo("Asia/Kolkata")
-        except Exception:
-            import pytz
-            ist = pytz.timezone("Asia/Kolkata")
-        
-        from_dt = datetime(today.year, today.month, today.day, 9, 15, 0)
-        to_dt = datetime.now()
+        if target_date and len(str(target_date).strip()) == 10:
+            try:
+                dt_req = datetime.strptime(str(target_date).strip(), "%Y-%m-%d").date()
+                from_dt = datetime(dt_req.year, dt_req.month, dt_req.day, 9, 15, 0)
+                to_dt = datetime(dt_req.year, dt_req.month, dt_req.day, 15, 30, 0)
+            except Exception:
+                today = _get_ist_now().date()
+                from_dt = datetime(today.year, today.month, today.day, 9, 15, 0)
+                to_dt = datetime.now()
+        else:
+            today = _get_ist_now().date()
+            from_dt = datetime(today.year, today.month, today.day, 9, 15, 0)
+            to_dt = datetime.now()
         
         print(f"ContractDataManager: Fetching Kite historical for {trading_symbol} (token={token}) from {from_dt} to {to_dt}", flush=True)
         

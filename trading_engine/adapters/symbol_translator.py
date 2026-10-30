@@ -200,9 +200,39 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "exchange_code": exchange_code
         }
 
+    # Pattern 4b: Human-readable Option with spaces (e.g. "NIFTY 03 NOV 22950 CE" or "NIFTY 29 OCT 22750 PE")
+    m_human = re.match(r"^([A-Z]+)\s+(\d{1,2})\s*([A-Z]{3})\s*(\d+)\s*(CE|PE)$", clean_sym)
+    if m_human:
+        underlying = m_human.group(1)
+        day_num = int(m_human.group(2))
+        month_str = m_human.group(3)
+        strike = float(m_human.group(4))
+        opt_type = m_human.group(5)
+        month_num = MONTH_MAP.get(month_str, 1)
+        year_full = datetime.now().year
+        try:
+            exp_date = datetime(year_full, month_num, min(day_num, 31))
+        except Exception:
+            exp_date = datetime(year_full, month_num, 28)
+
+        right = "Call" if opt_type == "CE" else "Put"
+        breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "options")
+        return {
+            "canonical_symbol": clean_sym,
+            "underlying": underlying,
+            "breeze_stock_code": breeze_code,
+            "strike_price": int(strike) if strike.is_integer() else strike,
+            "option_type": opt_type,
+            "right": right,
+            "expiry_date": exp_date,
+            "product_type": "options",
+            "exchange_code": exchange_code
+        }
+
     # Pattern 5: Spot Index (e.g. NIFTY 50, NIFTY, BANKNIFTY, SENSEX)
     for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSESEN", "BSX", "FINNIFTY", "MIDCPNIFTY"):
-        if clean_sym == spot_name or clean_sym.startswith(spot_name):
+        if clean_sym == spot_name or (clean_sym.startswith(spot_name) and not ("CE" in clean_sym or "PE" in clean_sym or "FUT" in clean_sym)):
             und = "SENSEX" if ("SENSEX" in spot_name or "BSESEN" in spot_name or "BSX" in spot_name) else (
                 "BANKNIFTY" if "BANK" in spot_name else (
                     "FINNIFTY" if "FIN" in spot_name else (

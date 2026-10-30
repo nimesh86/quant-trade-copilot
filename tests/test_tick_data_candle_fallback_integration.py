@@ -224,3 +224,46 @@ def test_integration_06_option_pattern_matching_cross_format(client, test_db_eng
         assert data["candles"][0]["open"] == 134.35
     finally:
         state.db_engine = original_engine
+
+
+def test_integration_07_partial_candles_broker_fallback_triggers(client, test_db_engine, monkeypatch):
+    """
+    IT-07: When a contract has only partial candles in local DB (e.g. < 250 bars from afternoon ticks),
+    fetch_contract_candles must invoke broker fallback with target_date and load the complete
+    full-day 376-bar session.
+    """
+    from unittest.mock import MagicMock
+    import trading_engine.web.contract_data_manager as cdm
+
+    # Mock full 376 candles returned from Breeze broker
+    mock_breeze_candles = [
+        {
+            "time": f"2026-10-29 09:{i:02d}",
+            "timestamp": 1793245500 + i * 60,
+            "open": 100.0 + i,
+            "high": 105.0 + i,
+            "low": 98.0 + i,
+            "close": 102.0 + i,
+            "volume": 1000 + i * 10
+        }
+        for i in range(376)
+    ]
+    monkeypatch.setattr(cdm, "get_active_broker", lambda: "breeze")
+    monkeypatch.setattr(cdm, "_fetch_from_breeze", lambda sym, target_date=None: mock_breeze_candles)
+
+    original_engine = state.db_engine
+    try:
+        state.db_engine = test_db_engine
+        # NIFTY26N0322950CE has 0 candles in test DB -> broker fallback gives 376
+        res = cdm.fetch_contract_candles("NIFTY26N0322950CE", target_date="2026-10-29", db_engine=test_db_engine)
+        assert res["count"] == 376
+        assert len(res["candles"]) == 376
+        assert res["candles"][0]["time"] == "2026-10-29 09:00"
+
+        # Even if 1 candle already existed (partial data < 250), broker fallback must replace with full 376 bars
+        res_partial = cdm.fetch_contract_candles("NIFTY26N0322750CE", target_date="2026-10-29", db_engine=test_db_engine)
+        assert res_partial["count"] == 376
+        assert len(res_partial["candles"]) == 376
+    finally:
+        state.db_engine = original_engine
+
