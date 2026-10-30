@@ -188,3 +188,39 @@ def test_integration_04_simulation_dates_includes_tick_data(client, test_db_engi
         state.db_engine = original_engine
         server_module._cached_sim_dates.clear()
         server_module._last_dates_fetch_ts = 0.0
+
+
+def test_integration_05_api_candles_dashboard_endpoint(client, test_db_engine):
+    """
+    IT-05: Main dashboard endpoint GET /api/candles?date=2026-10-29 must return
+    populated candles when selected from the dashboard date dropdown.
+    """
+    original_engine = state.db_engine
+    try:
+        state.db_engine = test_db_engine
+        response = client.get("/api/candles?date=2026-10-29")
+        assert response.status_code == 200
+        data = response.json()
+        assert "candles" in data
+        assert len(data["candles"]) > 0, f"Expected candles in /api/candles for 2026-10-29, got {data}"
+        assert data["candles"][0]["open"] == 22690.0
+    finally:
+        state.db_engine = original_engine
+
+
+def test_integration_06_option_pattern_matching_cross_format(client, test_db_engine):
+    """
+    IT-06: When UI requests NIFTY26OCT22750CE on 2026-10-29, it must match
+    the active strike recorded as NIFTY26N0322750CE.
+    """
+    original_engine = state.db_engine
+    try:
+        state.db_engine = test_db_engine
+        # Query using monthly format symbol NIFTY26OCT22750CE
+        response = client.get("/api/contracts/candles?symbol=NIFTY26OCT22750CE&date=2026-10-29")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] > 0
+        assert data["candles"][0]["open"] == 134.35
+    finally:
+        state.db_engine = original_engine

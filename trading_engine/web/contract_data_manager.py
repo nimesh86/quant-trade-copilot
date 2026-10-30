@@ -1303,36 +1303,66 @@ def fetch_contract_candles(
         try:
             from sqlalchemy import text
             import pandas as pd
+            import re
             start_ts = f"{active_date} 00:00:00+05:30"
             end_ts = f"{active_date} 23:59:59+05:30"
+
+            # Parse underlying and strike if option contract
+            opt_pattern = None
+            m_opt = re.search(r'([A-Za-z]+).*?(\d{4,6})\s*(CE|PE)', trading_symbol, re.IGNORECASE)
+            if m_opt:
+                u_pfx = m_opt.group(1).upper()
+                if u_pfx in ("NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY", "MIDCPNIFTY"):
+                    opt_pattern = f"{u_pfx}%{m_opt.group(2)}{m_opt.group(3).upper()}"
+
+            sym_aliases = [trading_symbol]
+            if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
+                sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
+            elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
+                sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
+            elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
+                sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
+
             with db_engine.connect() as conn:
+                ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
+                p_map = {f"s{i}": s for i, s in enumerate(sym_aliases)}
+                p_map["start_ts"] = start_ts
+                p_map["end_ts"] = end_ts
+
                 for tbl in ["minute_candles", "option_minute_candles"]:
                     sql = text(f"""
                         SELECT timestamp, open, high, low, close, volume
                         FROM {tbl}
-                        WHERE symbol = :sym
+                        WHERE symbol IN ({ph})
                           AND timestamp >= :start_ts
                           AND timestamp <= :end_ts
                         ORDER BY timestamp ASC
                     """)
-                    df = pd.read_sql(sql, conn, params={"sym": trading_symbol, "start_ts": start_ts, "end_ts": end_ts})
+                    df = pd.read_sql(sql, conn, params=p_map)
                     if not df.empty:
                         candles = _df_to_candle_list(df)
                         break
 
+                # 2a. If no exact match, check by option pattern (e.g. NIFTY26OCT22750CE -> NIFTY26N0322750CE)
+                if not candles and opt_pattern:
+                    for tbl in ["minute_candles", "option_minute_candles"]:
+                        sql_pat = text(f"""
+                            SELECT timestamp, open, high, low, close, volume
+                            FROM {tbl}
+                            WHERE symbol LIKE :pat
+                              AND timestamp >= :start_ts
+                              AND timestamp <= :end_ts
+                            ORDER BY timestamp ASC
+                        """)
+                        df_pat = pd.read_sql(sql_pat, conn, params={"pat": opt_pattern, "start_ts": start_ts, "end_ts": end_ts})
+                        if not df_pat.empty:
+                            candles = _df_to_candle_list(df_pat)
+                            break
+
                 # 2b. Fallback to tick_data aggregation if minute_candles / option_minute_candles has 0 candles
                 if not candles:
-                    sym_aliases = [trading_symbol]
-                    if trading_symbol in ("NIFTY", "NIFTY-I", "NIFTY 50", "NIFTY50"):
-                        sym_aliases = ["NIFTY", "NIFTY 50", "NIFTY-I"]
-                    elif trading_symbol in ("BANKNIFTY", "BANKNIFTY-I", "NIFTY BANK"):
-                        sym_aliases = ["BANKNIFTY", "NIFTY BANK", "BANKNIFTY-I"]
-                    elif trading_symbol in ("SENSEX", "SENSEX-I", "BSE SENSEX"):
-                        sym_aliases = ["SENSEX", "BSE SENSEX", "SENSEX-I"]
-
                     tick_start = f"{active_date} 09:15:00+05:30"
                     tick_end = f"{active_date} 15:30:00+05:30"
-                    ph = ", ".join([f":s{i}" for i in range(len(sym_aliases))])
                     params = {f"s{i}": s for i, s in enumerate(sym_aliases)}
                     params["start_ts"] = tick_start
                     params["end_ts"] = tick_end
@@ -1358,6 +1388,27 @@ def fetch_contract_candles(
                             ORDER BY timestamp ASC
                         """)
                         df_tick = pd.read_sql(sql_tick, conn, params=params)
+
+                        if df_tick.empty and opt_pattern:
+                            sql_tick_pat = text("""
+                                SELECT 
+                                    date_trunc('minute', timestamp) AS timestamp,
+                                    (array_agg(price ORDER BY timestamp ASC))[1] AS open,
+                                    MAX(price) AS high,
+                                    MIN(price) AS low,
+                                    (array_agg(price ORDER BY timestamp DESC))[1] AS close,
+                                    CASE 
+                                        WHEN MAX(volume) > MIN(volume) THEN MAX(volume) - MIN(volume)
+                                        ELSE COUNT(*)
+                                    END AS volume
+                                FROM tick_data
+                                WHERE symbol LIKE :pat
+                                  AND timestamp >= :start_ts
+                                  AND timestamp <= :end_ts
+                                GROUP BY date_trunc('minute', timestamp)
+                                ORDER BY timestamp ASC
+                            """)
+                            df_tick = pd.read_sql(sql_tick_pat, conn, params={"pat": opt_pattern, "start_ts": tick_start, "end_ts": tick_end})
                     else:
                         sql_tick = text(f"""
                             SELECT timestamp, price, volume
@@ -1368,6 +1419,17 @@ def fetch_contract_candles(
                             ORDER BY timestamp ASC
                         """)
                         df_raw = pd.read_sql(sql_tick, conn, params=params)
+                        if df_raw.empty and opt_pattern:
+                            sql_tick_pat = text("""
+                                SELECT timestamp, price, volume
+                                FROM tick_data
+                                WHERE symbol LIKE :pat
+                                  AND timestamp >= :start_ts
+                                  AND timestamp <= :end_ts
+                                ORDER BY timestamp ASC
+                            """)
+                            df_raw = pd.read_sql(sql_tick_pat, conn, params={"pat": opt_pattern, "start_ts": tick_start, "end_ts": tick_end})
+
                         if not df_raw.empty:
                             df_raw["ts_dt"] = pd.to_datetime(df_raw["timestamp"])
                             resampled = df_raw.set_index("ts_dt").resample("1min").agg({

@@ -755,72 +755,122 @@ async def get_candles(limit: int = Query(375, ge=10, le=1000), date: Optional[st
         is_weekday = now_ist.weekday() < 5
         resolved_date = target_date or today_str
 
+        def _fetch_nifty_candles_for_session(target_d: str):
+            sym_list = ['NIFTY-I', 'NIFTY', 'NIFTY 50']
+            is_pg = getattr(state.db_engine.dialect, "name", "") == "postgresql"
+            with state.db_engine.connect() as conn:
+                for s in sym_list:
+                    if is_pg:
+                        q_s = text("""
+                            SELECT timestamp, open, high, low, close, volume 
+                            FROM minute_candles 
+                            WHERE symbol = :sym
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                            ORDER BY timestamp ASC
+                        """)
+                    else:
+                        q_s = text("""
+                            SELECT timestamp, open, high, low, close, volume 
+                            FROM minute_candles 
+                            WHERE symbol = :sym
+                              AND date(timestamp) = :d
+                            ORDER BY timestamp ASC
+                        """)
+                    res_df = pd.read_sql(q_s, conn, params={"sym": s, "d": target_d})
+                    if not res_df.empty:
+                        return res_df
+
+                # Fallback to tick_data
+                try:
+                    if is_pg:
+                        q_t = text("""
+                            SELECT 
+                                date_trunc('minute', timestamp) AS timestamp,
+                                (array_agg(price ORDER BY timestamp ASC))[1] AS open,
+                                MAX(price) AS high,
+                                MIN(price) AS low,
+                                (array_agg(price ORDER BY timestamp DESC))[1] AS close,
+                                CASE WHEN MAX(volume) > MIN(volume) THEN MAX(volume) - MIN(volume) ELSE COUNT(*) END AS volume
+                            FROM tick_data
+                            WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::time >= '09:15:00'
+                              AND (timestamp AT TIME ZONE 'Asia/Kolkata')::time <= '15:30:00'
+                            GROUP BY date_trunc('minute', timestamp)
+                            ORDER BY timestamp ASC
+                        """)
+                        res_df = pd.read_sql(q_t, conn, params={"d": target_d})
+                    else:
+                        q_t = text("""
+                            SELECT timestamp, price, volume
+                            FROM tick_data
+                            WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                              AND date(timestamp) = :d
+                            ORDER BY timestamp ASC
+                        """)
+                        raw_df = pd.read_sql(q_t, conn, params={"d": target_d})
+                        if not raw_df.empty:
+                            raw_df["ts_dt"] = pd.to_datetime(raw_df["timestamp"])
+                            res = raw_df.set_index("ts_dt").resample("1min").agg({
+                                "price": ["first", "max", "min", "last"],
+                                "volume": lambda x: int(x.max() - x.min()) if (len(x) > 0 and x.max() > x.min()) else len(x)
+                            }).dropna()
+                            res.columns = ["open", "high", "low", "close", "volume"]
+                            res["timestamp"] = res.index
+                            res_df = res.reset_index(drop=True)[["timestamp", "open", "high", "low", "close", "volume"]]
+                        else:
+                            res_df = pd.DataFrame()
+                    if not res_df.empty:
+                        return res_df
+                except Exception as e:
+                    print(f"Error fetching tick_data fallback in get_candles: {e}", flush=True)
+
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
         if target_date:
-            # Explicit Session Date Requested - query that exact date without prepending prior sessions
             resolved_date = target_date
             if target_date == today_str and is_pre_market_today():
                 df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
             else:
-                q_target = text("""
-                    SELECT timestamp, open, high, low, close, volume 
-                    FROM minute_candles 
-                    WHERE symbol = 'NIFTY-I'
-                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :target_date
-                    ORDER BY timestamp ASC
-                """)
-                with state.db_engine.connect() as conn:
-                    df = pd.read_sql(q_target, conn, params={"target_date": target_date})
+                df = _fetch_nifty_candles_for_session(target_date)
         else:
-            # Active Day (Today) or Default Session
             if is_weekday and is_pre_market_today():
                 resolved_date = today_str
                 df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
-            elif is_market_open_now():
-                resolved_date = today_str
-                # Query today's candles only (do not prepend yesterday's tail)
-                q_today = text("""
-                    SELECT timestamp, open, high, low, close, volume 
-                    FROM minute_candles 
-                    WHERE symbol = 'NIFTY-I'
-                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today_date
-                    ORDER BY timestamp ASC
-                """)
-                with state.db_engine.connect() as conn:
-                    df = pd.read_sql(q_today, conn, params={"today_date": today_str})
             else:
-                # Outside market hours on weekday evening or weekend
-                q_today = text("""
-                    SELECT timestamp, open, high, low, close, volume 
-                    FROM minute_candles 
-                    WHERE symbol = 'NIFTY-I'
-                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :today_date
-                    ORDER BY timestamp ASC
-                """)
-                with state.db_engine.connect() as conn:
-                    df = pd.read_sql(q_today, conn, params={"today_date": today_str})
-
+                resolved_date = today_str
+                df = _fetch_nifty_candles_for_session(today_str)
                 if df.empty:
-                    # Fallback to latest available trading day in DB
-                    q_latest = text("""
-                        SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date as d
-                        FROM minute_candles
-                        WHERE symbol = 'NIFTY-I'
-                        ORDER BY d DESC
-                        LIMIT 1
-                    """)
-                    with state.db_engine.connect() as conn:
-                        latest_row = conn.execute(q_latest).fetchone()
-                        resolved_date = str(latest_row[0]) if latest_row else today_str
-
-                    q_session = text("""
-                        SELECT timestamp, open, high, low, close, volume 
-                        FROM minute_candles 
-                        WHERE symbol = 'NIFTY-I'
-                          AND (timestamp AT TIME ZONE 'Asia/Kolkata')::date = :d
-                        ORDER BY timestamp ASC
-                    """)
-                    with state.db_engine.connect() as conn:
-                        df = pd.read_sql(q_session, conn, params={"d": resolved_date})
+                    try:
+                        is_pg = getattr(state.db_engine.dialect, "name", "") == "postgresql"
+                        with state.db_engine.connect() as conn:
+                            if is_pg:
+                                q_latest = text("""
+                                    SELECT d FROM (
+                                        SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date as d
+                                        FROM minute_candles
+                                        WHERE symbol IN ('NIFTY-I', 'NIFTY', 'NIFTY 50')
+                                        UNION
+                                        SELECT DISTINCT (timestamp AT TIME ZONE 'Asia/Kolkata')::date as d
+                                        FROM tick_data
+                                        WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                                    ) combined
+                                    ORDER BY d DESC LIMIT 1
+                                """)
+                            else:
+                                q_latest = text("""
+                                    SELECT d FROM (
+                                        SELECT DISTINCT date(timestamp) as d FROM minute_candles WHERE symbol IN ('NIFTY-I', 'NIFTY', 'NIFTY 50')
+                                        UNION
+                                        SELECT DISTINCT date(timestamp) as d FROM tick_data WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                                    ) combined ORDER BY d DESC LIMIT 1
+                                """)
+                            latest_row = conn.execute(q_latest).fetchone()
+                            if latest_row and latest_row[0]:
+                                resolved_date = str(latest_row[0])
+                                df = _fetch_nifty_candles_for_session(resolved_date)
+                    except Exception as e:
+                        print(f"Error finding latest fallback date in get_candles: {e}", flush=True)
 
         candles = []
         if not df.empty and "timestamp" in df.columns:
@@ -1247,19 +1297,73 @@ def load_sim_candles_from_db(sim_date: str) -> pd.DataFrame:
     """Indexed fast query for 1-minute candles on a given date (runs in ~0.3s)."""
     start_ts = f"{sim_date} 00:00:00+05:30"
     end_ts = f"{sim_date} 23:59:59+05:30"
-    q = text("""
-        SELECT timestamp, open, high, low, close, volume 
-        FROM minute_candles 
-        WHERE symbol = 'NIFTY-I' 
-          AND timestamp >= :start_ts 
-          AND timestamp <= :end_ts
-        ORDER BY timestamp ASC
-    """)
-    with state.db_engine.connect() as conn:
-        df = pd.read_sql(q, conn, params={"start_ts": start_ts, "end_ts": end_ts})
-    if not df.empty:
-        df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_convert("Asia/Kolkata")
-    return df
+    for s in ['NIFTY-I', 'NIFTY', 'NIFTY 50']:
+        q = text("""
+            SELECT timestamp, open, high, low, close, volume 
+            FROM minute_candles 
+            WHERE symbol = :sym 
+              AND timestamp >= :start_ts 
+              AND timestamp <= :end_ts
+            ORDER BY timestamp ASC
+        """)
+        with state.db_engine.connect() as conn:
+            df = pd.read_sql(q, conn, params={"sym": s, "start_ts": start_ts, "end_ts": end_ts})
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_convert("Asia/Kolkata")
+            return df
+
+    # Fallback to tick_data
+    try:
+        is_pg = getattr(state.db_engine.dialect, "name", "") == "postgresql"
+        with state.db_engine.connect() as conn:
+            if is_pg:
+                q_t = text("""
+                    SELECT 
+                        date_trunc('minute', timestamp) AS timestamp,
+                        (array_agg(price ORDER BY timestamp ASC))[1] AS open,
+                        MAX(price) AS high,
+                        MIN(price) AS low,
+                        (array_agg(price ORDER BY timestamp DESC))[1] AS close,
+                        CASE WHEN MAX(volume) > MIN(volume) THEN MAX(volume) - MIN(volume) ELSE COUNT(*) END AS volume
+                    FROM tick_data
+                    WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                      AND timestamp >= :start_ts
+                      AND timestamp <= :end_ts
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::time >= '09:15:00'
+                      AND (timestamp AT TIME ZONE 'Asia/Kolkata')::time <= '15:30:00'
+                    GROUP BY date_trunc('minute', timestamp)
+                    ORDER BY timestamp ASC
+                """)
+                df = pd.read_sql(q_t, conn, params={"start_ts": start_ts, "end_ts": end_ts})
+            else:
+                q_t = text("""
+                    SELECT timestamp, price, volume
+                    FROM tick_data
+                    WHERE symbol IN ('NIFTY', 'NIFTY 50', 'NIFTY-I')
+                      AND timestamp >= :start_ts
+                      AND timestamp <= :end_ts
+                    ORDER BY timestamp ASC
+                """)
+                raw_df = pd.read_sql(q_t, conn, params={"start_ts": start_ts, "end_ts": end_ts})
+                if not raw_df.empty:
+                    raw_df["ts_dt"] = pd.to_datetime(raw_df["timestamp"])
+                    res = raw_df.set_index("ts_dt").resample("1min").agg({
+                        "price": ["first", "max", "min", "last"],
+                        "volume": lambda x: int(x.max() - x.min()) if (len(x) > 0 and x.max() > x.min()) else len(x)
+                    }).dropna()
+                    res.columns = ["open", "high", "low", "close", "volume"]
+                    res["timestamp"] = res.index
+                    df = res.reset_index(drop=True)[["timestamp", "open", "high", "low", "close", "volume"]]
+                else:
+                    df = pd.DataFrame()
+
+            if not df.empty:
+                df["timestamp"] = pd.to_datetime(df["timestamp"]).dt.tz_convert("Asia/Kolkata")
+                return df
+    except Exception as e:
+        print(f"Error loading sim candles from tick_data: {e}", flush=True)
+
+    return pd.DataFrame()
 
 
 _cached_sim_dates: List[str] = []
