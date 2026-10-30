@@ -1196,6 +1196,14 @@ def fetch_contract_candles(
             if cached_entry:
                 cached_ts, cached_list = cached_entry
                 is_valid = (not is_market_open()) or (time.time() - cached_ts < 60.0)
+                # Session cache is only valid during market hours if it contains the morning open (09:15)
+                if is_valid and len(cached_list) > 0 and is_market_open():
+                    market_min_now = now_ist.hour * 60 + now_ist.minute
+                    if market_min_now >= (9 * 60 + 17):
+                        first_time = cached_list[0].get("time", "")
+                        if not ("09:15" in first_time or "09:16" in first_time):
+                            is_valid = False
+
                 if is_valid and len(cached_list) > 0:
                     return {
                         "symbol": trading_symbol,
@@ -1216,12 +1224,15 @@ def fetch_contract_candles(
 
     if explicit_date_requested:
         active_date = target_date
+    elif not is_weekend and (is_market_open() or str(target_date).lower() == "today"):
+        # During live market hours on a weekday, the active session is strictly today!
+        active_date = today_str
     else:
         active_date = None
     is_last_day = False
 
-    # If target_date is not an explicit past date and it's a weekday, check if today has candles in DB with chunk pruning
-    if not explicit_date_requested and not is_weekend and db_engine is not None:
+    # If target_date is not yet determined (e.g. pre-market or closed), check if today has candles in DB with chunk pruning
+    if not active_date and not is_weekend and db_engine is not None:
         try:
             from sqlalchemy import text
             with db_engine.connect() as conn:
@@ -1470,8 +1481,12 @@ def fetch_contract_candles(
                     start_del = f"{active_date} 00:00:00+05:30"
                     end_del = f"{active_date} 23:59:59+05:30"
                     records = []
+                    seen_rec_ts = set()
                     for c in candles:
                         c_ts = datetime.fromtimestamp(c["timestamp"]).strftime("%Y-%m-%d %H:%M:%S+05:30")
+                        if c_ts in seen_rec_ts:
+                            continue
+                        seen_rec_ts.add(c_ts)
                         records.append({
                             "ts": c_ts,
                             "sym": trading_symbol,
@@ -1497,8 +1512,27 @@ def fetch_contract_candles(
                 except Exception as b_err:
                     print(f"ContractDataManager: Backfill error (non-fatal): {b_err}", flush=True)
 
-    # 4. Fallback if today still has 0 candles (e.g. pre-market or weekend)
-    if not candles and not explicit_date_requested and db_engine is not None:
+    # Append current forming minute candle if running during live market hours
+    if active_date == today_str and is_market_open():
+        with _lock:
+            fc = _forming_candles.get(trading_symbol)
+            if fc and (not candles or fc["time"] > candles[-1]["timestamp"]):
+                candles.append({
+                    "time": datetime.fromtimestamp(fc["time"]).strftime("%Y-%m-%d %H:%M"),
+                    "timestamp": fc["time"],
+                    "open": float(fc["open"]),
+                    "high": float(fc["high"]),
+                    "low": float(fc["low"]),
+                    "close": float(fc["close"]),
+                    "volume": int(fc.get("volume", 0)),
+                })
+
+    if candles and active_date == today_str:
+        with _lock:
+            _session_candles[trading_symbol] = (time.time(), list(candles))
+
+    # 4. Fallback only if market is closed (pre-market or weekend) and today has 0 candles
+    if not candles and not explicit_date_requested and not is_market_open() and db_engine is not None:
         try:
             from sqlalchemy import text
             import pandas as pd
@@ -1937,8 +1971,6 @@ def update_forming_candle(symbol: str, price: float) -> Optional[Dict]:
                     if not s_candles or s_candles[-1].get("timestamp") != prev_completed["timestamp"]:
                         s_candles.append(prev_completed)
                         _session_candles[symbol] = (time.time(), s_candles)
-                else:
-                    _session_candles[symbol] = (time.time(), [prev_completed])
 
             _forming_candles[symbol] = {
                 "time": now_min_ts,
