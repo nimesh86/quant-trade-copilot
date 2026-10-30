@@ -1725,11 +1725,21 @@ def _fetch_from_kite(trading_symbol: str, db_engine=None) -> List[Dict]:
 def _df_to_candle_list(df) -> List[Dict]:
     """Convert a pandas DataFrame with timestamp, open, high, low, close, volume to candle list."""
     candles = []
+    try:
+        from zoneinfo import ZoneInfo
+        tz_ist = ZoneInfo("Asia/Kolkata")
+    except Exception:
+        from datetime import timezone, timedelta
+        tz_ist = timezone(timedelta(hours=5, minutes=30))
+
     for _, row in df.iterrows():
         ts = row["timestamp"]
         if hasattr(ts, "timestamp"):
             unix_ts = int(ts.timestamp())
-            time_str = ts.strftime("%Y-%m-%d %H:%M")
+            if hasattr(ts, "tzinfo") and ts.tzinfo is not None:
+                time_str = ts.astimezone(tz_ist).strftime("%Y-%m-%d %H:%M")
+            else:
+                time_str = ts.strftime("%Y-%m-%d %H:%M")
         else:
             unix_ts = int(ts)
             time_str = str(ts)
