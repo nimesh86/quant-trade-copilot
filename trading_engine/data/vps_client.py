@@ -11,7 +11,10 @@ import logging
 from typing import Dict, Any, List, Optional, Callable, Union
 from urllib.parse import urlencode
 
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import pandas as pd
 
 from trading_engine.data.duckdb_store import LocalDataStore
