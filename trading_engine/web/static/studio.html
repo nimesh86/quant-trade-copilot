@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#070b14" />
+    <title>Indicator Studio & Replay Debugger — AI Quant Engine</title>
+    <meta name="description" content="Professional split-screen Indicator IDE, Zero-latency RAM compiler, TradingView Lightweight Chart overlay, and Replay Debugger." />
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/studio.css?v=20261031_02" />
+</head>
+<body class="studio-dark">
+<div id="studio-shell">
+
+    <!-- ── 1. Top Master Header Bar ──────────────────────────────────────── -->
+    <header id="studio-header">
+        <div class="hdr-left">
+            <a href="/contract" class="nav-back-btn" title="Back to Contract Stations">← Stations</a>
+            <div class="studio-brand">
+                <span class="brand-bolt">⚡</span>
+                <span class="brand-title">INDICATOR <span class="brand-accent">STUDIO</span></span>
+                <span class="brand-badge">IDE v2.0</span>
+            </div>
+            <div class="symbol-select-wrap">
+                <select id="select-underlying" title="Select Underlying Symbol">
+                    <option value="NIFTY" selected>NIFTY 50</option>
+                    <option value="BANKNIFTY">BANK NIFTY</option>
+                    <option value="FINNIFTY">FINNIFTY</option>
+                    <option value="SENSEX">SENSEX</option>
+                </select>
+            </div>
+            <div class="strike-select-wrap">
+                <select id="select-strike" title="Select Option Strike">
+                    <option value="24100">24,100 Strike (ITM)</option>
+                    <option value="24150">24,150 Strike (ITM)</option>
+                    <option value="24200" selected>24,200 Strike (ATM)</option>
+                    <option value="24250">24,250 Strike (OTM)</option>
+                    <option value="24300">24,300 Strike (OTM)</option>
+                </select>
+            </div>
+            <div class="tf-btn-group">
+                <button class="tf-btn active" data-tf="1m">1m</button>
+                <button class="tf-btn" data-tf="5m">5m</button>
+            </div>
+
+            <!-- Date & Historical Range Selector -->
+            <div class="date-range-group" title="Select Historical Session Date">
+                <span class="cal-icon">📅</span>
+                <select id="select-replay-date" class="studio-select-sm" style="min-width:145px;font-weight:600;">
+                    <option value="2026-10-30" selected>30 Oct 2026 (Latest)</option>
+                    <option value="2026-10-29">29 Oct 2026</option>
+                    <option value="2026-10-28">28 Oct 2026</option>
+                    <option value="2026-10-27">27 Oct 2026</option>
+                    <option value="2026-10-24">24 Oct 2026 (Expiry)</option>
+                </select>
+                <span id="session-time-badge" class="session-badge">09:15 - 15:30</span>
+            </div>
+        </div>
+
+        <div class="hdr-right">
+            <div class="telemetry-pill" title="Backend Calculation Latency in RAM">
+                <span class="dot live-pulse"></span>
+                <span class="telemetry-label">RAM LATENCY:</span>
+                <span id="stat-latency" class="telemetry-val">0.4 µs</span>
+            </div>
+            <button id="btn-mount-live" class="btn-accent" title="Compile and Mount to Live Price Bus">⚡ Mount Live</button>
+        </div>
+    </header>
+
+    <!-- ── 2. Top Panel: Canvas Chart (TradingView Lightweight Charts) ─────── -->
+    <section id="panel-chart" class="panel-top">
+        <div class="chart-toolbar">
+            <div class="chart-tabs">
+                <button class="chart-tab active" data-chart="spot" id="tab-spot">🔘 Index Spot</button>
+                <button class="chart-tab" data-chart="ce" id="tab-ce">⚪ 24200 CE</button>
+                <button class="chart-tab" data-chart="pe" id="tab-pe">⚪ 24200 PE</button>
+            </div>
+            <div id="chart-legend" class="chart-legend">
+                <span id="legend-symbol" class="legend-sym">NIFTY 50</span>
+                <span id="legend-ohlc" class="legend-ohlc">O: 24,198.50 H: 24,215.00 L: 24,192.10 C: 24,210.40</span>
+                <span id="legend-plots" class="legend-plots">Fast EMA: 24,205.20 | S/R Res: 24,220.00</span>
+            </div>
+            <div class="chart-actions">
+                <button id="btn-fit-chart" class="icon-btn" title="Fit Chart Content (Auto Scale)">⛶ Fit Scale</button>
+            </div>
+        </div>
+        <div id="chart-container" class="chart-viewport"></div>
+    </section>
+
+    <!-- ── 3. Draggable Splitter Gutter ────────────────────────────────────── -->
+    <div id="split-gutter" title="Drag to resize panels (Double click to reset 50/50)">
+        <div class="gutter-handle"></div>
+    </div>
+
+    <!-- ── 4. Replay & Backtest Control Ribbon ──────────────────────────────── -->
+    <div id="replay-toolbar">
+        <div class="replay-controls">
+            <button id="btn-replay-rewind" class="replay-btn" title="Rewind to Market Open (09:15)">⏮ Rewind</button>
+            <button id="btn-replay-prev-candle" class="replay-btn" title="Seek -1 Candle Backward">⏪ -1 Candle</button>
+            <button id="btn-replay-prev-tick" class="replay-btn" title="Step -1 Tick Backward">◀ -1 Tick</button>
+            <button id="btn-replay-play" class="replay-btn play-btn" title="Play Sub-Second Ticks">▶ Play</button>
+            <button id="btn-replay-next-tick" class="replay-btn" title="Step +1 Tick Forward">▶ +1 Tick</button>
+            <button id="btn-replay-next-candle" class="replay-btn" title="Seek +1 Candle Forward">+1 Candle ⏩</button>
+            <div class="speed-select-wrap">
+                <select id="select-replay-speed" title="Replay Speed">
+                    <option value="1">1x Ticks</option>
+                    <option value="2" selected>2x Ticks</option>
+                    <option value="5">5x Ticks</option>
+                    <option value="10">10x Ticks</option>
+                </select>
+            </div>
+            <label class="checkbox-wrap" title="Halt playback immediately on BUY/SELL signal">
+                <input type="checkbox" id="chk-break-signal" checked />
+                <span class="chk-label">Break on Signal</span>
+            </label>
+        </div>
+
+        <div class="scrubber-container">
+            <input type="range" id="replay-scrubber" min="0" max="100" value="0" />
+            <span id="replay-bar-info" class="scrubber-badge">Tick #0 / 0 | Bar 0 / 0 (09:15:00)</span>
+        </div>
+
+        <div class="backtest-quick-actions">
+            <button id="btn-run-backtest" class="btn-backtest" title="Run Fast Vectorized Backtest (<=50ms)">📊 Quick Backtest</button>
+        </div>
+    </div>
+
+    <!-- ── 5. Bottom Panel: Monaco IDE & Watch Table ────────────────────────── -->
+    <section id="panel-editor" class="panel-bottom">
+        
+        <!-- Left Sidebar: Settings, Dynamic Inputs & Watch Table -->
+        <!-- Left Sidebar: Settings, Dynamic Inputs & Watch Table -->
+        <aside id="editor-sidebar">
+            <div class="sidebar-tab-bar">
+                <button class="sidebar-tab-btn active" data-tab="tab-watch">🔍 Watch</button>
+                <button class="sidebar-tab-btn" data-tab="tab-inputs">⚙️ Inputs</button>
+                <button class="sidebar-tab-btn" data-tab="tab-breakpoints">🔴 Breakpoints</button>
+            </div>
+
+            <!-- Pane 1: Variable Watch Table (Inspector) -->
+            <div id="tab-watch" class="sidebar-tab-pane active">
+                <div class="sidebar-section watch-section">
+                    <div class="watch-header-row">
+                        <span class="section-label">VARIABLE WATCH (INSPECTOR)</span>
+                        <button id="btn-add-watch" class="watch-add-btn" title="Add Custom Watch Expression">+</button>
+                    </div>
+                    <div id="watch-input-container" class="watch-input-container" style="display:none;">
+                        <input type="text" id="watch-expression-input" placeholder="Expression (e.g. c - upper)" />
+                    </div>
+                    <div class="watch-table-wrap">
+                        <table id="watch-table" class="watch-table">
+                            <thead>
+                                <tr>
+                                    <th>VARIABLE</th>
+                                    <th>VALUE</th>
+                                </tr>
+                            </thead>
+                            <tbody id="watch-table-body">
+                                <tr><td class="var-name">bar_index</td><td class="var-val">0</td></tr>
+                                <tr><td class="var-name">close</td><td class="var-val">0.00</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pane 2: Template Presets & Dynamic Inputs -->
+            <div id="tab-inputs" class="sidebar-tab-pane">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">INDICATOR PRESET</span>
+                    <div class="preset-wrap">
+                        <select id="select-preset" title="Load Preset Indicator Template">
+                            <option value="">📂 Choose Preset...</option>
+                            <optgroup label="System Indicators">
+                                <option value="bss_pro_v5" selected>BSS Pro Scalper v5</option>
+                                <option value="algoalpha_breakout">AlgoAlpha Breakout</option>
+                                <option value="supertrend_cloud">Supertrend Cloud</option>
+                            </optgroup>
+                            <optgroup id="optgroup-user-indicators" label="My Custom Indicators">
+                                <!-- Populated dynamically -->
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <div class="section-label">SCRIPT INPUTS</div>
+                    <div id="dynamic-inputs-container" class="inputs-list">
+                        <!-- Populated dynamically from input.* schema -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pane 3: Breakpoints List -->
+            <div id="tab-breakpoints" class="sidebar-tab-pane">
+                <div class="sidebar-section breakpoints-section">
+                    <div class="section-label">BREAKPOINTS</div>
+                    <div id="breakpoints-list" class="breakpoints-list">
+                        <span class="bp-hint">Click gutter next to line numbers to set breakpoint.</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Right Workspace: Monaco Code Editor & Diagnostics Console -->
+        <main id="editor-main">
+            <!-- VSCode Style Debugger & Script Toolbar -->
+            <div id="editor-toolbar">
+                <div class="toolbar-left">
+                    <input type="text" id="indicator-name-input" class="indicator-title-input" value="BSS Pro Scalper v5" title="Click to rename indicator" />
+                    <button id="btn-save-script" class="btn-tool" title="Save Indicator (Cmd+S)">💾 Save</button>
+                    <button id="btn-save-as-script" class="btn-tool" title="Save As New Indicator">📋 Save As...</button>
+                </div>
+
+                <div class="toolbar-center vscode-debugger-bar">
+                    <button id="dbg-play" class="dbg-btn" title="Continue / Run (F5)">▶ Run</button>
+                    <button id="dbg-pause" class="dbg-btn" title="Pause">⏸ Pause</button>
+                    <button id="dbg-step-over" class="dbg-btn" title="Step Over +1 Tick (F10)">↷ Step Tick</button>
+                    <button id="dbg-step-candle" class="dbg-btn" title="Step Over +1 Candle">⤸ Step Candle</button>
+                    <button id="dbg-step-back" class="dbg-btn" title="Step Back -1 Tick">↶ Back</button>
+                    <button id="dbg-restart" class="dbg-btn" title="Restart (Shift+Cmd+F5)">↺ Restart</button>
+                </div>
+
+                <div class="toolbar-right">
+                    <span id="dbg-status-pill" class="dbg-status ready">Debugger Ready</span>
+                </div>
+            </div>
+
+            <!-- Compilation Error Banner with Interactive Jump Button -->
+            <div id="compilation-error-banner" class="compilation-error-banner">
+                <div class="compilation-error-msg">
+                    <span class="error-icon">⚠️</span>
+                    <span id="compilation-error-text">Syntax Error</span>
+                </div>
+                <button id="btn-jump-to-error" class="btn-jump-error">🎯 Jump to Line</button>
+            </div>
+
+            <div id="editor-container" class="editor-viewport">
+                <!-- Monaco Editor mounts here -->
+                <textarea id="editor-fallback" class="editor-fallback" spellcheck="false" placeholder="Loading Monaco IDE..."></textarea>
+            </div>
+            
+            <!-- Bottom Output / Backtest / Diagnostics Drawer -->
+            <div id="console-drawer">
+                <div class="drawer-tabs">
+                    <button class="drawer-tab active" data-tab="console">Console & Logs</button>
+                    <button class="drawer-tab" data-tab="scorecard">Backtest Scorecard</button>
+                    <span id="compilation-badge" class="compilation-badge">AST: OK (0.4ms)</span>
+                </div>
+                <div id="tab-console-content" class="drawer-content active">
+                    <div id="console-logs" class="console-text">[System] Quant Studio initialized. DuckDB local cache connected.</div>
+                </div>
+                <div id="tab-scorecard-content" class="drawer-content">
+                    <div id="scorecard-display" class="scorecard-grid">
+                        <div class="sc-metric"><span class="sc-label">Total Trades</span><span id="sc-trades" class="sc-val">-</span></div>
+                        <div class="sc-metric"><span class="sc-label">Win Rate</span><span id="sc-winrate" class="sc-val">-</span></div>
+                        <div class="sc-metric"><span class="sc-label">Profit Factor</span><span id="sc-pf" class="sc-val">-</span></div>
+                        <div class="sc-metric"><span class="sc-label">Total PnL</span><span id="sc-pnl" class="sc-val">-</span></div>
+                        <div class="sc-metric"><span class="sc-label">Max Drawdown</span><span id="sc-dd" class="sc-val">-</span></div>
+                        <div class="sc-metric"><span class="sc-label">Sharpe Ratio</span><span id="sc-sharpe" class="sc-val">-</span></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </section>
+
+</div>
+
+<!-- Save Indicator Modal -->
+<div id="save-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <h3>💾 Save Indicator to Library</h3>
+            <button id="modal-close-btn" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Indicator Name:</label>
+                <input type="text" id="modal-indicator-name" class="modal-input" placeholder="e.g. My BSS Pro Strategy" />
+            </div>
+            <div class="form-group">
+                <label>Description / Strategy Rules:</label>
+                <textarea id="modal-indicator-desc" class="modal-textarea" rows="3" placeholder="Brief strategy summary, parameters, or version notes..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="modal-cancel-btn" class="btn-primary">Cancel</button>
+            <button id="modal-confirm-save-btn" class="btn-accent">Save Indicator</button>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="/static/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+<script src="/static/studio_chart.js?v=20261031_02"></script>
+<script src="/static/studio.js?v=20261031_02"></script>
+</body>
+</html>

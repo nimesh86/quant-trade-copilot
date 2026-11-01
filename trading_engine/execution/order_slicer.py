@@ -11,9 +11,9 @@ import math
 import time
 
 try:
-    from ..config import EngineConfig
+    from ..config import EngineConfig, get_symbol_lot_size
 except ImportError:
-    from config import EngineConfig
+    from config import EngineConfig, get_symbol_lot_size
 
 @dataclass
 class ChildSlice:
@@ -51,7 +51,7 @@ class OrderSlicer:
         self.cfg = cfg
         self.freeze_lots = getattr(cfg, "freeze_lots", 30)
         self.max_slices = getattr(cfg, "max_slices", 35)
-        self.lot_size = getattr(cfg, "lot_size", 65)
+        self.lot_size = getattr(cfg, "lot_size", None) or get_symbol_lot_size(getattr(cfg, "symbol", "NIFTY"))
         self.depth_slip_per_slice = getattr(cfg, "depth_slip_per_slice", 0.05)
         self.strike_dispersion = getattr(cfg, "strike_dispersion", True)
         self.slice_delay_ms = getattr(cfg, "slice_delay_ms", 250)

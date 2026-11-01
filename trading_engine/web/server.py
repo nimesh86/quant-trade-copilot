@@ -2199,6 +2199,25 @@ async def serve_contract():
         }
     )
 
+@app.get("/studio")
+@app.get("/studio.html")
+async def serve_studio():
+    return FileResponse(
+        STATIC_DIR / "studio.html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )
+
+# ── Mount Indicator Studio Router ──
+try:
+    from trading_engine.web.studio_router import studio_router
+    app.include_router(studio_router)
+except Exception as _e:
+    pass
+
 
 # ── Contract Analysis Page APIs ───────────────────────────────────────────────
 

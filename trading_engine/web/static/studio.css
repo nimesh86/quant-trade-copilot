@@ -1,0 +1,1022 @@
+/* ==========================================================================
+   Indicator Studio & Replay Debugger Stylesheet
+   Theme: High-Density Institutional Dark Mode (#070b14)
+   ========================================================================== */
+
+:root {
+    --bg-primary: #070b14;
+    --bg-surface: #0c1220;
+    --bg-card: #11182c;
+    --bg-elevated: #16203a;
+    --border-subtle: #1a2542;
+    --border-accent: #263863;
+    
+    --text-primary: #f0f4fc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    
+    --cyan-accent: #00f0ff;
+    --cyan-glow: rgba(0, 240, 255, 0.25);
+    --green-bull: #10b981;
+    --red-bear: #ef4444;
+    --purple-magic: #8b5cf6;
+    --yellow-warn: #f59e0b;
+    
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+}
+
+html, body {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    user-select: none;
+}
+
+#studio-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
+
+/* ── 1. Top Master Header Bar ────────────────────────────────────────────── */
+#studio-header {
+    height: 48px;
+    min-height: 48px;
+    max-height: 48px;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    z-index: 100;
+}
+
+.hdr-left, .hdr-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.nav-back-btn {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    transition: all 0.2s;
+}
+.nav-back-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-card);
+    border-color: var(--cyan-accent);
+}
+
+.studio-brand {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+}
+.brand-bolt { color: var(--cyan-accent); }
+.brand-accent { color: var(--cyan-accent); }
+.brand-badge {
+    background: var(--bg-card);
+    color: var(--purple-magic);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+}
+
+select {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+select:hover, select:focus {
+    border-color: var(--cyan-accent);
+}
+
+.tf-btn-group {
+    display: flex;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.tf-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.tf-btn.active {
+    background: var(--border-accent);
+    color: var(--cyan-accent);
+}
+
+/* Date Range Selector in Header */
+.date-range-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+.cal-icon { font-size: 12px; }
+.studio-date-input {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+}
+.studio-select-sm {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    padding: 2px 6px;
+    font-size: 10px;
+}
+.session-badge {
+    color: var(--cyan-accent);
+    font-size: 10px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    background: rgba(0, 240, 255, 0.08);
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+.telemetry-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 240, 255, 0.05);
+    border: 1px solid rgba(0, 240, 255, 0.2);
+    padding: 3px 8px;
+    border-radius: 16px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+}
+.dot.live-pulse {
+    width: 6px;
+    height: 6px;
+    background: var(--cyan-accent);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--cyan-accent);
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+.telemetry-label { color: var(--text-muted); font-size: 9px; }
+.telemetry-val { color: var(--cyan-accent); font-weight: 600; }
+
+.btn-primary, .btn-accent {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+}
+.btn-primary:hover {
+    background: var(--border-accent);
+}
+.btn-accent {
+    background: linear-gradient(135deg, #00f0ff, #0099ff);
+    color: #070b14;
+    box-shadow: 0 0 10px var(--cyan-glow);
+}
+.btn-accent:hover {
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+}
+
+/* ── 2. Top Panel: Canvas Chart ──────────────────────────────────────────── */
+#panel-chart {
+    height: 48%;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.chart-toolbar {
+    height: 32px;
+    min-height: 32px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+}
+
+.chart-tabs {
+    display: flex;
+    gap: 4px;
+}
+.chart-tab {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.chart-tab.active {
+    background: var(--bg-card);
+    color: var(--cyan-accent);
+    border-color: var(--border-subtle);
+}
+
+.chart-legend {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+}
+.legend-sym { font-weight: 700; color: var(--text-primary); }
+.legend-ohlc { color: var(--text-secondary); }
+.legend-plots { color: var(--cyan-accent); }
+
+.icon-btn {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.icon-btn:hover {
+    color: var(--cyan-accent);
+    border-color: var(--cyan-accent);
+}
+
+.chart-viewport {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+}
+
+/* ── 3. Draggable Splitter Gutter ────────────────────────────────────────── */
+#split-gutter {
+    height: 6px;
+    min-height: 6px;
+    max-height: 6px;
+    flex-shrink: 0;
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: row-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    transition: background 0.2s;
+}
+#split-gutter:hover, #split-gutter.dragging {
+    background: var(--cyan-accent);
+}
+.gutter-handle {
+    width: 32px;
+    height: 2px;
+    background: var(--text-muted);
+    border-radius: 2px;
+}
+
+/* ── 4. Replay & Backtest Ribbon ─────────────────────────────────────────── */
+#replay-toolbar {
+    height: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    gap: 12px;
+}
+
+.replay-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.replay-btn {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.replay-btn:hover {
+    border-color: var(--cyan-accent);
+    color: var(--cyan-accent);
+}
+.replay-btn.play-btn {
+    background: var(--border-accent);
+    color: var(--cyan-accent);
+}
+.replay-btn.playing {
+    background: var(--yellow-warn);
+    color: #070b14;
+}
+
+.checkbox-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.checkbox-wrap input {
+    accent-color: var(--cyan-accent);
+}
+
+.scrubber-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+}
+#replay-scrubber {
+    width: 240px;
+    min-width: 240px;
+    max-width: 240px;
+    accent-color: var(--cyan-accent);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.scrubber-badge {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    min-width: 260px;
+    text-align: left;
+}
+
+.btn-backtest {
+    background: var(--bg-card);
+    color: var(--purple-magic);
+    border: 1px solid rgba(139, 92, 246, 0.4);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-backtest:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: var(--purple-magic);
+}
+
+/* ── 5. Bottom Panel: Monaco IDE & Debugger ──────────────────────────────── */
+#panel-editor {
+    flex: 1;
+    min-height: 120px;
+    display: flex;
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+
+#editor-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-tab-bar {
+    display: flex;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0 4px;
+    flex-shrink: 0;
+}
+.sidebar-tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 7px 4px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s ease;
+}
+.sidebar-tab-btn:hover {
+    color: var(--text-primary);
+}
+.sidebar-tab-btn.active {
+    color: var(--cyan-accent);
+    border-bottom-color: var(--cyan-accent);
+    background: rgba(0, 240, 255, 0.05);
+}
+
+.sidebar-tab-pane {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow-y: auto;
+    min-height: 0;
+}
+.sidebar-tab-pane.active {
+    display: flex;
+}
+
+.sidebar-header {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.sidebar-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+.preset-wrap select {
+    width: 100%;
+}
+
+.sidebar-section {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.section-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.inputs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.input-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.input-label-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.input-val-badge {
+    color: var(--cyan-accent);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+.input-row input[type="range"] {
+    width: 100%;
+    accent-color: var(--cyan-accent);
+}
+
+.watch-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.watch-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+.watch-add-btn {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    color: var(--cyan-accent);
+    font-size: 12px;
+    font-weight: bold;
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.watch-input-container {
+    margin-bottom: 6px;
+}
+.watch-input-container input {
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--cyan-accent);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 3px;
+    outline: none;
+}
+
+.watch-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+}
+.watch-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+.watch-table th {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 700;
+    text-align: left;
+    padding: 4px 6px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.watch-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.watch-table tr:hover {
+    background: rgba(0, 240, 255, 0.05);
+}
+.var-name { color: var(--text-secondary); }
+.var-val { color: var(--cyan-accent); font-weight: 600; text-align: right; }
+
+/* Breakpoints Section */
+.breakpoints-section {
+    max-height: 100px;
+    overflow-y: auto;
+}
+.breakpoints-list {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+.bp-hint { color: var(--text-muted); font-size: 9px; }
+.bp-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    cursor: pointer;
+}
+.bp-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--red-bear);
+    border-radius: 50%;
+    box-shadow: 0 0 4px var(--red-bear);
+}
+
+/* ── 6. Editor Main & VSCode Debugger Bar ─────────────────────────────────── */
+#editor-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    overflow: hidden;
+    min-width: 0;
+}
+
+/* VSCode Editor Toolbar */
+#editor-toolbar {
+    height: 34px;
+    min-height: 34px;
+    max-height: 34px;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    gap: 8px;
+}
+
+.toolbar-left, .toolbar-center, .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.indicator-title-input {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    color: var(--cyan-accent);
+    font-weight: 700;
+    font-size: 11px;
+    font-family: var(--font-ui);
+    padding: 3px 8px;
+    border-radius: 4px;
+    outline: none;
+    width: 170px;
+    transition: all 0.2s;
+}
+.indicator-title-input:focus {
+    border-color: var(--cyan-accent);
+    box-shadow: 0 0 6px var(--cyan-glow);
+}
+
+.btn-tool {
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-tool:hover {
+    color: var(--text-primary);
+    border-color: var(--cyan-accent);
+}
+
+/* VSCode Debugger Floating/Inline Bar */
+.vscode-debugger-bar {
+    background: var(--bg-card);
+    border: 1px solid var(--border-accent);
+    border-radius: 4px;
+    padding: 2px 4px;
+    display: flex;
+    gap: 4px;
+}
+.dbg-btn {
+    background: transparent;
+    color: var(--text-primary);
+    border: none;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 7px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.dbg-btn:hover {
+    background: var(--border-accent);
+    color: var(--cyan-accent);
+}
+#dbg-play { color: var(--green-bull); }
+#dbg-pause { color: var(--yellow-warn); }
+#dbg-restart { color: var(--cyan-accent); }
+
+.dbg-status {
+    font-size: 9px;
+    font-family: var(--font-mono);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+.dbg-status.ready {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--green-bull);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.dbg-status.paused {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--yellow-warn);
+    border: 1px solid var(--yellow-warn);
+    animation: pulse 1.5s infinite;
+}
+
+/* Editor Viewport & Monaco Reset */
+.editor-viewport {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Typography & Geometry Reset for Monaco - do not override box-sizing globally */
+#editor-container {
+    width: 100%;
+    height: 100%;
+    line-height: normal !important;
+    letter-spacing: normal !important;
+}
+
+/* Monaco Breakpoint Glyph */
+.monaco-editor .debug-breakpoint-glyph,
+.debug-breakpoint-glyph {
+    background: var(--red-bear) !important;
+    border-radius: 50% !important;
+    box-shadow: 0 0 6px var(--red-bear) !important;
+    cursor: pointer;
+    width: 10px !important;
+    height: 10px !important;
+    margin-left: 5px;
+    margin-top: 5px;
+}
+
+/* Monaco Active Breakpoint Paused Line & Execution Arrow */
+.monaco-editor .debug-line-highlight,
+.debug-line-highlight {
+    background: rgba(245, 158, 11, 0.35) !important;
+    border-left: 4px solid #f59e0b !important;
+}
+
+.monaco-editor .debug-current-line-arrow,
+.debug-current-line-arrow {
+    background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23f59e0b"><polygon points="5,3 19,12 5,21"/></svg>') no-repeat center center !important;
+    background-size: 14px 14px !important;
+    margin-left: 3px;
+    cursor: pointer;
+}
+
+/* Compilation Error Banner */
+.compilation-error-banner {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(239, 68, 68, 0.15);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.4);
+    padding: 6px 14px;
+    font-size: 11px;
+    color: #fca5a5;
+    z-index: 10;
+    flex-shrink: 0;
+}
+.compilation-error-banner.active {
+    display: flex;
+}
+.compilation-error-msg {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+}
+.btn-jump-error {
+    background: #ef4444;
+    color: #ffffff;
+    border: none;
+    padding: 3px 10px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.btn-jump-error:hover {
+    background: #dc2626;
+}
+
+.editor-fallback {
+    width: 100%;
+    height: 100%;
+    background: #0b0f19;
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 12px;
+    border: none;
+    outline: none;
+    resize: none;
+    display: none;
+}
+
+/* ── 7. Console Drawer (Docked, Fixed/Strict Height) ──────────────────────── */
+#console-drawer {
+    height: 125px;
+    min-height: 110px;
+    max-height: 160px;
+    flex-shrink: 0;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.drawer-tabs {
+    height: 26px;
+    min-height: 26px;
+    background: var(--bg-card);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.drawer-tab {
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    cursor: pointer;
+}
+.drawer-tab.active {
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--cyan-accent);
+}
+.compilation-badge {
+    margin-left: auto;
+    font-size: 9px;
+    font-family: var(--font-mono);
+    color: var(--green-bull);
+}
+
+.drawer-content {
+    flex: 1;
+    padding: 6px 10px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    display: none;
+}
+.drawer-content.active {
+    display: block;
+}
+.console-text {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+
+.scorecard-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
+    padding: 4px 0;
+}
+.sc-metric {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    padding: 6px 8px;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.sc-label { font-size: 8px; color: var(--text-muted); text-transform: uppercase; }
+.sc-val { font-size: 12px; font-weight: 700; color: var(--cyan-accent); }
+
+/* ── 8. Modal Dialog: Save Indicator ─────────────────────────────────────── */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(7, 11, 20, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-accent);
+    border-radius: 6px;
+    width: 440px;
+    max-width: 90vw;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
+.modal-header {
+    background: var(--bg-card);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.modal-header h3 {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+}
+.modal-close:hover { color: var(--text-primary); }
+.modal-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.form-group label {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+.modal-input, .modal-textarea {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    outline: none;
+}
+.modal-input:focus, .modal-textarea:focus {
+    border-color: var(--cyan-accent);
+}
+.modal-footer {
+    background: var(--bg-card);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    border-top: 1px solid var(--border-subtle);
+}

@@ -2,6 +2,7 @@
 Trading Engine Global Configuration.
 """
 from dataclasses import dataclass, field
+from typing import Optional
 import os
 
 def _default_db_url() -> str:
@@ -46,7 +47,7 @@ class EngineConfig:
 
     # Portfolio & Execution
     initial_capital: float = 100000.0   # 1 Lakh INR
-    lot_size: int = 65                 # NIFTY lot size (65 units)
+    lot_size: Optional[int] = None      # Dynamic lot size (auto-resolved from symbol if None)
     risk_per_trade_pct: float = 0.07   # 7.0% compounding risk
     slippage_per_side: float = 0.50    # ₹0.50 baseline bid-ask spread
     brokerage_per_order: float = 20.0  # ₹20 flat brokerage per order leg
@@ -59,6 +60,10 @@ class EngineConfig:
     execution_mode: str = "custom_slicing" # 'broker_native' (max 10 legs), 'custom_slicing', 'strike_dispersion'
     strike_dispersion: bool = True     # Disperse across ATM/ITM/OTM if order > 300 lots to minimize market impact
     slice_delay_ms: int = 250          # 250ms interval between sequential child order submissions
+
+    def __post_init__(self):
+        if self.lot_size is None or self.lot_size <= 0:
+            self.lot_size = get_symbol_lot_size(self.symbol)
 
 
 INDEX_SPEC_REGISTRY = {
@@ -84,9 +89,9 @@ INDEX_SPEC_REGISTRY = {
         "exchange_code": "NFO",
         "cash_exchange": "NSE",
         "strike_gap": 100,
-        "lot_size": 15,
+        "lot_size": 30,
         "freeze_limit_units": 900,
-        "freeze_lots": 60,
+        "freeze_lots": 30,
     },
     "SENSEX": {
         "display_name": "SENSEX",
@@ -97,9 +102,9 @@ INDEX_SPEC_REGISTRY = {
         "exchange_code": "BFO",
         "cash_exchange": "BSE",
         "strike_gap": 100,
-        "lot_size": 10,
+        "lot_size": 20,
         "freeze_limit_units": 1000,
-        "freeze_lots": 100,
+        "freeze_lots": 50,
     },
     "FINNIFTY": {
         "display_name": "FINNIFTY",
@@ -110,9 +115,9 @@ INDEX_SPEC_REGISTRY = {
         "exchange_code": "NFO",
         "cash_exchange": "NSE",
         "strike_gap": 50,
-        "lot_size": 25,
+        "lot_size": 60,
         "freeze_limit_units": 1800,
-        "freeze_lots": 72,
+        "freeze_lots": 30,
     },
     "MIDCPNIFTY": {
         "display_name": "MIDCAP NIFTY",
@@ -123,9 +128,35 @@ INDEX_SPEC_REGISTRY = {
         "exchange_code": "NFO",
         "cash_exchange": "NSE",
         "strike_gap": 25,
-        "lot_size": 75,
+        "lot_size": 120,
         "freeze_limit_units": 4200,
-        "freeze_lots": 56,
+        "freeze_lots": 35,
+    },
+    "BANKEX": {
+        "display_name": "BANKEX",
+        "kite_spot": "BSE:BANKEX",
+        "kite_fut_prefix": "BANKEX",
+        "kite_token": 274,
+        "breeze_stock_code": "BSEBAN",
+        "exchange_code": "BFO",
+        "cash_exchange": "BSE",
+        "strike_gap": 100,
+        "lot_size": 30,
+        "freeze_limit_units": 900,
+        "freeze_lots": 30,
+    },
+    "GIFTNIFTY": {
+        "display_name": "GIFT NIFTY",
+        "kite_spot": "NSEIFSC:NIFTY",
+        "kite_fut_prefix": "GIFTNIFTY",
+        "kite_token": 0,
+        "breeze_stock_code": "GIFTNIF",
+        "exchange_code": "NSEIFSC",
+        "cash_exchange": "NSEIFSC",
+        "strike_gap": 50,
+        "lot_size": 50,
+        "freeze_limit_units": 5000,
+        "freeze_lots": 100,
     },
 }
 
@@ -137,6 +168,8 @@ def get_index_spec(underlying: str) -> dict:
     u = underlying.strip().upper()
     if u in INDEX_SPEC_REGISTRY:
         return INDEX_SPEC_REGISTRY[u]
+    if "BANKEX" in u:
+        return INDEX_SPEC_REGISTRY["BANKEX"]
     if "BANK" in u:
         return INDEX_SPEC_REGISTRY["BANKNIFTY"]
     if "SENSEX" in u or "BSX" in u:
@@ -145,7 +178,47 @@ def get_index_spec(underlying: str) -> dict:
         return INDEX_SPEC_REGISTRY["FINNIFTY"]
     if "MID" in u:
         return INDEX_SPEC_REGISTRY["MIDCPNIFTY"]
+    if "GIFT" in u:
+        return INDEX_SPEC_REGISTRY["GIFTNIFTY"]
     return INDEX_SPEC_REGISTRY["NIFTY"]
+
+
+def get_symbol_lot_size(symbol: str) -> int:
+    """
+    Dynamically returns the official contract lot size for any index, F&O stock, or equity.
+    """
+    if not symbol:
+        return 65
+    u = symbol.strip().upper()
+
+    # 1. Prominent F&O stock specifications (checked first to prevent bank/fin stocks colliding with index keywords)
+    stock_fno_lots = {
+        "RELIANCE": 250, "TCS": 175, "INFY": 400, "HDFCBANK": 550,
+        "ICICIBANK": 700, "SBIN": 750, "BHARTIARTL": 475, "ITC": 1600,
+        "LT": 175, "AXISBANK": 625, "KOTAKBANK": 400, "TATAMOTORS": 575
+    }
+    for stk, lot in stock_fno_lots.items():
+        if stk in u:
+            return lot
+
+    # 2. Major Index Specifications (check sub-indices before generic NIFTY)
+    if "BANKEX" in u:
+        return 30
+    if "BANKNIFTY" in u or "CNXBAN" in u or "NIFTY BANK" in u or u.startswith("BANK"):
+        return 30
+    if "SENSEX" in u or "BSESEN" in u or "BSX" in u:
+        return 20
+    if "FINNIFTY" in u or "NIFFIN" in u or "FIN SERVICE" in u:
+        return 60
+    if "MIDCPNIFTY" in u or "NIFMID" in u or "MIDCAP" in u or "MID SELECT" in u:
+        return 120
+    if "GIFT" in u:
+        return 50
+    if "NIFTY" in u:
+        return 65
+
+    # Default to 1 for cash equities
+    return 1
 
 
 # ─────────────────────────────────────────────────────────────────────────────

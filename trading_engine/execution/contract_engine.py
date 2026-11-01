@@ -57,18 +57,9 @@ class ContractTradingEngine:
         return {"status": "error", "message": f"Invalid mode: {mode}"}
 
     def get_index_lot_size(self, symbol: str) -> int:
-        """Infer lot size from underlying symbol."""
-        s = symbol.upper()
-        if "BANKNIFTY" in s:
-            return 30
-        elif "SENSEX" in s or "BANKEX" in s:
-            return 20
-        elif "FINNIFTY" in s:
-            return 65
-        elif "MIDCPNIFTY" in s:
-            return 120
-        # Default NIFTY lot size
-        return 65
+        """Infer lot size dynamically from underlying symbol or contract."""
+        from trading_engine.config import get_symbol_lot_size
+        return get_symbol_lot_size(symbol)
 
     def place_order(
         self,

@@ -1,0 +1,78 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Quant Studio: Debug BSS Pro v5 (Recommended)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/trading_engine/replay/debug_runner.py",
+      "args": [
+        "--file",
+        "${workspaceFolder}/trading_engine/indicators/bss_pro_v5.py",
+        "--symbol",
+        "NIFTY",
+        "--contract",
+        "NIFTY_ATM_CE",
+        "--date",
+        "2026-10-30",
+        "--port",
+        "8765"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "python": "${workspaceFolder}/venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Quant Studio: Debug Current Indicator",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/trading_engine/replay/debug_runner.py",
+      "args": [
+        "--file",
+        "${file}",
+        "--symbol",
+        "NIFTY",
+        "--contract",
+        "NIFTY_ATM_CE",
+        "--date",
+        "2026-10-30",
+        "--port",
+        "8765"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "python": "${workspaceFolder}/venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    },
+    {
+      "name": "Quant Studio: Fast Market Replay",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/trading_engine/replay/debug_runner.py",
+      "args": [
+        "--file",
+        "${file}",
+        "--symbol",
+        "NIFTY",
+        "--contract",
+        "NIFTY_ATM_CE",
+        "--date",
+        "2026-10-30",
+        "--port",
+        "8765",
+        "--headless"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "python": "${workspaceFolder}/venv/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}

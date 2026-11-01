@@ -1,0 +1,813 @@
+// BSS Pro v5
+// The consolidation-channel detection used for breakout levels is adapted from the idea and formulas of
+// "Smart Money Breakout Channels" by AlgoAlpha, published under the Mozilla Public License 2.0
+// (https://mozilla.org/MPL/2.0/). Keep this notice if you share this script.
+//@version=5
+indicator("BSS Pro v5 - Buyer/Seller Strength, Targets, SL & Exit", shorttitle="BSS Pro v5", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+
+// =====================================================================
+//  INPUTS
+// =====================================================================
+g0 = "0. Mode & Signal Source"
+tradeMode = input.string("Option buyer (long premium only)", "Trade mode", options=["Option buyer (long premium only)", "Normal (BUY & SELL on this chart)"], group=g0, tooltip="Option buyer: only BUY signals on this chart. Normal: BUY and SELL both, for index / futures / stock charts.")
+useSrc    = input.bool(false, "Take signals from another symbol", group=g0, tooltip="Entries, exits and buyer/seller % come from the source symbol; stop loss, targets, support/resistance and prices stay on THIS chart.")
+srcSymIn  = input.symbol("NSE:NIFTY1!", "Signal source symbol", group=g0)
+optType   = input.string("Auto", "This chart's option type (only used with another source)", options=["Auto", "CALL", "PUT"], group=g0)
+
+g1 = "1. Trend & Signal"
+emaFastLen = input.int(21, "Fast EMA", minval=2, group=g1)
+emaSlowLen = input.int(50, "Slow EMA", minval=5, group=g1)
+rsiLen     = input.int(14, "RSI length", minval=2, group=g1)
+stLen      = input.int(10, "Supertrend ATR length", minval=1, group=g1)
+stMult     = input.float(3.0, "Supertrend multiplier", minval=0.5, step=0.1, group=g1)
+
+g2 = "2. Buyer / Seller Pressure"
+pressLen = input.int(14, "Pressure lookback (bars)", minval=3, group=g2)
+domThr   = input.float(58.0, "TREND entries: min dominant side %", minval=50.0, maxval=90.0, step=1.0, group=g2)
+useLtf   = input.bool(true, "Use intrabar volume for the buyer/seller split", group=g2, tooltip="Needs the chart timeframe above the intrabar timeframe below (e.g. 5m chart with 1m).")
+ltfTf    = input.string("1", "Intrabar timeframe", options=["1", "3", "5"], group=g2)
+minRank  = input.float(40.0, "TREND entries: min relative strength rank (0-100)", minval=0.0, maxval=100.0, step=5.0, group=g2)
+
+g3 = "3. TREND entries (pullback in a trend)"
+useCandle = input.bool(true, "Signal candle must close in trade direction", group=g3)
+maxExtAtr = input.float(1.5, "Max distance from fast EMA (x ATR)", minval=0.3, step=0.1, group=g3)
+rsiHi     = input.float(70.0, "BUY blocked if RSI above", minval=55.0, maxval=95.0, group=g3)
+rsiLo     = input.float(30.0, "SELL blocked if RSI below", minval=5.0, maxval=45.0, group=g3)
+reqPb     = input.bool(true, "Need a recent pullback to the fast EMA", group=g3)
+pbBars    = input.int(8, "Pullback look-back (bars)", minval=2, group=g3)
+pbAtr     = input.float(0.6, "Pullback touch zone (x ATR)", minval=0.1, step=0.1, group=g3)
+useMacd   = input.bool(true, "MACD histogram must agree", group=g3)
+maxWick   = input.float(0.4, "Max rejection wick on signal candle (share of range)", minval=0.1, maxval=1.0, step=0.05, group=g3)
+minRR     = input.float(0.8, "Min reward:risk to T1", minval=0.0, step=0.1, group=g3)
+cooldown  = input.int(5, "Cool-down after a trade closes (bars)", minval=0, group=g3)
+
+g3b = "3b. BREAKOUT entries (first strong close above a resistance level)"
+useBrk     = input.bool(true, "Allow BREAKOUT entries", group=g3b, tooltip="Fires on the first strong close above a swing resistance (built from candle BODIES, not wicks) or above a consolidation channel top.")
+brkWin     = input.int(3, "Level counts as just-broken for (bars)", minval=1, maxval=10, group=g3b, tooltip="If the first breakout candle fails the checks, the next candles can still trigger within this many bars.")
+chaseAtr   = input.float(1.5, "Max distance above the broken level (x ATR)", minval=0.3, step=0.1, group=g3b, tooltip="Late-entry limit. Beyond this the move is treated as already gone.")
+minCf      = input.int(3, "Confirmations needed (out of 5)", minval=0, maxval=5, group=g3b, tooltip="The 5 checks: small rejection wick, MACD histogram turning your way, volume at or above average, body size, close beyond the fast EMA. Soft score - one failed check no longer blocks the trade.")
+brkDomThr  = input.float(52.0, "Min dominant side % (breakouts)", minval=50.0, maxval=90.0, step=1.0, group=g3b)
+brkBody    = input.float(0.4, "Body size check (x ATR)", minval=0.1, step=0.1, group=g3b)
+volMult    = input.float(1.0, "Volume check vs 20-bar average (x)", minval=0.0, step=0.1, group=g3b)
+chNormLen  = input.int(100, "Channel: normalisation length", minval=10, group=g3b)
+chLen      = input.int(14, "Channel: detection length", minval=3, group=g3b)
+chMinDur   = input.int(10, "Channel: minimum bars inside", minval=3, group=g3b)
+chStrong   = input.bool(true, "Channel: strong close only (body mostly outside)", group=g3b)
+chNested   = input.bool(false, "Channel: allow overlapping channels", group=g3b)
+
+g3c = "3c. Support / Resistance (calculated from candle bodies - nothing is drawn)"
+srOn       = input.bool(true, "Check support / resistance before entry", group=g3c)
+pivL       = input.int(4, "Swing pivot: bars on the left", minval=1, group=g3c)
+pivR       = input.int(2, "Swing pivot: bars on the right", minval=1, group=g3c)
+srLookback = input.int(150, "Use levels from the last N bars", minval=20, group=g3c)
+srTolAtr   = input.float(0.25, "Zone half-width (x ATR)", minval=0.05, step=0.05, group=g3c)
+minRoomR   = input.float(2.0, "Min room to the next resistance (x risk)", minval=0.0, step=0.5, group=g3c, tooltip="2.0 = T2 (the 1:2 target) must fit below the next resistance.")
+
+g4 = "4. Stop Loss, Trailing & Costs"
+atrLen    = input.int(14, "ATR length", minval=1, group=g4)
+swingLen  = input.int(10, "Swing lookback for SL", minval=2, group=g4)
+minSlAtr  = input.float(0.6, "Min SL distance (x ATR)", minval=0.2, step=0.1, group=g4)
+maxSlAtr  = input.float(2.5, "Max SL distance (x ATR)", minval=0.5, step=0.1, group=g4)
+maxSlPct  = input.float(12.0, "Hard cap on SL distance (% of entry, 0 = off)", minval=0.0, step=0.5, group=g4)
+trailOn   = input.bool(true, "Trail the stop after T1", group=g4)
+trailR    = input.float(1.0, "Trailing distance (x initial risk)", minval=0.3, step=0.1, group=g4)
+costPct   = input.float(1.0, "Round-trip cost (% of premium: brokerage, taxes, spread)", minval=0.0, step=0.1, group=g4)
+
+g4b = "4b. Fade Exit (leave early when momentum dies after T1 / T2)"
+fadeOn      = input.bool(true, "Exit at candle close when momentum fades", group=g4b)
+fadeNeedT1  = input.int(3, "Warning signs needed after T1 (of 7)", minval=1, maxval=7, group=g4b)
+fadeNeedT2  = input.int(2, "Warning signs needed after T2 (of 7)", minval=1, maxval=7, group=g4b)
+
+g5 = "5. Targets"
+tgtMode  = input.string("R-multiple", "Target mode", options=["R-multiple", "Fibonacci extension"], group=g5)
+r1       = input.float(1.0, "T1 (R)", minval=0.2, step=0.1, group=g5)
+r2       = input.float(2.0, "T2 (R)", minval=0.2, step=0.1, group=g5)
+r3       = input.float(3.0, "Max (R)", minval=0.2, step=0.1, group=g5)
+fibLen   = input.int(50, "Fib mode: swing range lookback", minval=10, group=g5)
+f1       = input.float(0.382, "Fib mode: T1 ratio", step=0.001, group=g5)
+f2       = input.float(0.618, "Fib mode: T2 ratio", step=0.001, group=g5)
+f3       = input.float(1.0,   "Fib mode: Max ratio", step=0.001, group=g5)
+maxTgtR  = input.float(4.0, "Fib mode: cap targets at (R)", minval=1.0, step=0.5, group=g5)
+maxBars  = input.int(60, "Time stop: close trade after N bars", minval=5, group=g5)
+minSamples = input.int(20, "Samples needed before showing a chance %", minval=5, group=g5)
+
+g6 = "6. Look & Feel"
+markerOff  = input.float(0.45, "Marker distance from candle (x ATR)", minval=0.1, step=0.05, group=g6)
+showRibbon = input.bool(true, "EMA ribbon (of this chart)", group=g6)
+showZones  = input.bool(true, "Risk / reward zones", group=g6)
+zoneToMax  = input.bool(false, "Draw reward zone up to Max (otherwise up to T2)", group=g6)
+keepOldLbl = input.bool(false, "Keep level labels on completed trades", group=g6)
+showTable  = input.bool(true, "Info panel", group=g6)
+tblPosIn   = input.string("Bottom left", "Panel position", options=["Bottom left", "Bottom right", "Top right", "Top left"], group=g6, tooltip="Top left sits under the chart legend and top right usually sits on the candles, so Bottom left is the default. If candles still draw over the panel: indicator menu (three dots) > Visual order > Bring to front.")
+colBuy     = input.color(#089981, "BUY marker", group=g6)
+colSell    = input.color(#F23645, "SELL marker", group=g6)
+colSlBuy   = input.color(#FF9800, "Stop loss - BUY trade", group=g6)
+colSlSell  = input.color(#AB47BC, "Stop loss - SELL trade", group=g6)
+colTgtBuy  = input.color(#00C853, "Targets - BUY trade", group=g6)
+colTgtSell = input.color(#29B6F6, "Targets - SELL trade", group=g6)
+colExit    = input.color(#FFD54F, "EXIT marker", group=g6)
+
+colWin  = #00E676
+colLoss = #FF5252
+
+tblPos = switch tblPosIn
+    "Top left"     => position.top_left
+    "Top right"    => position.top_right
+    "Bottom right" => position.bottom_right
+    => position.bottom_left
+
+// =====================================================================
+//  HELPERS
+// =====================================================================
+f_px(x) => str.tostring(x, format.mintick)
+
+f_gain(x, base, d) =>
+    g = d * (x - base) / base * 100.0
+    (g >= 0 ? "+" : "") + str.tostring(g, "0.0") + "%"
+
+f_pct(x) => (x >= 0 ? "+" : "") + str.tostring(x, "0.0") + "%"
+
+f_room(r) => r >= 900.0 ? "clear" : str.tostring(r, "0.0") + "R"
+
+f_bar(p, n) =>
+    f = math.round(p / 100.0 * n)
+    s = ""
+    for i = 0 to n - 1
+        s += i < f ? "█" : "░"
+    s
+
+f_hit(h, n) =>
+    n < minSamples ? "hits " + str.tostring(h) + "/" + str.tostring(n) : "chance " + str.tostring(h * 100.0 / n, "0") + "% (" + str.tostring(h) + "/" + str.tostring(n) + ")"
+
+// Signal engine - runs on the SIGNAL SOURCE symbol (this chart unless another symbol is chosen)
+f_engine() =>
+    a   = ta.atr(atrLen)
+    eF  = ta.ema(close, emaFastLen)
+    eS  = ta.ema(close, emaSlowLen)
+    r   = ta.rsi(close, rsiLen)
+    [stL, sd] = ta.supertrend(stMult, stLen)
+    [mL, mSg, mH] = ta.macd(close, 12, 26, 9)
+    vA  = nz(ta.sma(volume, 20))
+    rc  = math.max(high - low, syminfo.mintick)
+    up  = sd < 0
+    bullC = close > open and close > close[1]
+    bearC = close < open and close < close[1]
+    pbUp  = ta.lowest(low - eF, pbBars) <= pbAtr * a
+    pbDn  = ta.highest(high - eF, pbBars) >= -pbAtr * a
+    wkUp  = (high - close) / rc <= maxWick
+    wkDn  = (close - low) / rc <= maxWick
+    moUp  = (not useMacd) or (mH > 0 and mH > mH[1])
+    moDn  = (not useMacd) or (mH < 0 and mH < mH[1])
+    mbUp  = (not useMacd) or mH > mH[1]
+    mbDn  = (not useMacd) or mH < mH[1]
+    vlOk  = nz(volume) <= 0 or vA <= 0 or volume >= volMult * vA
+    trUp  = up and eF > eS and close > eF and r > 50 and r < rsiHi
+    trDn  = (not up) and eF < eS and close < eF and r < 50 and r > rsiLo
+    quUp  = (not useCandle or bullC) and (close - eF) <= maxExtAtr * a and (not reqPb or pbUp) and wkUp and moUp
+    quDn  = (not useCandle or bearC) and (eF - close) <= maxExtAtr * a and (not reqPb or pbDn) and wkDn and moDn
+    // soft confirmation score for breakouts (0-5)
+    cfUp  = (wkUp ? 1 : 0) + (mbUp ? 1 : 0) + (vlOk ? 1 : 0) + ((close - open) >= brkBody * a ? 1 : 0) + (close > eF ? 1 : 0)
+    cfDn  = (wkDn ? 1 : 0) + (mbDn ? 1 : 0) + (vlOk ? 1 : 0) + ((open - close) >= brkBody * a ? 1 : 0) + (close < eF ? 1 : 0)
+    // warning signs against a rise (c*) and against a fall (d*)
+    c1 = r < r[1] and r[1] > 60
+    c2 = mH < mH[1] and (mH[1] < mH[2] or mL < mSg)
+    c3 = close < eF
+    c4 = vA > 0 and close < open and nz(volume) > vA
+    c5 = (high - math.max(open, close)) >= 0.5 * rc
+    d1 = r > r[1] and r[1] < 40
+    d2 = mH > mH[1] and (mH[1] > mH[2] or mL > mSg)
+    d3 = close > eF
+    d4 = vA > 0 and close > open and nz(volume) > vA
+    d5 = (math.min(open, close) - low) >= 0.5 * rc
+    fdUpN = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0) + (c5 ? 1 : 0)
+    fdDnN = (d1 ? 1 : 0) + (d2 ? 1 : 0) + (d3 ? 1 : 0) + (d4 ? 1 : 0) + (d5 ? 1 : 0)
+    fdUpT = (c1 ? "RSI " : "") + (c2 ? "MACD " : "") + (c3 ? "EMA " : "") + (c4 ? "VOL " : "") + (c5 ? "WICK " : "")
+    fdDnT = (d1 ? "RSI " : "") + (d2 ? "MACD " : "") + (d3 ? "EMA " : "") + (d4 ? "VOL " : "") + (d5 ? "WICK " : "")
+    [trUp, trDn, quUp, quDn, cfUp, cfDn, up, close < eF, close > eF, fdUpN, fdUpT, fdDnN, fdDnT]
+
+// =====================================================================
+//  SIGNAL SOURCE + BUYER / SELLER PRESSURE
+// =====================================================================
+srcTicker = useSrc ? srcSymIn : syminfo.tickerid
+
+[tUp, tDn, qUp, qDn, cfUp, cfDn, stUp, belowF, aboveF, fdUpN, fdUpT, fdDnN, fdDnT] = request.security(srcTicker, timeframe.period, f_engine())
+[sH, sL, sC, sV] = request.security(srcTicker, timeframe.period, [high, low, close, volume])
+
+array<float> upA = request.security_lower_tf(srcTicker, ltfTf, close > open ? nz(volume) : close == open ? nz(volume) * 0.5 : 0.0)
+array<float> dnA = request.security_lower_tf(srcTicker, ltfTf, close < open ? nz(volume) : close == open ? nz(volume) * 0.5 : 0.0)
+float ltfUp = (useLtf and array.size(upA) > 0) ? array.sum(upA) : 0.0
+float ltfDn = (useLtf and array.size(dnA) > 0) ? array.sum(dnA) : 0.0
+bool  ltfOk = ltfUp + ltfDn > 0
+
+sRng     = sH - sL
+sVol     = nz(sV) > 0 ? sV : 1.0
+shapeBuy = sRng > 0 ? sVol * (sC - sL) / sRng : sVol * 0.5
+buyVol   = ltfOk ? ltfUp : shapeBuy
+sellVol  = ltfOk ? ltfDn : sVol - shapeBuy
+buySum   = math.sum(buyVol, pressLen)
+sellSum  = math.sum(sellVol, pressLen)
+totSum   = buySum + sellSum
+buyPct   = totSum > 0 ? buySum / totSum * 100.0 : 50.0
+sellPct  = 100.0 - buyPct
+
+domAbs = math.abs(buyPct - 50.0)
+rank   = ta.percentrank(domAbs, 100)
+rankOK = minRank <= 0 or (not na(rank) and rank >= minRank)
+grade  = na(rank) ? "n/a" : rank >= 75 ? "Strong" : rank >= 40 ? "Moderate" : "Weak"
+
+dirOkUp = buyPct >= domThr and rankOK
+dirOkDn = sellPct >= domThr and rankOK
+
+// =====================================================================
+//  LEVELS (on THIS chart's price)
+// =====================================================================
+atr    = ta.atr(atrLen)
+emaF   = ta.ema(close, emaFastLen)
+emaS   = ta.ema(close, emaSlowLen)
+hh     = ta.highest(high, fibLen)
+ll     = ta.lowest(low, fibLen)
+swLow  = ta.lowest(low, swingLen)
+swHigh = ta.highest(high, swingLen)
+leg    = math.max(hh - ll, 2.0 * atr)
+off    = markerOff * atr
+
+slL0 = math.min(math.max(swLow - 0.1 * atr, close - maxSlAtr * atr), close - minSlAtr * atr)
+slS0 = math.max(math.min(swHigh + 0.1 * atr, close + maxSlAtr * atr), close + minSlAtr * atr)
+slL  = maxSlPct > 0 ? math.max(slL0, close * (1.0 - maxSlPct / 100.0)) : slL0
+slS  = maxSlPct > 0 ? math.min(slS0, close * (1.0 + maxSlPct / 100.0)) : slS0
+riskL = math.max(close - slL, syminfo.mintick)
+riskS = math.max(slS - close, syminfo.mintick)
+
+isR = tgtMode == "R-multiple"
+dL1 = isR ? riskL * r1 : math.min(leg * f1, riskL * maxTgtR)
+dL2 = isR ? riskL * r2 : math.min(leg * f2, riskL * maxTgtR)
+dL3 = isR ? riskL * r3 : math.min(leg * f3, riskL * maxTgtR)
+dS1 = isR ? riskS * r1 : math.min(leg * f1, riskS * maxTgtR)
+dS2 = isR ? riskS * r2 : math.min(leg * f2, riskS * maxTgtR)
+dS3 = isR ? riskS * r3 : math.min(leg * f3, riskS * maxTgtR)
+
+t1L = close + dL1
+t2L = close + dL2
+tML = close + dL3
+t1S = math.max(close - dS1, syminfo.mintick)
+t2S = math.max(close - dS2, syminfo.mintick)
+tMS = math.max(close - dS3, syminfo.mintick)
+rrL = (t1L - close) / riskL
+rrS = (close - t1S) / riskS
+
+// =====================================================================
+//  SUPPORT / RESISTANCE FROM CANDLE BODIES + CONSOLIDATION CHANNELS (internal only)
+// =====================================================================
+ph = ta.pivothigh(math.max(open, close), pivL, pivR)
+pl = ta.pivotlow(math.min(open, close), pivL, pivR)
+
+var array<float> resLv  = array.new_float()
+var array<int>   resBar = array.new_int()
+var array<float> supLv  = array.new_float()
+var array<int>   supBar = array.new_int()
+var array<float> chTop  = array.new_float()
+var array<float> chBot  = array.new_float()
+var array<int>   chBar  = array.new_int()
+
+var float clrLvlU = na
+var int   clrBarU = -1000
+var bool  clrChU  = false
+var float clrLvlD = na
+var int   clrBarD = -1000
+var bool  clrChD  = false
+
+if not na(ph)
+    array.push(resLv, ph)
+    array.push(resBar, bar_index - pivR)
+    if array.size(resLv) > 40
+        array.shift(resLv)
+        array.shift(resBar)
+if not na(pl)
+    array.push(supLv, pl)
+    array.push(supBar, bar_index - pivR)
+    if array.size(supLv) > 40
+        array.shift(supLv)
+        array.shift(supBar)
+
+// consolidation channels: a quiet period (falling volatility) ends when volatility starts expanding
+loN   = ta.lowest(low, chNormLen)
+hiN   = ta.highest(high, chNormLen)
+normP = hiN > loN ? (close - loN) / (hiN - loN) : 0.5
+volN  = ta.stdev(normP, 14)
+upPos = (ta.highestbars(volN, chLen + 1) + chLen) / chLen
+loPos = (ta.lowestbars(volN, chLen + 1) + chLen) / chLen
+chDur = math.max(nz(ta.barssince(ta.crossover(loPos, upPos))), 1)
+chHi  = ta.highest(high, chDur)
+chLo  = ta.lowest(low, chDur)
+chForm = ta.crossover(upPos, loPos) and chDur > chMinDur
+
+if chForm
+    bool freeSlot = true
+    if (not chNested) and array.size(chTop) > 0
+        for j = 0 to array.size(chTop) - 1
+            if chHi > array.get(chBot, j) and chLo < array.get(chTop, j)
+                freeSlot := false
+    if freeSlot
+        array.push(chTop, chHi)
+        array.push(chBot, chLo)
+        array.push(chBar, bar_index)
+        if array.size(chTop) > 8
+            array.shift(chTop)
+            array.shift(chBot)
+            array.shift(chBar)
+
+tolPx    = srTolAtr * atr
+strongPx = chStrong ? math.avg(close, open) : close
+float nearRes = na
+float nearSup = na
+
+// channels: strong close outside = breakout of that level
+if array.size(chTop) > 0
+    for k = array.size(chTop) - 1 to 0
+        float tp = array.get(chTop, k)
+        float bt = array.get(chBot, k)
+        int   bb = array.get(chBar, k)
+        if strongPx > tp
+            clrLvlU := (bar_index == clrBarU and not na(clrLvlU)) ? math.max(clrLvlU, tp) : tp
+            clrBarU := bar_index
+            clrChU  := true
+            array.remove(chTop, k)
+            array.remove(chBot, k)
+            array.remove(chBar, k)
+        else if strongPx < bt
+            clrLvlD := (bar_index == clrBarD and not na(clrLvlD)) ? math.min(clrLvlD, bt) : bt
+            clrBarD := bar_index
+            clrChD  := true
+            array.remove(chTop, k)
+            array.remove(chBot, k)
+            array.remove(chBar, k)
+        else if bar_index - bb > 400
+            array.remove(chTop, k)
+            array.remove(chBot, k)
+            array.remove(chBar, k)
+
+// channels still open act as resistance above price and support below it
+if array.size(chTop) > 0
+    for k2 = 0 to array.size(chTop) - 1
+        float tp2 = array.get(chTop, k2)
+        float bt2 = array.get(chBot, k2)
+        if tp2 > close - tolPx
+            nearRes := na(nearRes) ? tp2 : math.min(nearRes, tp2)
+        if bt2 < close + tolPx
+            nearSup := na(nearSup) ? bt2 : math.max(nearSup, bt2)
+
+// body-based swing levels
+if array.size(resLv) > 0
+    for i = 0 to array.size(resLv) - 1
+        float lv = array.get(resLv, i)
+        int   bi = array.get(resBar, i)
+        if bar_index - bi <= srLookback
+            if lv > close - tolPx
+                nearRes := na(nearRes) ? lv : math.min(nearRes, lv)
+            if close > lv + tolPx and close[1] <= lv + tolPx and strongPx > lv
+                if bar_index != clrBarU or lv > nz(clrLvlU)
+                    clrLvlU := lv
+                    clrBarU := bar_index
+                    clrChU  := false
+
+if array.size(supLv) > 0
+    for j2 = 0 to array.size(supLv) - 1
+        float lw = array.get(supLv, j2)
+        int   bj = array.get(supBar, j2)
+        if bar_index - bj <= srLookback
+            if lw < close + tolPx
+                nearSup := na(nearSup) ? lw : math.max(nearSup, lw)
+            if close < lw - tolPx and close[1] >= lw - tolPx and strongPx < lw
+                if bar_index != clrBarD or lw < nz(clrLvlD, 1000000000.0)
+                    clrLvlD := lw
+                    clrBarD := bar_index
+                    clrChD  := false
+
+roomRL  = na(nearRes) ? 999.0 : math.max(nearRes - close, 0.0) / riskL
+roomRS  = na(nearSup) ? 999.0 : math.max(close - nearSup, 0.0) / riskS
+srOKL   = (not srOn) or roomRL >= minRoomR
+srOKS   = (not srOn) or roomRS >= minRoomR
+atRes   = (not na(nearRes)) and (nearRes - close) <= 0.4 * atr
+atSup   = (not na(nearSup)) and (close - nearSup) <= 0.4 * atr
+
+// a level broken in the last few bars, price still above / below it, and not already run away from it
+lvlUp   = (bar_index - clrBarU <= brkWin) and (not na(clrLvlU)) and close > clrLvlU
+lvlDn   = (bar_index - clrBarD <= brkWin) and (not na(clrLvlD)) and close < clrLvlD
+chaseOkL = lvlUp and (close - clrLvlU) <= chaseAtr * atr
+chaseOkS = lvlDn and (clrLvlD - close) <= chaseAtr * atr
+
+// =====================================================================
+//  MODE: which chart-side trade does a source signal create?
+// =====================================================================
+buyerMode = tradeMode == "Option buyer (long premium only)"
+isPut     = optType == "PUT" or (optType == "Auto" and str.contains(str.upper(syminfo.description), "PUT"))
+mapPut    = buyerMode and useSrc and isPut          // PUT premium rises when the source falls
+
+cfLong     = mapPut ? cfDn : cfUp
+domLongBrk = (mapPut ? sellPct : buyPct) >= brkDomThr
+longTrend  = mapPut ? (tDn and qDn and dirOkDn) : (tUp and qUp and dirOkUp)
+longBrk    = useBrk and chaseOkL and close > open and cfLong >= minCf and domLongBrk
+shortTrend = (not buyerMode) and (tDn and qDn and dirOkDn)
+shortBrk   = (not buyerMode) and useBrk and chaseOkS and close < open and cfDn >= minCf and sellPct >= brkDomThr
+
+sigLong  = (longTrend or longBrk) and srOKL
+sigShort = (shortTrend or shortBrk) and srOKS
+
+exitBull = (not stUp) or (belowF and buyPct < 50.0)
+exitBear = stUp or (aboveF and buyPct > 50.0)
+exitLongTrade  = mapPut ? exitBear : exitBull
+exitShortTrade = exitBear
+
+// momentum-fade warning signs for the open trade (source signs + flow + wall)
+flowL = mapPut ? sellPct < 50.0 : buyPct < 50.0
+fadeLongN = (mapPut ? fdDnN : fdUpN) + (flowL ? 1 : 0) + (atRes ? 1 : 0)
+fadeLongT = (mapPut ? fdDnT : fdUpT) + (flowL ? "FLOW " : "") + (atRes ? "RES " : "")
+flowS = sellPct < 50.0
+fadeShortN = fdDnN + (flowS ? 1 : 0) + (atSup ? 1 : 0)
+fadeShortT = fdDnT + (flowS ? "FLOW " : "") + (atSup ? "SUP " : "")
+
+longOK  = sigLong and rrL >= minRR
+shortOK = sigShort and rrS >= minRR
+
+// Signals are only confirmed on candle close, so they never repaint
+longTrig  = longOK and not longOK[1] and barstate.isconfirmed
+shortTrig = shortOK and not shortOK[1] and barstate.isconfirmed
+
+// =====================================================================
+//  TRADE STATE + DRAWINGS
+// =====================================================================
+var int    tDir   = 0
+var float  entry  = na
+var float  slP    = na
+var float  t1P    = na
+var float  t2P    = na
+var float  tMP    = na
+var float  riskPts = na
+var float  runExt = na
+var bool   h1     = false
+var bool   h2     = false
+var bool   hM     = false
+var bool   trailActive = false
+var int    barsIn = 0
+var int    lastDir = 0
+var int    lastCloseBar = -1000
+var color  curSl  = #FF9800
+var string lastEvent = "No signal yet"
+
+var int lTot = 0
+var int l1   = 0
+var int l2   = 0
+var int lM   = 0
+var int sTot = 0
+var int s1   = 0
+var int s2   = 0
+var int sM   = 0
+
+var int   nTrades = 0
+var int   nWin    = 0
+var float sumNet  = 0.0
+
+var int lastUpBar = -100
+var int slotUp    = 0
+var int lastDnBar = -100
+var int slotDn    = 0
+
+var line  lnEntry = na
+var line  lnSL    = na
+var line  lnT1    = na
+var line  lnT2    = na
+var line  lnTM    = na
+var line  lnConn  = na
+var label lbEntry = na
+var label lbSL    = na
+var label lbT1    = na
+var label lbT2    = na
+var label lbTM    = na
+var box   bxRisk  = na
+var box   bxRew   = na
+
+bool   evLong    = false
+bool   evShort   = false
+bool   ev1       = false
+bool   ev2       = false
+bool   evM       = false
+bool   evSL      = false
+bool   evExit    = false
+bool   evFade    = false
+bool   evTime    = false
+bool   closedNow = false
+string fadeWhy   = ""
+float  trailSeries = na
+
+// ---------------------------------------------------------------------
+//  Manage an open trade (if SL and a target touch in the same candle, SL counts first)
+// ---------------------------------------------------------------------
+if tDir != 0
+    barsIn += 1
+    runExt := tDir == 1 ? math.max(runExt, high) : math.min(runExt, low)
+
+    // keep every drawing in step with the current bar
+    if not trailActive
+        line.set_x2(lnSL, bar_index)
+    line.set_x2(lnEntry, bar_index)
+    line.set_x2(lnT1, bar_index)
+    line.set_x2(lnT2, bar_index)
+    line.set_x2(lnTM, bar_index)
+    label.set_x(lbEntry, bar_index + 1)
+    label.set_x(lbSL, bar_index + 1)
+    label.set_x(lbT1, bar_index + 1)
+    label.set_x(lbT2, bar_index + 1)
+    label.set_x(lbTM, bar_index + 1)
+    if showZones
+        box.set_right(bxRisk, bar_index)
+        box.set_right(bxRew, bar_index)
+    float runPnl = tDir * (close - entry) / entry * 100.0
+    line.set_xy2(lnConn, bar_index, close)
+    line.set_color(lnConn, runPnl >= 0 ? colWin : colLoss)
+
+    bool slHit = tDir == 1 ? low <= slP : high >= slP
+    bool hit1  = tDir == 1 ? high >= t1P : low <= t1P
+    bool hit2  = tDir == 1 ? high >= t2P : low <= t2P
+    bool hitM  = tDir == 1 ? high >= tMP : low <= tMP
+
+    if slHit
+        evSL := true
+        closedNow := true
+        lastEvent := trailActive ? "Trailing stop hit" : "Stop loss hit"
+    else
+        if hit1 and not h1
+            h1 := true
+            ev1 := true
+            lastEvent := "T1 hit"
+        if hit2 and not h2
+            h2 := true
+            ev2 := true
+            lastEvent := "T2 hit"
+        if hitM and not hM
+            hM := true
+            evM := true
+            lastEvent := "Max target hit"
+
+        int  fadeN    = tDir == 1 ? fadeLongN : fadeShortN
+        bool fadeExit = fadeOn and barstate.isconfirmed and h1 and fadeN >= (h2 ? fadeNeedT2 : fadeNeedT1)
+        bool exitSig  = barstate.isconfirmed and (tDir == 1 ? exitLongTrade : exitShortTrade)
+
+        if hM
+            closedNow := true
+        else if fadeExit
+            evFade := true
+            closedNow := true
+            fadeWhy := tDir == 1 ? fadeLongT : fadeShortT
+            lastEvent := "FADE exit (" + fadeWhy + ")"
+        else if exitSig
+            evExit := true
+            closedNow := true
+            lastEvent := "EXIT signal"
+        else if barsIn >= maxBars and barstate.isconfirmed
+            evTime := true
+            closedNow := true
+            lastEvent := "Time stop"
+
+        // trailing stop: break-even (+costs) after T1, T1 after T2, and follow the best price
+        if (not closedNow) and trailOn and h1
+            float beLvl = tDir == 1 ? entry * (1.0 + costPct / 100.0) : entry * (1.0 - costPct / 100.0)
+            float cand = slP
+            if tDir == 1
+                cand := math.max(slP, beLvl)
+                if h2
+                    cand := math.max(cand, t1P)
+                cand := math.max(cand, runExt - trailR * riskPts)
+                cand := math.min(cand, close)
+                cand := math.max(cand, slP)
+            else
+                cand := math.min(slP, beLvl)
+                if h2
+                    cand := math.min(cand, t1P)
+                cand := math.min(cand, runExt + trailR * riskPts)
+                cand := math.max(cand, close)
+                cand := math.min(cand, slP)
+            if cand != slP
+                slP := cand
+                trailActive := true
+                label.set_y(lbSL, slP)
+                label.set_text(lbSL, "TRAIL SL  " + f_px(slP) + "  (" + f_gain(slP, entry, tDir) + ")")
+
+    if trailActive
+        trailSeries := slP
+
+    // level labels: tick off what has happened
+    if ev1
+        label.set_text(lbT1, "✔ " + label.get_text(lbT1))
+    if ev2
+        label.set_text(lbT2, "✔ " + label.get_text(lbT2))
+    if evM
+        label.set_text(lbTM, "✔ " + label.get_text(lbTM))
+    if evSL
+        label.set_text(lbSL, "✖ " + label.get_text(lbSL))
+
+    // small T1 / T2 markers when the trade continues (stacked so they never overlap)
+    if (ev1 or ev2) and not closedNow
+        bool upH = tDir == 1
+        float hOff = off * 0.6
+        if upH
+            slotUp := bar_index - lastUpBar <= 4 ? slotUp + 1 : 0
+            lastUpBar := bar_index
+            hOff := off * 0.6 * (1.0 + 2.8 * slotUp)
+        else
+            slotDn := bar_index - lastDnBar <= 4 ? slotDn + 1 : 0
+            lastDnBar := bar_index
+            hOff := off * 0.6 * (1.0 + 2.8 * slotDn)
+        string hTxt = (ev1 ? "T1 ✔" : "") + (ev1 and ev2 ? "  " : "") + (ev2 ? "T2 ✔" : "") + "  ₹" + f_px(ev2 ? t2P : t1P)
+        label.new(bar_index, upH ? high + hOff : low - hOff, hTxt, style=upH ? label.style_label_down : label.style_label_up, color=upH ? colTgtBuy : colTgtSell, textcolor=color.white, size=size.small)
+
+    if closedNow
+        int   cDir   = tDir
+        float exitPx = evSL ? slP : hM ? tMP : close
+        float pnl    = cDir * (exitPx - entry) / entry * 100.0
+        float net    = pnl - costPct
+
+        nTrades += 1
+        nWin += net > 0 ? 1 : 0
+        sumNet += net
+        lastCloseBar := bar_index
+
+        if cDir == 1
+            lTot += 1
+            l1 += h1 ? 1 : 0
+            l2 += h2 ? 1 : 0
+            lM += hM ? 1 : 0
+        else
+            sTot += 1
+            s1 += h1 ? 1 : 0
+            s2 += h2 ? 1 : 0
+            sM += hM ? 1 : 0
+
+        // EXIT / SL / TARGET marker with premium price and gross / net result
+        bool   above  = (cDir == 1) != evSL
+        bool   locked = trailActive and (cDir == 1 ? slP >= entry : slP <= entry)
+        string exTxt  = evSL ? (locked ? "TRAIL STOP" : "SL HIT") : hM ? "MAX TARGET" : evFade ? "FADE EXIT" : evExit ? "EXIT" : "TIME EXIT"
+        color  exCol  = evSL ? (cDir == 1 ? colSlBuy : colSlSell) : hM ? (cDir == 1 ? colTgtBuy : colTgtSell) : colExit
+        color  exTxtC = (evExit or evTime or evFade) ? color.black : color.white
+        string exLbl  = exTxt + "\n₹" + f_px(exitPx) + "\n" + f_pct(pnl) + "  (net " + f_pct(net) + ")" + (evFade ? "\n" + fadeWhy : "")
+
+        float eOff = off
+        if above
+            slotUp := bar_index - lastUpBar <= 4 ? slotUp + 1 : 0
+            lastUpBar := bar_index
+            eOff := off * (1.0 + 2.8 * slotUp)
+        else
+            slotDn := bar_index - lastDnBar <= 4 ? slotDn + 1 : 0
+            lastDnBar := bar_index
+            eOff := off * (1.0 + 2.8 * slotDn)
+        label.new(bar_index, above ? high + eOff : low - eOff, exLbl, style=above ? label.style_label_down : label.style_label_up, color=exCol, textcolor=exTxtC, size=size.small)
+
+        // finish the entry -> exit connector line
+        line.set_xy2(lnConn, bar_index, exitPx)
+        line.set_color(lnConn, net >= 0 ? colWin : colLoss)
+
+        if not keepOldLbl
+            label.delete(lbEntry)
+            label.delete(lbSL)
+            label.delete(lbT1)
+            label.delete(lbT2)
+            label.delete(lbTM)
+
+        tDir := 0
+
+// ---------------------------------------------------------------------
+//  Open a new trade (only when flat and the cool-down is over)
+// ---------------------------------------------------------------------
+if tDir == 0 and not closedNow and (longTrig or shortTrig) and (bar_index - lastCloseBar > cooldown)
+    tDir := longTrig ? 1 : -1
+    bool isL = tDir == 1
+    entry := close
+    slP := isL ? slL : slS
+    t1P := isL ? t1L : t1S
+    t2P := isL ? t2L : t2S
+    tMP := isL ? tML : tMS
+    riskPts := isL ? riskL : riskS
+    runExt := close
+    h1 := false
+    h2 := false
+    hM := false
+    trailActive := false
+    barsIn := 0
+    lastDir := tDir
+    evLong := isL
+    evShort := not isL
+
+    bool   bullSrc = isL ? (not mapPut) : false
+    bool   isBrk   = isL ? longBrk : shortBrk
+    bool   viaCh   = isL ? clrChU : clrChD
+    string eType   = isBrk ? (viaCh ? "CHANNEL BRK" : "LEVEL BRK") : "TREND"
+    float  roomNow = isL ? roomRL : roomRS
+    lastEvent := (isL ? "BUY (" : "SELL (") + eType + ")"
+
+    color cE = isL ? colBuy : colSell
+    color cS = isL ? colSlBuy : colSlSell
+    color cT = isL ? colTgtBuy : colTgtSell
+    curSl := cS
+    int hn  = isL ? lTot : sTot
+    int hc1 = isL ? l1 : s1
+    int hc2 = isL ? l2 : s2
+    int hc3 = isL ? lM : sM
+
+    // BUY / SELL marker with premium price, kept clear of the candle and stacked if crowded
+    string domTxt = (bullSrc ? "Buyers " + str.tostring(buyPct, "0") : "Sellers " + str.tostring(sellPct, "0")) + "%" + (useSrc ? " (src)" : "") + " · " + grade
+    string entTxt = (isL ? "▲ BUY" : "▼ SELL") + "  ·  " + eType + "\n₹" + f_px(close) + "\n" + domTxt + "\nRoom to wall: " + f_room(roomNow)
+    float nOff = off
+    if isL
+        slotDn := bar_index - lastDnBar <= 4 ? slotDn + 1 : 0
+        lastDnBar := bar_index
+        nOff := off * (1.0 + 3.2 * slotDn)
+    else
+        slotUp := bar_index - lastUpBar <= 4 ? slotUp + 1 : 0
+        lastUpBar := bar_index
+        nOff := off * (1.0 + 3.2 * slotUp)
+    label.new(bar_index, isL ? low - nOff : high + nOff, entTxt, style=isL ? label.style_label_up : label.style_label_down, color=cE, textcolor=color.white, size=size.small)
+
+    // risk / reward zones
+    if showZones
+        float zEnd = zoneToMax ? tMP : t2P
+        bxRew := box.new(bar_index, math.max(entry, zEnd), bar_index + 1, math.min(entry, zEnd), border_color=color.new(cT, 100), bgcolor=color.new(cT, 94))
+        bxRisk := box.new(bar_index, math.max(entry, slP), bar_index + 1, math.min(entry, slP), border_color=color.new(cS, 100), bgcolor=color.new(cS, 92))
+
+    // level lines
+    lnEntry := line.new(bar_index, entry, bar_index + 1, entry, color=color.new(color.gray, 20), width=1, style=line.style_dotted)
+    lnSL    := line.new(bar_index, slP, bar_index + 1, slP, color=cS, width=2, style=line.style_solid)
+    lnT1    := line.new(bar_index, t1P, bar_index + 1, t1P, color=cT, width=1, style=line.style_dashed)
+    lnT2    := line.new(bar_index, t2P, bar_index + 1, t2P, color=cT, width=1, style=line.style_dashed)
+    lnTM    := line.new(bar_index, tMP, bar_index + 1, tMP, color=cT, width=2, style=line.style_solid)
+    lnConn  := line.new(bar_index, entry, bar_index + 1, entry, color=cE, width=2, style=line.style_dashed)
+
+    // level labels (name, price, % move, past hit record)
+    lbEntry := label.new(bar_index + 1, entry, "ENTRY  ₹" + f_px(entry), style=label.style_label_left, color=color.new(color.gray, 25), textcolor=color.white, size=size.small)
+    lbSL    := label.new(bar_index + 1, slP, (isL ? "BUY SL  " : "SELL SL  ") + f_px(slP) + "  (" + f_gain(slP, entry, tDir) + ")", style=label.style_label_left, color=cS, textcolor=color.white, size=size.small)
+    lbT1    := label.new(bar_index + 1, t1P, "T1  " + f_px(t1P) + "  (" + f_gain(t1P, entry, tDir) + ")  |  " + f_hit(hc1, hn), style=label.style_label_left, color=cT, textcolor=color.white, size=size.small)
+    lbT2    := label.new(bar_index + 1, t2P, "T2  " + f_px(t2P) + "  (" + f_gain(t2P, entry, tDir) + ")  |  " + f_hit(hc2, hn), style=label.style_label_left, color=cT, textcolor=color.white, size=size.small)
+    lbTM    := label.new(bar_index + 1, tMP, "MAX  " + f_px(tMP) + "  (" + f_gain(tMP, entry, tDir) + ")  |  " + f_hit(hc3, hn), style=label.style_label_left, color=cT, textcolor=color.white, size=size.small)
+
+// =====================================================================
+//  PLOTS
+// =====================================================================
+pF = plot(showRibbon ? emaF : na, "Fast EMA", color=color.new(emaF > emaS ? colBuy : colSell, 15), linewidth=1, display=display.pane)
+pS = plot(showRibbon ? emaS : na, "Slow EMA", color=color.new(emaF > emaS ? colBuy : colSell, 55), linewidth=1, display=display.pane)
+fill(pF, pS, color=emaF > emaS ? color.new(colBuy, 88) : color.new(colSell, 88))
+plot(trailSeries, "Trailing stop", color=curSl, linewidth=2, style=plot.style_linebr, display=display.pane)
+
+// =====================================================================
+//  INFO PANEL (compact)
+// =====================================================================
+int hnT  = lastDir == 1 ? lTot : lastDir == -1 ? sTot : 0
+int hT1  = lastDir == 1 ? l1 : lastDir == -1 ? s1 : 0
+int hT2  = lastDir == 1 ? l2 : lastDir == -1 ? s2 : 0
+int hTM  = lastDir == 1 ? lM : lastDir == -1 ? sM : 0
+
+var table tb = table.new(tblPos, 2, 13, bgcolor=#131722, frame_color=#2A2E39, frame_width=1, border_color=#2A2E39, border_width=1)
+
+f_row(r, k, val, valCol) =>
+    table.cell(tb, 0, r, k, text_color=color.new(color.white, 30), bgcolor=#1E222D, text_halign=text.align_left, text_size=size.small)
+    table.cell(tb, 1, r, val, text_color=valCol, bgcolor=#131722, text_halign=text.align_left, text_size=size.small)
+
+if barstate.islast and showTable
+    haveLv    = lastDir != 0
+    statusCol = tDir == 1 ? colBuy : tDir == -1 ? colSell : color.gray
+    slCol     = lastDir == 1 ? colSlBuy : lastDir == -1 ? colSlSell : color.gray
+    tgCol     = lastDir == 1 ? colTgtBuy : lastDir == -1 ? colTgtSell : color.gray
+    gradeCol  = grade == "Strong" ? colWin : grade == "Moderate" ? color.yellow : color.gray
+    float pnlNow = tDir != 0 ? tDir * (close - entry) / entry * 100.0 : na
+    tradeTxt = tDir == 0 ? "● Flat" : (tDir == 1 ? "▲ LONG @ ₹" : "▼ SHORT @ ₹") + f_px(entry) + "  " + f_pct(pnlNow) + " (net " + f_pct(pnlNow - costPct) + ")"
+    int   fN = tDir == 1 ? fadeLongN : tDir == -1 ? fadeShortN : 0
+    string fT = tDir == 1 ? fadeLongT : tDir == -1 ? fadeShortT : ""
+    roomTxt = "▲ " + f_room(roomRL) + (buyerMode ? "" : "  ▼ " + f_room(roomRS)) + "  (need " + str.tostring(minRoomR, "0.0") + "R)"
+    roomCol = roomRL >= minRoomR ? colWin : colLoss
+    resTxt  = nTrades == 0 ? "no finished trades yet" : str.tostring(nWin) + "/" + str.tostring(nTrades) + " net wins · " + f_pct(sumNet) + " · avg " + f_pct(sumNet / nTrades)
+    resCol  = nTrades == 0 ? color.gray : sumNet >= 0 ? colWin : colLoss
+    float lagMin = (timenow - time_close) / 60000.0
+    dataTxt = lagMin <= 0 ? "Live" : lagMin < 180 ? (lagMin > 6 ? "⚠ delayed, at least " + str.tostring(lagMin, "0") + " min" : "OK") : "Market closed"
+    dataCol = (lagMin > 6 and lagMin < 180) ? color.orange : color.new(color.white, 20)
+
+    table.cell(tb, 0, 0, "BSS PRO v5  ·  Buyer / Seller Strength", text_color=color.white, bgcolor=#2962FF, text_halign=text.align_center, text_size=size.small)
+    table.merge_cells(tb, 0, 0, 1, 0)
+
+    f_row(1, "BUYERS", f_bar(buyPct, 10) + " " + str.tostring(buyPct, "0.0") + "%", colBuy)
+    f_row(2, "SELLERS", f_bar(sellPct, 10) + " " + str.tostring(sellPct, "0.0") + "%", colSell)
+    f_row(3, "STRENGTH", grade + (na(rank) ? "" : "  (" + str.tostring(rank, "0") + "/100)"), gradeCol)
+    f_row(4, "TRADE", tradeTxt, statusCol)
+    f_row(5, "STOP", haveLv ? "₹" + f_px(slP) + (trailActive and tDir != 0 ? "  (trailing)" : "") : "-", slCol)
+    f_row(6, "T1", haveLv ? "₹" + f_px(t1P) + " · " + f_hit(hT1, hnT) : "-", tgCol)
+    f_row(7, "T2", haveLv ? "₹" + f_px(t2P) + " · " + f_hit(hT2, hnT) : "-", tgCol)
+    f_row(8, "MAX", haveLv ? "₹" + f_px(tMP) + " · " + f_hit(hTM, hnT) : "-", tgCol)
+    f_row(9, "ROOM", roomTxt, srOn ? roomCol : color.gray)
+    f_row(10, "FADE", tDir != 0 ? str.tostring(fN) + "/7  " + fT : "-", fN >= fadeNeedT1 ? colLoss : color.new(color.white, 20))
+    f_row(11, "RESULTS", resTxt, resCol)
+    f_row(12, "DATA", dataTxt, dataCol)
+
+// =====================================================================
+//  ALERTS
+// =====================================================================
+alertcondition(evLong,  "BSS BUY",  "BSS: BUY signal @ {{close}}")
+alertcondition(evShort, "BSS SELL", "BSS: SELL signal @ {{close}}")
+alertcondition(evExit or evFade, "BSS EXIT", "BSS: EXIT / FADE exit @ {{close}}")
+alertcondition(evSL,    "BSS Stop hit", "BSS: Stop loss / trailing stop hit")
+alertcondition(ev1 or ev2 or evM, "BSS Target hit", "BSS: Target hit")

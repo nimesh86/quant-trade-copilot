@@ -1,0 +1,127 @@
+{
+  "name": "quant-studio",
+  "displayName": "Quant Studio - Indicator Debugger & Market Replay",
+  "description": "Production-grade quantitative indicator development, native Python debugging (debugpy), and TradingView market replay for VS Code and Google Antigravity IDE.",
+  "version": "1.0.0",
+  "publisher": "quant-trade-copilot",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "trading",
+    "quant",
+    "backtest",
+    "tradingview",
+    "lightweight-charts",
+    "debugger",
+    "antigravity"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onCommand:quantStudio.openChart",
+    "onCommand:quantStudio.debugIndicator",
+    "onCommand:quantStudio.runReplay",
+    "onView:quantStudio.sessionView",
+    "onView:quantStudio.indicatorsView"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "quantStudio.openChart",
+        "title": "Open Quant Studio Chart",
+        "category": "Quant Studio",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "quantStudio.debugIndicator",
+        "title": "Debug Active Indicator",
+        "category": "Quant Studio",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "quantStudio.runReplay",
+        "title": "Run Fast Market Replay",
+        "category": "Quant Studio",
+        "icon": "$(play)"
+      },
+      {
+        "command": "quantStudio.killSession",
+        "title": "Terminate Quant Studio Session",
+        "category": "Quant Studio",
+        "icon": "$(stop-circle)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "quantStudio.openChart",
+          "group": "navigation@1",
+          "when": "resourceExtname == .py"
+        },
+        {
+          "command": "quantStudio.debugIndicator",
+          "group": "navigation@2",
+          "when": "resourceExtname == .py"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "quantStudio.openChart",
+          "when": "view == quantStudio.sessionView",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "quant-studio",
+          "title": "Quant Studio",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "quant-studio": [
+        {
+          "id": "quantStudio.sessionView",
+          "name": "Market Replay Session"
+        },
+        {
+          "id": "quantStudio.indicatorsView",
+          "name": "Workspace Indicators"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Quant Studio",
+      "properties": {
+        "quantStudio.serverPort": {
+          "type": "integer",
+          "default": 8765,
+          "description": "Local WebSocket IPC port for the Python debug runner."
+        },
+        "quantStudio.defaultSymbol": {
+          "type": "string",
+          "default": "NIFTY",
+          "description": "Default underlying index symbol for replay."
+        },
+        "quantStudio.defaultContract": {
+          "type": "string",
+          "default": "NIFTY_ATM_CE",
+          "description": "Default option contract strike for replay."
+        },
+        "quantStudio.autoOpenChartOnDebug": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the TradingView Chart Webview tab when debugging an indicator."
+        }
+      }
+    }
+  }
+}
