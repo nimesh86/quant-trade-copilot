@@ -54,7 +54,6 @@
                 <button id="btn-master-replay" class="hdr-tb-btn replay-btn" title="Bar Replay Simulator">⏪</button>
                 <button id="btn-master-report" class="hdr-tb-btn report-btn" title="Session Accuracy Scorecard">📊</button>
                 <button id="btn-master-tvi" class="hdr-tb-btn pinescript-btn" title="TradingView Indicators (+TvI)">+Tv<span class="tvi-serif-i">I</span></button>
-                <button id="btn-master-strats" class="hdr-tb-btn strat-btn" onclick="openStrategiesModal()" title="Manage Active Strategies & Indicators / Unplug" style="color:#00f0ff;border-color:rgba(0,240,255,0.3);">🎯 Strategies (<span id="strat-count-badge">2</span>)</button>
             </div>
             <div id="portfolio-pnl-pill" class="portfolio-pnl-pill pnl-neutral" title="Portfolio Realized + Unrealized PnL / Capital">
                 <span id="val-portfolio-pnl" class="pnl-num">+₹0.00</span>
@@ -442,29 +441,6 @@
                             <!-- Populated dynamically with CE & PE trades -->
                         </tbody>
                     </table>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ── Live Strategies & Indicators Manager Modal ───────────────────────── -->
-    <div id="strategies-manager-modal" class="bt-modal-backdrop hidden" onclick="if(event.target===this)closeStrategiesModal()">
-        <div class="bt-modal-card" style="max-width: 580px;">
-            <div class="bt-modal-header">
-                <div class="bt-modal-title">
-                    <span class="bt-modal-icon">🎯</span>
-                    <div>
-                        <h3>Active Strategies & Live Indicators</h3>
-                        <p class="bt-modal-sub">Hot-plug, pause, or unplug indicators at runtime with 0ms downtime</p>
-                    </div>
-                </div>
-                <div class="bt-modal-header-actions">
-                    <button type="button" class="bt-modal-close" onclick="closeStrategiesModal()">✕</button>
-                </div>
-            </div>
-            <div class="bt-modal-body" style="padding: 18px 24px;">
-                <div id="strategies-list-container" style="display:flex;flex-direction:column;gap:12px;">
-                    <!-- Dynamically populated via loadStrategyList() -->
                 </div>
             </div>
         </div>
