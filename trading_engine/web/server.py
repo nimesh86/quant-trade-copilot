@@ -490,7 +490,60 @@ async def get_strategy_suggestions():
         "active_suggestions": get_dynamic_strategy_suggestions(),
         "history": state.strategy_detector.detection_history,
         "detector_active": True,
-        "strategies": [s.name for s in state.strategy_detector.strategies]
+        "strategies": [
+            {
+                "name": s.name,
+                "enabled": getattr(s, "enabled", True),
+                "is_indicator": hasattr(s, "indicator")
+            }
+            for s in state.strategy_detector.strategies
+        ]
+    }
+
+
+@app.get("/api/strategy/list")
+async def get_strategy_list():
+    """Returns list of running strategies and indicators with their live statuses."""
+    return {
+        "strategies": [
+            {
+                "name": s.name,
+                "enabled": getattr(s, "enabled", True),
+                "is_indicator": hasattr(s, "indicator")
+            }
+            for s in state.strategy_detector.strategies
+        ],
+        "total_active": len([s for s in state.strategy_detector.strategies if getattr(s, "enabled", True)])
+    }
+
+
+@app.post("/api/strategy/unplug")
+async def unplug_strategy(payload: Dict[str, Any] = Body(...)):
+    """Unplugs a strategy or indicator at runtime with zero downtime."""
+    strategy_name = payload.get("strategy_name") or payload.get("name")
+    if not strategy_name:
+        raise HTTPException(status_code=400, detail="Missing strategy_name in payload.")
+    success = state.strategy_detector.unplug_indicator(strategy_name)
+    return {
+        "success": success,
+        "strategy_name": strategy_name,
+        "unplugged": success,
+        "remaining_strategies": [s.name for s in state.strategy_detector.strategies]
+    }
+
+
+@app.post("/api/strategy/toggle")
+async def toggle_strategy(payload: Dict[str, Any] = Body(...)):
+    """Toggles a strategy or indicator on or off at runtime without unloading it."""
+    strategy_name = payload.get("strategy_name") or payload.get("name")
+    enabled = payload.get("enabled", True)
+    if not strategy_name:
+        raise HTTPException(status_code=400, detail="Missing strategy_name in payload.")
+    success = state.strategy_detector.toggle_strategy(strategy_name, enabled)
+    return {
+        "success": success,
+        "strategy_name": strategy_name,
+        "enabled": enabled
     }
 
 

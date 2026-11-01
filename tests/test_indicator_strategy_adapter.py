@@ -46,3 +46,24 @@ def test_dynamic_indicator_hot_mount():
     strategy_names = [s.name for s in detector.strategies]
     assert "CUSTOM_BSS_PRO_HOT" in strategy_names
     assert len(detector.strategies) == initial_count + 1
+
+    # Unplug dynamically
+    unplugged = detector.unplug_indicator("CUSTOM_BSS_PRO_HOT")
+    assert unplugged is True
+    assert "CUSTOM_BSS_PRO_HOT" not in [s.name for s in detector.strategies]
+    assert len(detector.strategies) == initial_count
+
+
+def test_strategy_runtime_toggle():
+    cfg = EngineConfig()
+    detector = StrategyDetectorAdapter(cfg)
+
+    # Toggle off BSS_PRO_V6
+    assert detector.toggle_strategy("BSS_PRO_V6", False) is True
+    strat = next(s for s in detector.strategies if s.name == "BSS_PRO_V6")
+    assert strat.enabled is False
+
+    # Toggle back on
+    assert detector.toggle_strategy("BSS_PRO_V6", True) is True
+    assert strat.enabled is True
+

@@ -5418,6 +5418,94 @@ window.setBacktestFilter = setBacktestFilter;
 window.openBacktestModal = openBacktestModal;
 window.closeBacktestModal = closeBacktestModal;
 
+// ── Live Strategy & Indicator Runtime Manager ────────────────────────────────
+async function openStrategiesModal() {
+    const modal = document.getElementById('strategies-manager-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    await loadStrategiesManagerList();
+}
+
+function closeStrategiesModal() {
+    const modal = document.getElementById('strategies-manager-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function loadStrategiesManagerList() {
+    const container = document.getElementById('strategies-list-container');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/strategy/list');
+        const data = await res.json();
+        const strats = data.strategies || [];
+        const badge = document.getElementById('strat-count-badge');
+        if (badge) badge.textContent = strats.filter(s => s.enabled).length;
+
+        if (strats.length === 0) {
+            container.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">No active strategies currently plugged in.</div>';
+            return;
+        }
+
+        container.innerHTML = strats.map(s => `
+            <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px 16px;">
+                <div>
+                    <div style="font-weight:600;font-size:14px;color:${s.enabled ? '#38bdf8' : '#94a3b8'};display:flex;align-items:center;gap:8px;">
+                        <span>${s.name}</span>
+                        <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:${s.is_indicator ? 'rgba(0,240,255,0.15)' : 'rgba(168,85,247,0.15)'};color:${s.is_indicator ? '#00f0ff' : '#c084fc'};">
+                            ${s.is_indicator ? 'Indicator' : 'Strategy'}
+                        </span>
+                    </div>
+                    <div style="font-size:12px;color:#64748b;margin-top:2px;">
+                        Status: <span style="color:${s.enabled ? '#4ade80' : '#f87171'};font-weight:500;">${s.enabled ? 'ACTIVE (Live Evaluation)' : 'PAUSED'}</span>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <button onclick="toggleStrategyRuntime('${s.name}', ${!s.enabled})" style="background:${s.enabled ? 'rgba(234,179,8,0.15)' : 'rgba(74,222,128,0.15)'};color:${s.enabled ? '#facc15' : '#4ade80'};border:1px solid ${s.enabled ? 'rgba(234,179,8,0.4)' : 'rgba(74,222,128,0.4)'};padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
+                        ${s.enabled ? 'Pause' : 'Resume'}
+                    </button>
+                    <button onclick="unplugStrategyRuntime('${s.name}')" style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.4);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">
+                        Unplug ✕
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = `<div style="color:#ef4444;text-align:center;">Failed to fetch strategies: ${e.message}</div>`;
+    }
+}
+
+async function toggleStrategyRuntime(name, enabled) {
+    try {
+        await fetch('/api/strategy/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({strategy_name: name, enabled: enabled})
+        });
+        await loadStrategiesManagerList();
+    } catch (e) {
+        alert('Failed to toggle strategy: ' + e.message);
+    }
+}
+
+async function unplugStrategyRuntime(name) {
+    if (!confirm('Are you sure you want to unplug ' + name + ' from the live trading engine?')) return;
+    try {
+        await fetch('/api/strategy/unplug', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({strategy_name: name})
+        });
+        await loadStrategiesManagerList();
+    } catch (e) {
+        alert('Failed to unplug strategy: ' + e.message);
+    }
+}
+
+window.openStrategiesModal = openStrategiesModal;
+window.closeStrategiesModal = closeStrategiesModal;
+window.toggleStrategyRuntime = toggleStrategyRuntime;
+window.unplugStrategyRuntime = unplugStrategyRuntime;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ── CONTRACT TRADING ENGINE TERMINAL (ON-CHART & RISK CONTROLS) ──────────────
 // ─────────────────────────────────────────────────────────────────────────────
