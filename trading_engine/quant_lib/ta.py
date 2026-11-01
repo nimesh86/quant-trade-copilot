@@ -5,7 +5,19 @@ Supports both vectorized historical arrays and incremental streaming updates.
 """
 from typing import Tuple, Union, Optional
 import numpy as np
-import numba
+
+try:
+    import numba
+except Exception:
+    class _MockNumba:
+        @staticmethod
+        def njit(*args, **kwargs):
+            def decorator(f):
+                return f
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                return args[0]
+            return decorator
+    numba = _MockNumba()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

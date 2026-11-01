@@ -2215,8 +2215,9 @@ async def serve_studio():
 try:
     from trading_engine.web.studio_router import studio_router
     app.include_router(studio_router)
+    logger.info("Indicator Studio & Dynamic Hot-Reload Router mounted successfully.")
 except Exception as _e:
-    pass
+    logger.error("Failed to mount Indicator Studio router: %s", _e, exc_info=True)
 
 
 # ── Contract Analysis Page APIs ───────────────────────────────────────────────
