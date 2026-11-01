@@ -517,6 +517,37 @@ async def get_strategy_list():
     }
 
 
+@app.post("/api/strategy/plug")
+async def plug_strategy(payload: Dict[str, Any] = Body(...)):
+    """Plugs / hot-mounts an indicator or preset into the live engine with zero downtime."""
+    strategy_id = str(payload.get("strategy_id") or payload.get("strategy_name") or payload.get("id") or "").lower()
+    if not strategy_id:
+        raise HTTPException(status_code=400, detail="Missing strategy_id or strategy_name.")
+
+    if "bss_pro_v6" in strategy_id or "bss_v6" in strategy_id:
+        from trading_engine.indicators.bss_pro_v6 import BSSProV6Indicator
+        ind = BSSProV6Indicator()
+        state.strategy_detector.register_indicator(ind, name="BSS_PRO_V6", cfg=payload.get("cfg"))
+        return {"success": True, "strategy_name": "BSS_PRO_V6", "plugged": True, "strategies": [s.name for s in state.strategy_detector.strategies]}
+    elif "bss_pro_v5" in strategy_id or "bss_v5" in strategy_id:
+        from trading_engine.indicators.bss_pro_v5 import BSSProV5Indicator
+        ind = BSSProV5Indicator()
+        state.strategy_detector.register_indicator(ind, name="BSS_PRO_V5", cfg=payload.get("cfg"))
+        return {"success": True, "strategy_name": "BSS_PRO_V5", "plugged": True, "strategies": [s.name for s in state.strategy_detector.strategies]}
+    else:
+        from trading_engine.indicators.presets import PresetsManager
+        from trading_engine.runtime.compiler import QuantCompiler
+        code = PresetsManager.get_preset_code(strategy_id)
+        if not code:
+            raise HTTPException(status_code=404, detail=f"Indicator '{strategy_id}' not found.")
+        compiler = QuantCompiler()
+        ind_cls, _ = compiler.compile_and_load(code)
+        ind = ind_cls()
+        strat_name = getattr(ind, "name", strategy_id.upper())
+        state.strategy_detector.register_indicator(ind, name=strat_name, cfg=payload.get("cfg"))
+        return {"success": True, "strategy_name": strat_name, "plugged": True, "strategies": [s.name for s in state.strategy_detector.strategies]}
+
+
 @app.post("/api/strategy/unplug")
 async def unplug_strategy(payload: Dict[str, Any] = Body(...)):
     """Unplugs a strategy or indicator at runtime with zero downtime."""
