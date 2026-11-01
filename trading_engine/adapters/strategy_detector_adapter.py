@@ -15,11 +15,18 @@ try:
     from ..strategy.base import BaseStrategy, StrategySignal
     from ..strategy.amd_volume_profile import AMDVolumeProfileStrategy
     from ..strategy.core_85_strategy import Core85Strategy
+    from ..strategy.indicator_strategy import IndicatorStrategyAdapter
+    from ..indicators.bss_pro_v6 import BSSProV6Indicator
 except ImportError:
     from config import EngineConfig
     from strategy.base import BaseStrategy, StrategySignal
     from strategy.amd_volume_profile import AMDVolumeProfileStrategy
     from strategy.core_85_strategy import Core85Strategy
+    from strategy.indicator_strategy import IndicatorStrategyAdapter
+    try:
+        from indicators.bss_pro_v6 import BSSProV6Indicator
+    except ImportError:
+        from trading_engine.indicators.bss_pro_v6 import BSSProV6Indicator
 
 class StrategyDetectorAdapter:
     def __init__(self, cfg: EngineConfig, config_path: Optional[str] = None):
@@ -53,7 +60,24 @@ class StrategyDetectorAdapter:
         amd_cfg = self.strategies_cfg.get("amd_volume_profile", {})
         if amd_cfg.get("enabled", True):
             self.strategies.append(AMDVolumeProfileStrategy(self.cfg, amd_cfg))
-            print("  ├── Registered: AMDVolumeProfileStrategy (TPO + Liquidity Sweep)")
+            print("  ├── Registered: AMDVolumeProfileStrategy (TPO + Liquidity Sweep)", flush=True)
+
+        # 2. BSS Pro Scalper v6 Indicator Strategy
+        bss_cfg = self.strategies_cfg.get("bss_pro_v6", {})
+        if bss_cfg.get("enabled", True):
+            try:
+                ind = BSSProV6Indicator()
+                self.strategies.append(IndicatorStrategyAdapter(ind, self.cfg, bss_cfg, name_override="BSS_PRO_V6"))
+                print("  ├── Registered: BSSProV6Indicator (Active Production Scalper v6)", flush=True)
+            except Exception as e:
+                print(f"  ├── Failed to register BSSProV6Indicator: {e}", flush=True)
+
+    def register_indicator(self, indicator, name: Optional[str] = None, cfg: Optional[Dict[str, Any]] = None):
+        """Zero-downtime dynamic hot-mount of an indicator into the running engine."""
+        strat = IndicatorStrategyAdapter(indicator, self.cfg, cfg, name_override=name)
+        self.strategies = [s for s in self.strategies if s.name != strat.name]
+        self.strategies.append(strat)
+        print(f"StrategyDetectorAdapter: Hot-mounted indicator strategy '{strat.name}'. Total running: {len(self.strategies)}", flush=True)
 
     def reset_session(self):
         """Resets active suggestions and daily session states across all strategies."""

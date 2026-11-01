@@ -2199,17 +2199,6 @@ async def serve_contract():
         }
     )
 
-@app.get("/studio")
-@app.get("/studio.html")
-async def serve_studio():
-    return FileResponse(
-        STATIC_DIR / "studio.html",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        }
-    )
 
 # ── Mount Indicator Studio Router ──
 try:

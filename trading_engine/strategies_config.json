@@ -21,5 +21,11 @@
     "min_rr_ratio": 2.0,
     "enable_trailing_breakeven_at_r": 1.5,
     "enable_profit_lock_at_r": 2.5
+  },
+  "bss_pro_v6": {
+    "enabled": true,
+    "trade_mode": "Option buyer (long premium only)",
+    "dom_thresh": 58.0,
+    "min_hold_prob": 40.0
   }
 }
