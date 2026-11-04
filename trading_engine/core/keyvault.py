@@ -26,7 +26,7 @@ import stat
 import subprocess
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
 
 logger = logging.getLogger("trading_engine.keyvault")
 
@@ -311,21 +311,138 @@ AUTO_START_TUNNEL=false
 
 keyvault = LocalKeyVault()
 
-def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+from trading_engine.core.credentials import (
+    SecretKey,
+    KiteCredentials,
+    BreezeCredentials,
+    TelegramCredentials
+)
+
+
+def _to_key_str(key: Union[SecretKey, str]) -> str:
+    """Helper normalizing SecretKey enum or string to vault key string."""
+    return key.value if isinstance(key, SecretKey) else str(key)
+
+
+def get_secret(key: Union[SecretKey, str], default: Optional[str] = None) -> Optional[str]:
     """Retrieve secret from KeyVault / Keychain / Environment."""
-    return keyvault.get_secret(key, default)
+    return keyvault.get_secret(_to_key_str(key), default)
 
-def set_secret(key: str, value: str):
+
+def set_secret(key: Union[SecretKey, str], value: str):
     """Store secret securely in KeyVault / Keychain."""
-    return keyvault.set_secret(key, value)
+    return keyvault.set_secret(_to_key_str(key), value)
 
-def delete_secret(key: str) -> bool:
+
+def delete_secret(key: Union[SecretKey, str]) -> bool:
     """Delete a secret from KeyVault / Keychain."""
-    return keyvault.delete_secret(key)
+    return keyvault.delete_secret(_to_key_str(key))
+
 
 def list_secrets() -> Dict[str, str]:
     """Returns dictionary of secret names with masked values."""
     return keyvault.list_secrets()
+
+
+def _resolve_secret(key: SecretKey, fallback_env: Optional[str] = None) -> str:
+    """
+    Central wrapper resolving secret value:
+    1. Local KeyVault storage
+    2. Primary process environment variable (key.value)
+    3. Optional secondary legacy environment variable (fallback_env)
+    """
+    val = get_secret(key) or os.getenv(key.value, "")
+    if not val and fallback_env:
+        val = os.getenv(fallback_env, "")
+    return val.strip() if val else ""
+
+
+# ── Typed Credentials Accessors (Single Source of Truth) ─────────────────────
+
+def get_kite_credentials() -> KiteCredentials:
+    """Retrieves Zerodha Kite credentials from KeyVault / Environment."""
+    return KiteCredentials(
+        api_key=_resolve_secret(SecretKey.KITE_API_KEY, fallback_env="ZERODHA_API_KEY"),
+        access_token=_resolve_secret(SecretKey.KITE_ACCESS_TOKEN, fallback_env="ZERODHA_ACCESS_TOKEN"),
+        api_secret=_resolve_secret(SecretKey.KITE_API_SECRET, fallback_env="ZERODHA_API_SECRET"),
+    )
+
+
+def set_kite_credentials(
+    api_key: Optional[str] = None,
+    access_token: Optional[str] = None,
+    api_secret: Optional[str] = None
+):
+    """Stores Zerodha Kite credentials in KeyVault."""
+    if api_key is not None:
+        set_secret(SecretKey.KITE_API_KEY, api_key.strip())
+    if access_token is not None:
+        set_secret(SecretKey.KITE_ACCESS_TOKEN, access_token.strip())
+    if api_secret is not None:
+        set_secret(SecretKey.KITE_API_SECRET, api_secret.strip())
+
+
+def get_breeze_credentials() -> BreezeCredentials:
+    """Retrieves ICICI Direct Breeze credentials from KeyVault / Environment."""
+    return BreezeCredentials(
+        api_key=_resolve_secret(SecretKey.BREEZE_API_KEY),
+        api_secret=_resolve_secret(SecretKey.BREEZE_API_SECRET),
+        user_id=_resolve_secret(SecretKey.BREEZE_USER_ID),
+        password=_resolve_secret(SecretKey.BREEZE_PASSWORD),
+        totp_key=_resolve_secret(SecretKey.BREEZE_TOTP_KEY),
+        session_token=_resolve_secret(SecretKey.BREEZE_SESSION_TOKEN),
+    )
+
+
+def set_breeze_credentials(
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+    user_id: Optional[str] = None,
+    password: Optional[str] = None,
+    totp_key: Optional[str] = None,
+    session_token: Optional[str] = None,
+):
+    """Stores ICICI Direct Breeze credentials in KeyVault."""
+    if api_key is not None:
+        set_secret(SecretKey.BREEZE_API_KEY, api_key.strip())
+    if api_secret is not None:
+        set_secret(SecretKey.BREEZE_API_SECRET, api_secret.strip())
+    if user_id is not None:
+        set_secret(SecretKey.BREEZE_USER_ID, user_id.strip())
+    if password is not None:
+        set_secret(SecretKey.BREEZE_PASSWORD, password.strip())
+    if totp_key is not None:
+        set_secret(SecretKey.BREEZE_TOTP_KEY, totp_key.strip())
+    if session_token is not None:
+        set_secret(SecretKey.BREEZE_SESSION_TOKEN, session_token.strip())
+
+
+def set_breeze_session_token(token: str):
+    """Convenience helper to persist daily captured session token."""
+    set_secret(SecretKey.BREEZE_SESSION_TOKEN, token.strip())
+
+
+def get_telegram_credentials() -> TelegramCredentials:
+    """Retrieves Telegram alert configuration from KeyVault."""
+    return TelegramCredentials(
+        bot_token=_resolve_secret(SecretKey.TELEGRAM_BOT_TOKEN),
+        chat_id=_resolve_secret(SecretKey.TELEGRAM_CHAT_ID),
+        enabled=_resolve_secret(SecretKey.TELEGRAM_ENABLED).lower() in ("true", "1"),
+    )
+
+
+def set_telegram_credentials(
+    bot_token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    enabled: Optional[bool] = None
+):
+    """Stores Telegram alert configuration in KeyVault."""
+    if bot_token is not None:
+        set_secret(SecretKey.TELEGRAM_BOT_TOKEN, bot_token.strip())
+    if chat_id is not None:
+        set_secret(SecretKey.TELEGRAM_CHAT_ID, chat_id.strip())
+    if enabled is not None:
+        set_secret(SecretKey.TELEGRAM_ENABLED, "true" if enabled else "false")
 
 
 # ── CLI Interface ─────────────────────────────────────────────────────────────

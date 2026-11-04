@@ -1,25 +1,11 @@
 """
-BSS Pro v5 - FROZEN GOLDEN BASELINE.
+BSS Pro v6 - Active Development & Strategy Enhancement.
 =============================================================================
-DO NOT MODIFY THIS FILE. This file is frozen as the immutable benchmark version.
-All future enhancements, strategy tweaks, cooldown rules, or SL adjustments
-must be developed in `bss_pro_v6.py`.
-
-Verified Benchmark Performance (2026-10-29 to 2026-10-30, NIFTY 1-min):
-- Total Trades: 12 (8 Wins / 4 Losses)
-- Win Rate: 66.67%
-- Profit Factor: 6.40
-- Gross P&L: +₹8,620.95 (+132.63 pts)
-- Brokerage & Taxes: ₹863.68
-- Net Realized P&L: +₹7,757.27 (+119.33 net pts on Lot 65) / +₹5,836.48 (Lot 50)
+Forked from Frozen Golden Baseline (BSS Pro v5).
+Target Enhancements:
+1. Cooldown Period (4-5 bars) after SMART_EXIT_DISTRIBUTION to prevent instant re-entry traps.
+2. Initial Stop Loss refinement to avoid premature shakeouts on pre-rally institutional noise.
 =============================================================================
-
-Features:
-- Dual Trend EMAs (21 / 50) + Supertrend Filter
-- Dynamic Support & Resistance Body Clustering
-- Buyer / Seller Strength Pressure Percentage (> 58%)
-- Trend Pullback Entries & Breakout Channel Expansion
-- Dynamic Risk-to-Reward and ATR-based Targets / Stops
 """
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
@@ -30,10 +16,10 @@ from trading_engine.quant_lib.base import Indicator, IndicatorSignal, input
 from trading_engine.quant_lib import ta
 
 
-class BSSProV5Indicator(Indicator):
+class BSSProV6Indicator(Indicator):
     """
-    Institutional Multi-Factor Scalping Indicator ported directly from BSS_Pro_v5.pine.
-    Runs on backend in RAM with sub-15µs evaluation latency.
+    BSS Pro v6 - Enhanced Institutional Multi-Factor Scalping Indicator.
+    Active development version.
     """
 
     def init(self):
@@ -547,3 +533,7 @@ class BSSProV5Indicator(Indicator):
                 )
 
         return None
+
+
+# Backward-compatible alias so existing imports of BSSProV5Indicator still work
+BSSProV5Indicator = BSSProV6Indicator

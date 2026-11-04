@@ -49,6 +49,7 @@ if str(WEB_DIR) not in sys.path:
     sys.path.insert(0, str(WEB_DIR))
 
 from trading_engine.core.keyvault import get_secret, set_secret
+from trading_engine.core.app_config import app_config_manager
 
 try:
     import trading_engine.web.contract_data_manager as _cdm
@@ -100,6 +101,11 @@ try:
     from execution.contract_engine import contract_engine
 except ImportError:
     from trading_engine.execution.contract_engine import contract_engine
+
+try:
+    from trading_engine.live_engine.paper_trade_daemon import paper_daemon
+except ImportError:
+    from live_engine.paper_trade_daemon import paper_daemon
 
 app = FastAPI(title="AI Trader Autonomous Engine", version="2.5.0")
 
@@ -422,6 +428,36 @@ def get_dynamic_strategy_suggestions() -> List[Dict[str, Any]]:
         p["current_premium"] = max(15.0, round(atr * 5.0 + dist * 0.55, 1))
         suggestions.append(p)
     return suggestions
+
+
+# ── Master Application Configuration Endpoints ────────────────────────────────
+
+@app.get("/api/config")
+async def get_app_config():
+    """Returns master application configuration hierarchy."""
+    return app_config_manager.get_config().to_dict()
+
+
+@app.post("/api/config")
+async def update_app_config(payload: Dict[str, Any] = Body(...)):
+    """Updates master application configuration settings and persists to disk."""
+    updated = app_config_manager.update(payload)
+    return {
+        "status": "ok",
+        "message": "Configuration saved successfully",
+        "config": updated.to_dict()
+    }
+
+
+@app.post("/api/config/reset")
+async def reset_app_config():
+    """Resets master application configuration to factory defaults."""
+    cfg = app_config_manager.reset_defaults()
+    return {
+        "status": "ok",
+        "message": "Configuration reset to defaults",
+        "config": cfg.to_dict()
+    }
 
 
 # ── REST API Endpoints ────────────────────────────────────────────────────────
@@ -1370,6 +1406,45 @@ async def update_contract_tick(payload: Dict[str, Any] = Body(...)):
     return {"status": "ignored"}
 
 
+# ── Paper Trading Autonomous Endpoints ─────────────────────────────────────
+
+@app.get("/api/paper/state")
+async def get_paper_trading_state():
+    """Returns current active paper trade, summary, and subtabs (total, monthly, today)."""
+    return paper_daemon.get_full_state()
+
+
+@app.post("/api/paper/exit")
+async def exit_paper_trading_active_trade():
+    """1-click Market Exit for the active paper trade."""
+    return paper_daemon.force_exit()
+
+
+@app.get("/api/paper/config")
+async def get_paper_trading_config():
+    """Returns paper trading configuration (strategy, capital, blocked slots, trades/day)."""
+    return paper_daemon.get_config()
+
+
+@app.post("/api/paper/config")
+async def update_paper_trading_config(payload: Dict[str, Any] = Body(...)):
+    """Updates paper trading parameters from cogwheel modal."""
+    return paper_daemon.update_config(payload)
+
+
+@app.post("/api/paper/reset")
+async def reset_paper_trading_account(payload: Dict[str, Any] = Body(default={})):
+    """Resets paper account balance to initial capital and clears logs."""
+    cap = float(payload.get("capital", 20000.0))
+    paper_daemon.capital = cap
+    paper_daemon.initial_capital = cap
+    paper_daemon.active_trade = None
+    paper_daemon.trade_history = []
+    paper_daemon.save_state()
+    return paper_daemon.get_full_state()
+
+
+
 # ── Simulation Replay Endpoints ──────────────────────────────────────────────
 
 AVAILABLE_SIM_DATES = [
@@ -2269,7 +2344,14 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
 async def serve_index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        }
+    )
 
 @app.get("/contract")
 @app.get("/contract.html")
@@ -2284,6 +2366,28 @@ async def serve_contract():
     )
 
 
+EXTENSION_WEBVIEW_DIR = PROJECT_ROOT / "extensions" / "quant-studio" / "src" / "webview"
+if EXTENSION_WEBVIEW_DIR.exists():
+    app.mount("/extension", StaticFiles(directory=str(EXTENSION_WEBVIEW_DIR)), name="extension")
+
+@app.get("/quant-studio")
+async def serve_quant_studio():
+    chart_file = EXTENSION_WEBVIEW_DIR / "chart.html"
+    if chart_file.exists():
+        html = chart_file.read_text(encoding="utf-8")
+        html = html.replace("{{LIGHTWEIGHT_CHARTS_URI}}", "/extension/lightweight-charts.standalone.production.js")
+        html = html.replace("{{CHART_VIEW_URI}}", "/extension/chart_view.js")
+        return HTMLResponse(
+            html,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
+    raise HTTPException(status_code=404, detail="Quant Studio chart.html not found")
+
+
 # ── Mount Indicator Studio Router ──
 try:
     from trading_engine.web.studio_router import studio_router
@@ -2292,6 +2396,16 @@ try:
 except Exception as _e:
     import traceback
     print(f"Failed to mount Indicator Studio router: {_e}", flush=True)
+    traceback.print_exc()
+
+# ── Mount 3-Layer Quant Architecture Router (Quant Core, Backtest Engine, Live Engine) ──
+try:
+    from trading_engine.web.quant_router import quant_router
+    app.include_router(quant_router)
+    print("3-Layer Quant Architecture Router mounted successfully.", flush=True)
+except Exception as _e:
+    import traceback
+    print(f"Failed to mount Quant Architecture router: {_e}", flush=True)
     traceback.print_exc()
 
 
@@ -2627,15 +2741,13 @@ async def get_kite_vault_status():
     Returns configuration status of Kite API credentials in KeyVault.
     Values are NEVER returned to the client to ensure zero leakage.
     """
-    from trading_engine.core.keyvault import get_secret
-    key = get_secret("KITE_API_KEY")
-    token = get_secret("KITE_ACCESS_TOKEN")
-    is_configured = bool(key and token and len(key.strip()) > 3 and len(token.strip()) > 10)
+    from trading_engine.core.keyvault import get_kite_credentials
+    creds = get_kite_credentials()
     return {
         "status": "ok",
-        "configured": is_configured,
-        "api_key_set": bool(key and len(key.strip()) > 0),
-        "access_token_set": bool(token and len(token.strip()) > 0)
+        "configured": creds.is_configured,
+        "api_key_set": bool(creds.api_key),
+        "access_token_set": bool(creds.access_token)
     }
 
 
@@ -2645,41 +2757,36 @@ async def get_broker_vault_status():
     Returns unified configuration status for both Zerodha Kite and ICICI Direct Breeze.
     Credentials values are NEVER returned.
     """
-    from trading_engine.core.keyvault import get_secret
-    active_broker = (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
+    from trading_engine.core.credentials import SecretKey
+    from trading_engine.core.keyvault import (
+        get_secret,
+        set_secret,
+        get_kite_credentials,
+        set_kite_credentials,
+        get_breeze_credentials,
+        set_breeze_credentials,
+    )
+    active_broker = (get_secret(SecretKey.ACTIVE_BROKER) or "kite").strip().lower()
 
-    # Kite status
-    k_key = get_secret("KITE_API_KEY")
-    k_tok = get_secret("KITE_ACCESS_TOKEN")
-    kite_configured = bool(k_key and k_tok and len(k_key.strip()) > 3 and len(k_tok.strip()) > 10)
-
-    # Breeze status
-    b_key = get_secret("BREEZE_API_KEY")
-    b_sec = get_secret("BREEZE_API_SECRET")
-    b_tok = get_secret("BREEZE_SESSION_TOKEN")
-    b_uid = get_secret("BREEZE_USER_ID")
-    b_pwd = get_secret("BREEZE_PASSWORD")
-    b_totp = get_secret("BREEZE_TOTP_KEY")
-
-    breeze_configured = bool(b_key and b_sec and b_tok and len(b_key.strip()) > 3 and len(b_tok.strip()) > 3)
-    breeze_autologin_ready = bool(b_key and b_sec and b_uid and b_pwd and b_totp and len(b_key.strip()) > 3 and len(b_totp.strip()) > 5)
+    kite_creds = get_kite_credentials()
+    breeze_creds = get_breeze_credentials()
 
     return {
         "status": "ok",
         "active_broker": active_broker,
         "kite": {
-            "configured": kite_configured,
-            "api_key_set": bool(k_key and len(k_key.strip()) > 0),
-            "access_token_set": bool(k_tok and len(k_tok.strip()) > 0)
+            "configured": kite_creds.is_configured,
+            "api_key_set": bool(kite_creds.api_key),
+            "access_token_set": bool(kite_creds.access_token)
         },
         "breeze": {
-            "configured": breeze_configured,
-            "autologin_ready": breeze_autologin_ready,
-            "api_key_set": bool(b_key and len(b_key.strip()) > 0),
-            "api_secret_set": bool(b_sec and len(b_sec.strip()) > 0),
-            "session_token_set": bool(b_tok and len(b_tok.strip()) > 0),
-            "user_id_set": bool(b_uid and len(b_uid.strip()) > 0),
-            "totp_key_set": bool(b_totp and len(b_totp.strip()) > 0)
+            "configured": breeze_creds.is_configured,
+            "autologin_ready": breeze_creds.is_autologin_ready,
+            "api_key_set": bool(breeze_creds.api_key),
+            "api_secret_set": bool(breeze_creds.api_secret),
+            "session_token_set": bool(breeze_creds.session_token),
+            "user_id_set": bool(breeze_creds.user_id),
+            "totp_key_set": bool(breeze_creds.totp_key)
         }
     }
 
@@ -2699,10 +2806,10 @@ async def update_kite_vault_credentials(payload: Dict[str, Any] = Body(...)):
     if not access_token:
         return JSONResponse(status_code=400, content={"status": "error", "message": "Kite Access Token cannot be empty."})
 
-    from trading_engine.core.keyvault import set_secret
-    set_secret("KITE_API_KEY", api_key)
-    set_secret("KITE_ACCESS_TOKEN", access_token)
-    set_secret("ACTIVE_BROKER", "kite")
+    from trading_engine.core.credentials import SecretKey
+    from trading_engine.core.keyvault import set_kite_credentials, set_secret
+    set_kite_credentials(api_key=api_key, access_token=access_token)
+    set_secret(SecretKey.ACTIVE_BROKER, "kite")
 
     try:
         _cdm.reset_kite()
@@ -2742,10 +2849,8 @@ async def update_breeze_vault_credentials(payload: Dict[str, Any] = Body(...)):
     if not session_token:
         return JSONResponse(status_code=400, content={"status": "error", "message": "Breeze Session Token cannot be empty."})
 
-    from trading_engine.core.keyvault import set_secret
-    set_secret("BREEZE_API_KEY", api_key)
-    set_secret("BREEZE_API_SECRET", api_secret)
-    set_secret("BREEZE_SESSION_TOKEN", session_token)
+    from trading_engine.core.keyvault import set_breeze_credentials
+    set_breeze_credentials(api_key=api_key, api_secret=api_secret, session_token=session_token)
 
     try:
         from trading_engine.adapters.breeze_adapter import default_breeze_adapter
@@ -2773,12 +2878,14 @@ async def update_breeze_autologin_vault_credentials(payload: Dict[str, Any] = Bo
     totp_key = str(payload.get("totp_key", "")).strip().replace(" ", "").upper()
     trigger_now = bool(payload.get("trigger_now", True))
 
-    from trading_engine.core.keyvault import set_secret
-    if api_key: set_secret("BREEZE_API_KEY", api_key)
-    if api_secret: set_secret("BREEZE_API_SECRET", api_secret)
-    if user_id: set_secret("BREEZE_USER_ID", user_id)
-    if password: set_secret("BREEZE_PASSWORD", password)
-    if totp_key: set_secret("BREEZE_TOTP_KEY", totp_key)
+    from trading_engine.core.keyvault import set_breeze_credentials
+    set_breeze_credentials(
+        api_key=api_key or None,
+        api_secret=api_secret or None,
+        user_id=user_id or None,
+        password=password or None,
+        totp_key=totp_key or None
+    )
 
     result = {
         "status": "success",
@@ -2846,9 +2953,10 @@ async def breeze_oauth_callback(request: Request, apisession: Optional[str] = No
             status_code=400
         )
 
-    from trading_engine.core.keyvault import set_secret
-    set_secret("BREEZE_SESSION_TOKEN", str(token).strip())
-    set_secret("ACTIVE_BROKER", "breeze")
+    from trading_engine.core.credentials import SecretKey
+    from trading_engine.core.keyvault import set_breeze_session_token, set_secret
+    set_breeze_session_token(str(token))
+    set_secret(SecretKey.ACTIVE_BROKER, "breeze")
 
     try:
         from trading_engine.adapters.breeze_adapter import default_breeze_adapter
@@ -2887,11 +2995,11 @@ async def breeze_oauth_callback(request: Request, apisession: Optional[str] = No
 @app.get("/api/broker/kite/login")
 async def kite_login_redirect():
     """Redirects user to official Zerodha Kite Connect login page."""
-    from trading_engine.core.keyvault import get_secret
-    api_key = get_secret("KITE_API_KEY")
-    if not api_key:
-        return HTMLResponse("<h3>⚠️ Error: KITE_API_KEY is not configured in KeyVault.</h3>", status_code=400)
-    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}"
+    from trading_engine.core.keyvault import get_kite_credentials
+    creds = get_kite_credentials()
+    if not creds.api_key:
+        return HTMLResponse("<h3>⚠️ Error: Kite API Key is not configured in KeyVault.</h3>", status_code=400)
+    login_url = f"https://kite.zerodha.com/connect/login?v=3&api_key={creds.api_key}"
     return RedirectResponse(url=login_url)
 
 
@@ -2916,23 +3024,22 @@ async def kite_oauth_callback(request: Request, request_token: Optional[str] = N
             status_code=400
         )
 
-    from trading_engine.core.keyvault import get_secret, set_secret
-    api_key = get_secret("KITE_API_KEY")
-    api_secret = get_secret("KITE_API_SECRET")
+    from trading_engine.core.keyvault import get_kite_credentials, set_kite_credentials, set_secret
+    creds = get_kite_credentials()
 
-    if not (api_key and api_secret):
+    if not creds.is_login_configured:
         return HTMLResponse(
-            "<h3>⚠️ Error: KITE_API_KEY or KITE_API_SECRET missing in KeyVault.</h3>",
+            "<h3>⚠️ Error: Kite API Key or Secret missing in KeyVault.</h3>",
             status_code=500
         )
 
     try:
         from kiteconnect import KiteConnect
-        kc = KiteConnect(api_key=api_key)
-        session_data = kc.generate_session(str(token).strip(), api_secret=api_secret)
+        kc = KiteConnect(api_key=creds.api_key)
+        session_data = kc.generate_session(str(token).strip(), api_secret=creds.api_secret)
         access_token = session_data["access_token"]
-        set_secret("KITE_ACCESS_TOKEN", access_token)
-        set_secret("ACTIVE_BROKER", "kite")
+        set_kite_credentials(access_token=access_token)
+        set_secret(SecretKey.ACTIVE_BROKER, "kite")
 
         # Hot-reload Kite client and WebSocket
         _cdm.reset_kite()
@@ -3112,6 +3219,12 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
         # Evaluates open positions and pending orders regardless of current UI screen
         contract_engine.update_price_tick(symbol, ltp)
 
+        # 2b. Autonomous Background Paper Trade Daemon
+        try:
+            paper_daemon.on_tick(tick)
+        except Exception:
+            pass
+
         # 3. Non-blocking queue for TimescaleDB batch insert
         enqueue_tick_for_db(symbol, ltp, int(tick.get("volume", 0) or 0), int(tick.get("oi", 0) or 0))
 
@@ -3176,7 +3289,7 @@ async def run_broker_subscription_manager():
     """
     print("BrokerSubscriptionManager: Started background multi-index subscription daemon.", flush=True)
     subscribed_symbols = set()
-    core_index_symbols = {"NIFTY", "SENSEX", "BANKNIFTY"}
+    core_index_symbols = {"NIFTY", "SENSEX", "BANKNIFTY", "NIFTY-I"}
 
     while True:
         try:
@@ -3185,7 +3298,8 @@ async def run_broker_subscription_manager():
                 # Monitored = all open positions in contract_engine + pending orders + UI active symbols + core indices
                 engine_syms = set(contract_engine.get_monitored_symbols())
                 ui_syms = set(get_all_subscribed_symbols())
-                desired_symbols = engine_syms | ui_syms | core_index_symbols
+                paper_syms = {paper_daemon.active_trade["contract"]} if (paper_daemon.active_trade and "contract" in paper_daemon.active_trade) else set()
+                desired_symbols = engine_syms | ui_syms | core_index_symbols | paper_syms
 
                 # Subscribe new symbols
                 to_sub = desired_symbols - subscribed_symbols

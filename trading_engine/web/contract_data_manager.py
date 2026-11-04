@@ -220,23 +220,18 @@ def _get_kite():
             sys.path.insert(0, AI_TRADER_DIR)
         from dotenv import load_dotenv
         load_dotenv(os.path.join(AI_TRADER_DIR, ".env"))
-        try:
-            from trading_engine.core.keyvault import get_secret
-            api_key = get_secret("KITE_API_KEY") or os.environ.get("KITE_API_KEY") or os.environ.get("ZERODHA_API_KEY")
-            access_token = get_secret("KITE_ACCESS_TOKEN") or os.environ.get("KITE_ACCESS_TOKEN") or os.environ.get("ZERODHA_ACCESS_TOKEN")
-        except Exception:
-            api_key = os.environ.get("KITE_API_KEY") or os.environ.get("ZERODHA_API_KEY")
-            access_token = os.environ.get("KITE_ACCESS_TOKEN") or os.environ.get("ZERODHA_ACCESS_TOKEN")
-
-        if not api_key or not access_token:
+        from trading_engine.core.keyvault import get_kite_credentials
+        creds = get_kite_credentials()
+        if not creds.is_configured:
             return None
+
         try:
             from kiteconnect import KiteConnect
         except ImportError:
             print("ContractDataManager: 'kiteconnect' package not installed in environment.", flush=True)
             return None
-        kite = KiteConnect(api_key=api_key)
-        kite.set_access_token(access_token)
+        kite = KiteConnect(api_key=creds.api_key)
+        kite.set_access_token(creds.access_token)
         _kite_client = kite
         print("ContractDataManager: KiteConnect client successfully initialized from KeyVault.", flush=True)
         return kite
@@ -1213,6 +1208,39 @@ def fetch_contract_candles(
                         "is_last_available_day": False,
                         "candles": list(cached_list),
                     }
+
+    # Check data/cache/ for pre-cached contract candles
+    if target_date:
+        import re
+        from pathlib import Path
+        cache_dir = Path(__file__).resolve().parent.parent.parent / "data" / "cache"
+        cache_path = cache_dir / f"candles_{trading_symbol}_{target_date}.json"
+
+        if not cache_path.exists():
+            # Check pattern fallback (e.g. NIFTY26N0522950CE vs NIFTY26NOV22950CE)
+            m = re.search(r"(\d{4,5})(CE|PE)", trading_symbol, re.IGNORECASE)
+            if m:
+                pat = f"*{m.group(1)}{m.group(2).upper()}_{target_date}.json"
+                matched = list(cache_dir.glob(pat))
+                if matched:
+                    cache_path = matched[0]
+
+        if cache_path.exists():
+            try:
+                import json
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    c_list = json.load(f)
+                    if isinstance(c_list, list) and len(c_list) > 0:
+                        return {
+                            "symbol": trading_symbol,
+                            "date": target_date,
+                            "count": len(c_list),
+                            "num_candles": len(c_list),
+                            "is_last_available_day": False,
+                            "candles": c_list,
+                        }
+            except Exception:
+                pass
 
     # 1. Resolve DB Engine
     if db_engine is None:

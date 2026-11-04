@@ -9,12 +9,19 @@ Provides REST and WebSocket endpoints for:
 """
 import asyncio
 import json
+import os
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import numpy as np
 import pandas as pd
+from datetime import datetime
+import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Body, Query
+from fastapi.responses import FileResponse
+
+logger = logging.getLogger("quant_studio.router")
 
 from trading_engine.quant_lib.base import Indicator, IndicatorSignal
 from trading_engine.config import get_symbol_lot_size
@@ -23,9 +30,15 @@ from trading_engine.runtime.registry import DynamicIndicatorRegistry
 from trading_engine.runtime.warmup import WarmupManager
 from trading_engine.data.duckdb_store import LocalDataStore
 from trading_engine.replay.session import ReplaySession, ReplayFrame
-from trading_engine.replay.backtester import VectorizedBacktester, BacktestScorecard
 
 studio_router = APIRouter()
+
+@studio_router.get("/studio")
+async def serve_studio():
+    studio_file = Path(__file__).parent / "static" / "studio.html"
+    if studio_file.exists():
+        return FileResponse(studio_file)
+    raise HTTPException(status_code=404, detail="studio.html not found")
 
 # Global state instances
 _compiler = IndicatorCompiler()
@@ -483,25 +496,156 @@ async def scrub_replay(payload: Dict[str, Any] = Body(...)):
 
 @studio_router.post("/api/backtest/run")
 async def run_backtest_endpoint(payload: Dict[str, Any] = Body(...)):
-    """Executes high-speed vectorized backtest and returns scorecard."""
-    symbol = payload.get("symbol", "NIFTY")
-    contract = payload.get("contract", "NIFTY_ATM_CE")
-    code = payload.get("code", "")
-    raw_lot = payload.get("lot_size")
-    lot_size = int(raw_lot) if raw_lot is not None and int(raw_lot) > 0 else get_symbol_lot_size(symbol)
-    slippage_pts = float(payload.get("slippage_pts", 0.5))
+    """Executes unified backtest via Layer B Backtest Engine for Quant Studio."""
+    from trading_engine.backtest_engine.engine import BacktestEngine
+    import asyncio
+    engine = BacktestEngine()
+    strat = payload.get("strategy") or payload.get("indicator") or "Adaptive Trend Pro"
+    strat_lower = strat.lower()
+    default_sizing = "compounding_7pct" if ("xgboost" in strat_lower or "ai_trader" in strat_lower or "78l" in strat_lower or "macro" in strat_lower) else "conservative"
 
-    # Compile indicator
-    ind_cls, _ = _compiler.compile_and_load(code)
-    indicator = ind_cls()
+    params = {
+        "symbol": payload.get("symbol", "NIFTY50"),
+        "segment": payload.get("segment", "NSE"),
+        "dateFrom": payload.get("dateFrom") or payload.get("startDate") or "2026-10-29",
+        "dateTo": payload.get("dateTo") or payload.get("endDate") or "2026-10-30",
+        "optionType": payload.get("optionType") or "ATM",
+        "capital": float(payload.get("capital", 50000.0)),
+        "strategy": strat,
+        "maxTradesPerDay": payload.get("maxTradesPerDay") or payload.get("max_trades_per_day") or 4,
+        "blockedTimeSlots": payload.get("blockedTimeSlots") or payload.get("blocked_time_slots") or [],
+        "sizingMode": payload.get("sizingMode") or payload.get("sizing_mode") or default_sizing
+    }
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, engine.run_backtest, params)
 
-    df = _data_store.query_candles(symbol, contract, "2020-01-01", "2030-01-01")
-    if df.empty or len(df) < 50:
-        df = _generate_synthetic_candles(symbol, contract, 1000)
 
-    backtester = VectorizedBacktester(lot_size=lot_size, slippage_pts=slippage_pts)
-    scorecard = backtester.run_backtest(df, indicator, warmup_bars=50)
-    return scorecard.to_dict()
+_pending_model_queries: Dict[str, asyncio.Future] = {}
+_latest_studio_model: Dict[str, Any] = {}
+
+
+@studio_router.get("/api/quant/model")
+async def get_live_quant_model(scope: str = Query("all")):
+    """On-demand endpoint: Queries active webview client for QuantStudioModel snapshot."""
+    report_dir = Path(__file__).resolve().parent.parent.parent / "reports"
+    
+    # Fast path for backtest results: always serve fresh validated report from disk
+    if scope == "backtest_results":
+        for fn in ["last_backtest.json", "quant_studio_model.json"]:
+            cand = report_dir / fn
+            if cand.exists():
+                try:
+                    with open(cand, "r") as f:
+                        mod = json.load(f)
+                        bt = mod.get("backtest_results", mod) if "summary" in mod.get("backtest_results", {}) else mod
+                        if "summary" in bt:
+                            return {"status": "success", "scope": scope, "data": bt}
+                except Exception:
+                    pass
+
+    if not _active_ws_clients:
+        m_file = report_dir / "quant_studio_model.json"
+        if m_file.exists():
+            try:
+                with open(m_file, "r") as f:
+                    mod = json.load(f)
+                    return {"status": "cached", "scope": scope, "data": mod.get(scope, mod) if scope != "all" else mod}
+            except Exception:
+                pass
+        return {"status": "idle", "scope": scope, "data": {}}
+
+    req_id = f"q_{int(time.time() * 1000)}"
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _pending_model_queries[req_id] = future
+
+    msg = {
+        "type": "query_model",
+        "query_id": req_id,
+        "scope": scope
+    }
+
+    for ws in list(_active_ws_clients):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            pass
+
+    try:
+        res = await asyncio.wait_for(future, timeout=2.0)
+        return {"status": "success", "scope": scope, "data": res}
+    except Exception:
+        return {"status": "cached", "scope": scope, "data": _latest_studio_model.get(scope, _latest_studio_model) if scope != "all" else _latest_studio_model}
+    finally:
+        _pending_model_queries.pop(req_id, None)
+
+
+@studio_router.post("/api/quant/broadcast-backtest")
+async def broadcast_backtest_results():
+    """Broadcasts latest reports/oct_nov_backtest_full.json to all connected Quant Studio webviews."""
+    report_dir = Path(__file__).resolve().parent.parent.parent / "reports"
+    report_file = report_dir / "oct_nov_backtest_full.json"
+    if not report_file.exists():
+        report_file = report_dir / "last_backtest.json"
+    if not report_file.exists():
+        return {"status": "error", "message": "No backtest report file found"}
+    with open(report_file, "r") as f:
+        data = json.load(f)
+    _latest_studio_model["backtest_results"] = data
+    msg = {"type": "backtest_result", "data": data}
+    sent_count = 0
+    for ws in list(_active_ws_clients):
+        try:
+            await ws.send_json(msg)
+            sent_count += 1
+        except Exception:
+            pass
+    return {"status": "broadcasted", "clients_updated": sent_count, "summary": data.get("summary")}
+
+
+@studio_router.post("/api/quant/model/sync")
+async def sync_live_quant_model(payload: Dict[str, Any] = Body(...)):
+    """Receives in-memory model updates from the Quant Studio UI."""
+    scope = payload.get("scope", "all")
+    data = payload.get("data", {})
+    if scope == "all" and isinstance(data, dict):
+        _latest_studio_model.update(data)
+    elif scope != "all":
+        if scope == "parameters" and isinstance(_latest_studio_model.get("parameters"), dict) and isinstance(data, dict):
+            _latest_studio_model["parameters"].update(data)
+        else:
+            _latest_studio_model[scope] = data
+
+    cap = data.get("capital") if isinstance(data, dict) else (data.get("parameters", {}).get("capital") if isinstance(data.get("parameters"), dict) else None)
+    logger.info(f"⚡ [HTTP SYNC EVENT] Received live parameters from Webview -> Capital: ₹{cap} (Data: {data})")
+
+    try:
+        report_dir = Path(__file__).resolve().parent.parent.parent / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        m_file = report_dir / "quant_studio_model.json"
+        with open(m_file, "w") as f:
+            json.dump(_latest_studio_model, f, indent=2)
+
+        s_file = report_dir / "quant_studio_state.json"
+        state = {}
+        if s_file.exists():
+            try:
+                with open(s_file, "r") as f:
+                    state = json.load(f)
+            except Exception:
+                pass
+        if "parameters" not in state or not isinstance(state["parameters"], dict):
+            state["parameters"] = {}
+        if scope == "parameters" and isinstance(data, dict):
+            state["parameters"].update(data)
+        elif "parameters" in _latest_studio_model and isinstance(_latest_studio_model["parameters"], dict):
+            state["parameters"].update(_latest_studio_model["parameters"])
+        state["last_updated"] = datetime.now().isoformat()
+        with open(s_file, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception as err:
+        logger.debug(f"Error persisting sync model: {err}")
+    return {"status": "synced", "scope": scope}
 
 
 # ---------------------------------------------------------
@@ -583,6 +727,23 @@ async def studio_websocket(websocket: WebSocket):
                 sess = _active_replay_sessions.get(session_id)
                 if sess:
                     sess.line_breakpoints = set(data.get("breakpoints", []))
+            elif action == "model_response":
+                q_id = data.get("query_id")
+                payload = data.get("data")
+                if q_id and q_id in _pending_model_queries:
+                    fut = _pending_model_queries[q_id]
+                    if not fut.done():
+                        fut.set_result(payload)
+                if isinstance(payload, dict):
+                    _latest_studio_model.update(payload)
+                    try:
+                        report_dir = Path(__file__).resolve().parent.parent.parent / "reports"
+                        report_dir.mkdir(parents=True, exist_ok=True)
+                        m_file = report_dir / "quant_studio_model.json"
+                        with open(m_file, "w") as f:
+                            json.dump(_latest_studio_model, f, indent=2)
+                    except Exception:
+                        pass
     except (WebSocketDisconnect, asyncio.CancelledError):
         pass
     finally:

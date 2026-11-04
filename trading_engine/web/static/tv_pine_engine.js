@@ -1223,6 +1223,88 @@ alertcondition(evSL,    "BSS Stop hit", "BSS: Stop loss / trailing stop hit")
 alertcondition(ev1 or ev2 or evM, "BSS Target hit", "BSS: Target hit")
 `;
 
+    // ── Full Complete Kalman Trend Levels Script Verbatim ──────────────────────────
+    const KALMAN_TREND_FULL_SCRIPT = `// This work is licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International  
+// https://creativecommons.org/licenses/by-nc-sa/4.0/
+// © BigBeluga
+
+//@version=5
+indicator("Kalman Trend Levels [BigBeluga]", overlay = true, max_labels_count = 500, max_boxes_count = 500)
+
+// ＩＮＰＵＴＳ ――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――{
+int short_len     = input.int(50, "Short Length")
+int long_len      = input.int(150, "Long Length")
+bool retest_sig   = input.bool(false, "Retest Signals")
+bool candle_color = input.bool(true, "Candle Color")
+
+color upper_col = input.color(#13bd6e, "Up", inline = "colors")
+color lower_col = input.color(#af0d4b, "Dn", inline = "colors")
+// }
+
+// ＣＡＬＣＵＬＡＴＩＯＮＳ――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――{
+float atr = ta.atr(200) * 0.5
+
+var box lower_box = na
+var box upper_box = na
+
+// Kalman filter function
+kalman_filter(src, length, R = 0.01, Q = 0.1) =>
+    var float estimate = na
+    var float error_est = 1.0
+    var float error_meas = R * length
+    var float kalman_gain = 0.0
+    var float prediction = na
+    
+    if na(estimate)
+        estimate := nz(src[1], src)
+
+    prediction := estimate
+    kalman_gain := error_est / (error_est + error_meas)
+    estimate := prediction + kalman_gain * (src - prediction)
+    error_est := (1 - kalman_gain) * error_est + Q / length
+
+    estimate
+
+float short_kalman = kalman_filter(close, short_len)
+float long_kalman  = kalman_filter(close, long_len)
+
+bool trend_up = short_kalman > long_kalman
+
+color trend_col  = trend_up ? upper_col : lower_col
+color trend_col1 = short_kalman > short_kalman[2] ? upper_col : lower_col
+color candle_col = candle_color ? (trend_up and short_kalman > short_kalman[2] ? upper_col : not trend_up and short_kalman < short_kalman[2] ? lower_col : color.gray) : na
+// }
+
+// ＰＬＯＴ ――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――{
+if trend_up and not nz(trend_up[1])
+    label.new(bar_index, short_kalman, "🡹\\n" + str.tostring(math.round(close, 1)), color = na, textcolor = upper_col, style = label.style_label_up, size = size.normal)
+    lower_box := box.new(bar_index, low + atr, bar_index, low, border_color = na, bgcolor = color.new(upper_col, 60))
+
+if not ta.change(trend_up) and not na(lower_box)
+    lower_box.set_right(bar_index)
+
+if nz(trend_up[1]) and not trend_up
+    label.new(bar_index, short_kalman, str.tostring(math.round(close, 1)) + "\\n🢃", color = na, textcolor = lower_col, style = label.style_label_down, size = size.normal)
+    upper_box := box.new(bar_index, high, bar_index, high - atr, border_color = na, bgcolor = color.new(lower_col, 60))
+
+if not ta.change(trend_up) and not na(upper_box)
+    upper_box.set_right(bar_index)
+
+if retest_sig
+    if not na(upper_box) and high < upper_box.get_bottom() and high[1] >= upper_box.get_bottom()
+        label.new(bar_index - 1, high[1], "x", color = na, textcolor = lower_col, style = label.style_label_down, size = size.normal)
+
+    if not na(lower_box) and low > lower_box.get_top() and low[1] <= lower_box.get_top()
+        label.new(bar_index - 1, low[1], "+", color = na, textcolor = upper_col, style = label.style_label_up, size = size.normal)
+
+p1 = plot(short_kalman, "Short Kalman", color = trend_col1)
+p2 = plot(long_kalman, "Long Kalman", linewidth = 2, color = trend_col)
+
+fill(p1, p2, color = color.new(trend_col, 80))
+
+plotcandle(open, high, low, close, title = 'Candles', color = candle_col, wickcolor = candle_col, bordercolor = candle_col)
+// }`;
+
 
     // ── Built-in Preset Registry ────────────────────────────────────────────────
     const PRESETS = {
@@ -1244,6 +1326,19 @@ alertcondition(ev1 or ev2 or evM, "BSS Target hit", "BSS: Target hit")
                 vol_down_color: '#f59e0b'
             },
             code: ALGOALPHA_FULL_SCRIPT
+        },
+        kalman_trend_levels: {
+            id: 'kalman_trend_levels',
+            name: 'Kalman Trend Levels [BigBeluga]',
+            inputs: {
+                short_len: 50,
+                long_len: 150,
+                retest_sig: false,
+                candle_color: true,
+                upper_col: '#13bd6e',
+                lower_col: '#af0d4b'
+            },
+            code: KALMAN_TREND_FULL_SCRIPT
         },
                 bss_pro_v5: {
             id: 'bss_pro_v5',
@@ -3075,10 +3170,186 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         return res;
     }
 
+    // ── Dedicated Kalman Trend Levels [BigBeluga] Runner ────────────────────────
+    function computeKalmanTrendLevels(candles, inputs) {
+        const n = candles.length;
+        if (n < 5) return null;
+
+        const rawInputs = inputs || {};
+        const short_len = Math.max(2, parseInt(rawInputs.short_len) || 50);
+        const long_len = Math.max(5, parseInt(rawInputs.long_len) || 150);
+        const retest_sig = Boolean(rawInputs.retest_sig);
+        const candle_color = rawInputs.candle_color !== undefined ? Boolean(rawInputs.candle_color) : true;
+        const upper_col = rawInputs.upper_col || '#13bd6e';
+        const lower_col = rawInputs.lower_col || '#af0d4b';
+
+        const closes = candles.map(c => c.close);
+        const highs = candles.map(c => c.high);
+        const lows = candles.map(c => c.low);
+        const times = candles.map(c => c.time);
+
+        // Vectorized Kalman Filter
+        function runKalmanFilter(src, length, R, Q) {
+            const out = new Array(n);
+            let estimate = null;
+            let error_est = 1.0;
+            const error_meas = R * length;
+            const qTerm = Q / length;
+
+            for (let i = 0; i < n; i++) {
+                const val = src[i];
+                if (estimate === null) {
+                    estimate = (i > 0 && src[i - 1] != null) ? src[i - 1] : val;
+                }
+                const prediction = estimate;
+                const kalman_gain = error_est / (error_est + error_meas);
+                estimate = prediction + kalman_gain * (val - prediction);
+                error_est = (1.0 - kalman_gain) * error_est + qTerm;
+                out[i] = estimate;
+            }
+            return out;
+        }
+
+        const short_kalman = runKalmanFilter(closes, short_len, 0.01, 0.1);
+        const long_kalman = runKalmanFilter(closes, long_len, 0.01, 0.1);
+        const atr200 = PineTA.atr(candles, Math.min(200, Math.max(14, Math.floor(n * 0.8))));
+
+        const trend_up = new Array(n);
+        const trend_col = new Array(n);
+        const trend_col1 = new Array(n);
+
+        for (let i = 0; i < n; i++) {
+            trend_up[i] = short_kalman[i] > long_kalman[i];
+            trend_col[i] = trend_up[i] ? upper_col : lower_col;
+            trend_col1[i] = (i >= 2 ? (short_kalman[i] > short_kalman[i - 2]) : true) ? upper_col : lower_col;
+        }
+
+        const boxes = [];
+        const labels = [];
+        const retestSignals = [];
+
+        let curLowerBox = null;
+        let curUpperBox = null;
+
+        for (let i = 0; i < n; i++) {
+            const isUp = trend_up[i];
+            const prevUp = i > 0 ? trend_up[i - 1] : false;
+            const changed = i === 0 || (isUp !== prevUp);
+            const curAtr = (atr200[i] || (highs[i] - lows[i])) * 0.5;
+
+            // Trend shift to Bullish
+            if (isUp && !prevUp && i > 0) {
+                labels.push({
+                    time: times[i],
+                    idx: i,
+                    price: short_kalman[i],
+                    close: closes[i],
+                    text: `▲ ${closes[i].toFixed(1)}`,
+                    style: 'up',
+                    color: upper_col
+                });
+                curLowerBox = {
+                    id: `lbox_${i}`,
+                    startIdx: i,
+                    startTime: times[i],
+                    endIdx: i,
+                    endTime: times[i],
+                    top: lows[i] + curAtr,
+                    bottom: lows[i],
+                    color: upper_col,
+                    active: true
+                };
+                boxes.push(curLowerBox);
+            }
+
+            // Trend unchanged - extend box rightward
+            if (!changed) {
+                if (isUp && curLowerBox) {
+                    curLowerBox.endIdx = i;
+                    curLowerBox.endTime = times[i];
+                } else if (!isUp && curUpperBox) {
+                    curUpperBox.endIdx = i;
+                    curUpperBox.endTime = times[i];
+                }
+            }
+
+            // Trend shift to Bearish
+            if (!isUp && prevUp && i > 0) {
+                labels.push({
+                    time: times[i],
+                    idx: i,
+                    price: short_kalman[i],
+                    close: closes[i],
+                    text: `▼ ${closes[i].toFixed(1)}`,
+                    style: 'down',
+                    color: lower_col
+                });
+                curUpperBox = {
+                    id: `ubox_${i}`,
+                    startIdx: i,
+                    startTime: times[i],
+                    endIdx: i,
+                    endTime: times[i],
+                    top: highs[i],
+                    bottom: highs[i] - curAtr,
+                    color: lower_col,
+                    active: true
+                };
+                boxes.push(curUpperBox);
+            }
+
+            // Retest signals
+            if (retest_sig && i > 0) {
+                if (curUpperBox && highs[i] < curUpperBox.bottom && highs[i - 1] >= curUpperBox.bottom) {
+                    retestSignals.push({
+                        time: times[i - 1],
+                        idx: i - 1,
+                        price: highs[i - 1],
+                        text: '✕',
+                        style: 'down',
+                        color: lower_col
+                    });
+                }
+                if (curLowerBox && lows[i] > curLowerBox.top && lows[i - 1] <= curLowerBox.top) {
+                    retestSignals.push({
+                        time: times[i - 1],
+                        idx: i - 1,
+                        price: lows[i - 1],
+                        text: '+',
+                        style: 'up',
+                        color: upper_col
+                    });
+                }
+            }
+        }
+
+        return {
+            type: 'kalman_trend_levels',
+            short_kalman,
+            long_kalman,
+            trend_up,
+            trend_col,
+            trend_col1,
+            boxes,
+            labels,
+            retestSignals,
+            upper_col,
+            lower_col,
+            candle_color,
+            candles
+        };
+    }
+
     // ── Universal Pine Script Runner & Transpiler ────────────────────────────────
     function computeGenericPineScript(candles, scriptCode, inputs) {
         const n = candles.length;
         if (n < 5) return null;
+
+        // Route Kalman Trend Levels script (BigBeluga)
+        const isKalman = /Kalman\s*Trend/i.test(scriptCode) || /kalman_filter/i.test(scriptCode);
+        if (isKalman) {
+            return computeKalmanTrendLevels(candles, inputs);
+        }
 
         // Route BSS Pro v3 indicator script
         const isBSSPro = /BSS\s*Pro/i.test(scriptCode) || /Buyer\/Seller Strength/i.test(scriptCode);
@@ -3337,6 +3608,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                 res = computeAlgoAlphaBreakoutChannels(station.rawCandles, state.inputs);
             } else if (id === 'bss_pro_v3' || id === 'bss_pro_v5' || /BSS\s*Pro/i.test(ind.name || '') || /BSS\s*Pro/i.test(ind.code || '')) {
                 res = computeBSSProV5(station.rawCandles, ind.inputs || state.inputs, st);
+            } else if (id === 'kalman_trend_levels' || /Kalman\s*Trend/i.test(ind.name || '') || /kalman_filter/i.test(ind.code || '')) {
+                res = computeKalmanTrendLevels(station.rawCandles, ind.inputs || state.inputs);
             } else {
                 res = computeGenericPineScript(station.rawCandles, ind.code, ind.inputs || state.inputs);
             }
@@ -3372,6 +3645,8 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
                 renderAlgoAlphaOverlay(ctx, res, timeScale, candleSeries, W, H);
             } else if (res.type === 'bss_pro_v3' || res.type === 'bss_pro_v5') {
                 renderBSSProV5Overlay(ctx, res, timeScale, candleSeries, W, H);
+            } else if (res.type === 'kalman_trend_levels') {
+                renderKalmanTrendOverlay(ctx, res, timeScale, candleSeries, W, H);
             } else if (res.type === 'generic_pine') {
                 renderGenericPineOverlay(ctx, res, timeScale, candleSeries, W, H);
             }
@@ -3983,6 +4258,152 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
         }
     }
 
+    function renderKalmanTrendOverlay(ctx, res, timeScale, candleSeries, W, H) {
+        const { short_kalman, long_kalman, trend_up, trend_col, trend_col1, boxes, labels, retestSignals, upper_col, lower_col, candle_color, candles } = res;
+        const n = candles.length;
+        if (n < 2) return;
+
+        // 1. Fill Cloud Ribbon between short_kalman and long_kalman
+        for (let i = 1; i < n; i++) {
+            const x0 = timeScale.timeToCoordinate(candles[i - 1].time);
+            const x1 = timeScale.timeToCoordinate(candles[i].time);
+            if (x0 == null || x1 == null || x1 < -50 || x0 > W + 50) continue;
+
+            const yShort0 = candleSeries.priceToCoordinate(short_kalman[i - 1]);
+            const yShort1 = candleSeries.priceToCoordinate(short_kalman[i]);
+            const yLong0 = candleSeries.priceToCoordinate(long_kalman[i - 1]);
+            const yLong1 = candleSeries.priceToCoordinate(long_kalman[i]);
+
+            if (yShort0 == null || yShort1 == null || yLong0 == null || yLong1 == null) continue;
+
+            const fillCol = trend_up[i] ? upper_col : lower_col;
+            ctx.fillStyle = hexToRgba(fillCol, 0.20);
+            ctx.beginPath();
+            ctx.moveTo(x0, yShort0);
+            ctx.lineTo(x1, yShort1);
+            ctx.lineTo(x1, yLong1);
+            ctx.lineTo(x0, yLong0);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 2. Dynamic Support & Resistance Boxes
+        if (boxes && boxes.length > 0) {
+            for (const b of boxes) {
+                const x1 = timeScale.timeToCoordinate(b.startTime);
+                const x2 = timeScale.timeToCoordinate(b.endTime);
+                if (x1 == null && x2 == null) continue;
+
+                const drawX1 = Math.max(-50, x1 != null ? x1 : 0);
+                const drawX2 = Math.min(W + 50, x2 != null ? x2 : W);
+                if (drawX2 < drawX1) continue;
+
+                const yTop = candleSeries.priceToCoordinate(b.top);
+                const yBottom = candleSeries.priceToCoordinate(b.bottom);
+                if (yTop == null || yBottom == null) continue;
+
+                const boxW = Math.max(3, drawX2 - drawX1);
+                const boxH = Math.abs(yBottom - yTop);
+                const topY = Math.min(yTop, yBottom);
+
+                ctx.fillStyle = hexToRgba(b.color, 0.22);
+                ctx.fillRect(drawX1, topY, boxW, boxH);
+
+                ctx.strokeStyle = hexToRgba(b.color, 0.70);
+                ctx.lineWidth = 1.2;
+                ctx.strokeRect(drawX1, topY, boxW, boxH);
+            }
+        }
+
+        // 3. Short Kalman Curve (dynamic trend_col1: green when rising, red when falling)
+        ctx.lineWidth = 2.0;
+        for (let i = 1; i < n; i++) {
+            const x0 = timeScale.timeToCoordinate(candles[i - 1].time);
+            const x1 = timeScale.timeToCoordinate(candles[i].time);
+            if (x0 == null || x1 == null || x1 < -50 || x0 > W + 50) continue;
+
+            const y0 = candleSeries.priceToCoordinate(short_kalman[i - 1]);
+            const y1 = candleSeries.priceToCoordinate(short_kalman[i]);
+            if (y0 == null || y1 == null) continue;
+
+            ctx.strokeStyle = trend_col1[i] || '#38bdf8';
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.stroke();
+        }
+
+        // 4. Long Kalman Baseline (width 2.5, colored by trend_col)
+        ctx.lineWidth = 2.5;
+        for (let i = 1; i < n; i++) {
+            const x0 = timeScale.timeToCoordinate(candles[i - 1].time);
+            const x1 = timeScale.timeToCoordinate(candles[i].time);
+            if (x0 == null || x1 == null || x1 < -50 || x0 > W + 50) continue;
+
+            const y0 = candleSeries.priceToCoordinate(long_kalman[i - 1]);
+            const y1 = candleSeries.priceToCoordinate(long_kalman[i]);
+            if (y0 == null || y1 == null) continue;
+
+            ctx.strokeStyle = trend_col[i] || '#64748b';
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.stroke();
+        }
+
+        // 5. Trend Shift Badges (Labels with pill background)
+        if (labels && labels.length > 0) {
+            ctx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (const lbl of labels) {
+                const x = timeScale.timeToCoordinate(lbl.time);
+                if (x == null || x < 0 || x > W) continue;
+                const y = candleSeries.priceToCoordinate(lbl.price);
+                if (y == null) continue;
+
+                const isUp = lbl.style === 'up';
+                const targetY = isUp ? y + 22 : y - 22;
+
+                const textW = ctx.measureText(lbl.text).width + 12;
+                const pillH = 18;
+
+                ctx.fillStyle = hexToRgba(lbl.color, 0.30);
+                ctx.strokeStyle = lbl.color;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                if (typeof ctx.roundRect === 'function') {
+                    ctx.roundRect(x - textW / 2, targetY - pillH / 2, textW, pillH, 4);
+                } else {
+                    ctx.rect(x - textW / 2, targetY - pillH / 2, textW, pillH);
+                }
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(lbl.text, x, targetY);
+            }
+        }
+
+        // 6. Retest Confirmation Markers
+        if (retestSignals && retestSignals.length > 0) {
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (const rs of retestSignals) {
+                const x = timeScale.timeToCoordinate(rs.time);
+                if (x == null || x < 0 || x > W) continue;
+                const y = candleSeries.priceToCoordinate(rs.price);
+                if (y == null) continue;
+
+                ctx.fillStyle = rs.color;
+                ctx.fillText(rs.text, x, rs.style === 'up' ? y + 14 : y - 14);
+            }
+        }
+    }
+
     // ── Persistence & Remote Cloud Sync ─────────────────────────────────────────
     async function loadConfig() {
         try {
@@ -4292,6 +4713,36 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             return;
         }
 
+        if (state.activePresetId === 'kalman_trend_levels') {
+            container.innerHTML = `
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Short Kalman Len</label>
+                    <input type="number" id="inp-kalman-short" class="tvi-inp" value="${state.inputs.short_len || 50}" min="2" max="200" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Long Kalman Len</label>
+                    <input type="number" id="inp-kalman-long" class="tvi-inp" value="${state.inputs.long_len || 150}" min="5" max="500" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Retest Signals</label>
+                    <input type="checkbox" id="inp-kalman-retest" ${state.inputs.retest_sig ? 'checked' : ''} />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Candle Color</label>
+                    <input type="checkbox" id="inp-kalman-candle-col" ${state.inputs.candle_color !== false ? 'checked' : ''} />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Bullish / Up Color</label>
+                    <input type="color" id="inp-kalman-up-col" class="tvi-color-inp" value="${state.inputs.upper_col || '#13bd6e'}" />
+                </div>
+                <div class="tvi-inp-row">
+                    <label class="tvi-inp-lbl">Bearish / Dn Color</label>
+                    <input type="color" id="inp-kalman-dn-col" class="tvi-color-inp" value="${state.inputs.lower_col || '#af0d4b'}" />
+                </div>
+            `;
+            return;
+        }
+
         // Generic dynamic inputs parsing from the script code
         const parsedInputs = parsePineInputsFromScript(state.currentCode);
         const keys = Object.keys(parsedInputs);
@@ -4396,6 +4847,23 @@ plotshape(bearishCross, "Bear Cross", shape.labeldown, location.abovebar, #ff110
             if (shwVolEl) state.inputs.shw_vol = shwVolEl.checked;
             if (volUpEl) state.inputs.vol_up_color = volUpEl.value;
             if (volDownEl) state.inputs.vol_down_color = volDownEl.value;
+            return;
+        }
+
+        if (state.activePresetId === 'kalman_trend_levels') {
+            const shortEl = document.getElementById('inp-kalman-short');
+            const longEl = document.getElementById('inp-kalman-long');
+            const retestEl = document.getElementById('inp-kalman-retest');
+            const candleEl = document.getElementById('inp-kalman-candle-col');
+            const upColEl = document.getElementById('inp-kalman-up-col');
+            const dnColEl = document.getElementById('inp-kalman-dn-col');
+
+            if (shortEl) state.inputs.short_len = parseInt(shortEl.value) || 50;
+            if (longEl) state.inputs.long_len = parseInt(longEl.value) || 150;
+            if (retestEl) state.inputs.retest_sig = retestEl.checked;
+            if (candleEl) state.inputs.candle_color = candleEl.checked;
+            if (upColEl) state.inputs.upper_col = upColEl.value;
+            if (dnColEl) state.inputs.lower_col = dnColEl.value;
             return;
         }
 

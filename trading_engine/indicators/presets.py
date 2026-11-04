@@ -42,6 +42,13 @@ class PresetsManager:
                 "description": "Multi-timeframe trend continuation with dynamic ATR trailing stops.",
                 "author": "Antigravity Quant Team",
                 "file": "supertrend_cloud.py"
+            },
+            {
+                "id": "kalman_trend_levels",
+                "name": "Kalman Trend Levels [BigBeluga]",
+                "description": "Adaptive dual Kalman filter (Short/Long) with dynamic S/R breakout boxes and retest signals.",
+                "author": "BigBeluga / Antigravity Quant Team",
+                "file": "kalman_trend_levels.py"
             }
         ]
 
@@ -53,7 +60,8 @@ class PresetsManager:
             "bss_pro_v5": current_dir / "bss_pro_v5.py",
             "bss_pro_v6": current_dir / "bss_pro_v6.py",
             "algoalpha_breakout": current_dir / "algoalpha_breakout.py",
-            "supertrend_cloud": current_dir / "supertrend_cloud.py"
+            "supertrend_cloud": current_dir / "supertrend_cloud.py",
+            "kalman_trend_levels": current_dir / "kalman_trend_levels.py"
         }
         target_path = file_map.get(preset_id)
         if target_path and target_path.exists():
