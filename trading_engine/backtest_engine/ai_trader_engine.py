@@ -258,11 +258,12 @@ class AITraderBacktestEngine:
             }
         )
 
-        # Attach clean spot candles for the TradingView chart
+        # Attach clean spot candles for the TradingView chart (last ~5 trading days)
         try:
             from trading_engine.backtest_engine.feeder import BacktestFeeder
             feeder = BacktestFeeder()
-            spot_df = feeder.load_spot_candles("NIFTY", date_from, date_to)
+            spot_start = max(date_from, (pd.to_datetime(date_to) - pd.Timedelta(days=8)).strftime("%Y-%m-%d"))
+            spot_df = feeder.load_spot_candles("NIFTY", spot_start, date_to)
             if not spot_df.empty:
                 sample_df = spot_df if len(spot_df) <= 1875 else spot_df.iloc[-1875:]
                 times = [t.strftime("%Y-%m-%d %H:%M") if hasattr(t, "strftime") else str(t)[:16] for t in sample_df["timestamp"]]
