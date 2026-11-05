@@ -137,11 +137,11 @@ class MarketCollectorDaemon:
         elif self.active_broker == "kite":
             try:
                 from kiteconnect import KiteConnect
-                api_key = get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY")
-                access_token = get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN")
-                if api_key and access_token:
-                    kc = KiteConnect(api_key=api_key)
-                    kc.set_access_token(access_token)
+                from trading_engine.core.keyvault import get_kite_credentials
+                creds = get_kite_credentials()
+                if creds.is_configured:
+                    kc = KiteConnect(api_key=creds.api_key)
+                    kc.set_access_token(creds.access_token)
                     self.kite_client = kc
                     logger.info("Kite client successfully initialized.")
                 else:
@@ -167,15 +167,7 @@ class MarketCollectorDaemon:
                 strike_step = ucfg["strike_step"]
                 spot_price = None
 
-                # 1. Fetch current spot
-                if self.active_broker == "breeze" and self.breeze_client and self.breeze_client.is_connected:
-                    try:
-                        quotes = self.breeze_client.get_quotes(stock_code=ucfg["breeze_code"], exchange_code=ucfg["exchange"])
-                        if quotes and "Success" in quotes and quotes["Success"]:
-                            spot_price = float(quotes["Success"][0].get("ltp", 0))
-                    except Exception as e:
-                        logger.debug(f"Breeze spot quote fetch error for {underlying}: {e}")
-
+                # 1. Fetch current spot from TimescaleDB (zero REST calls to protect daily quota)
                 if not spot_price or spot_price <= 0:
                     try:
                         conn = get_db_connection()

@@ -4622,9 +4622,11 @@
             <span class="live-pill" id="live-pill-blocked">🔒 Margin: ₹88</span>
             <span class="live-pill" id="live-pill-day-pnl">💰 Day P&L: ₹0.00</span>
             <span class="live-pill" id="live-pill-trade-limit">📊 Trades Today: 0 / 4</span>
-            <button type="button" class="btn-paper-reset" id="btn-live-sync-broker" onclick="syncLiveBrokerData()" title="Sync live broker funds, margins, positions, and trades directly from ICICI Direct Breeze API">
-              🔄 Sync Broker Data
+            <button type="button" class="btn-paper-reset" id="btn-live-sync-broker" onclick="syncLiveBrokerData()" title="Explicitly query ICICI Direct Breeze API for latest funds and trades (Zero calls on page refresh)">
+              🔄 Refresh Broker Data
             </button>
+            <span class="live-pill" id="live-pill-api-quota" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" title="Breeze REST Rate Limit: Max 5,000 calls/day. Page refreshes use cache (0 REST calls).">📡 API Quota: 4 / 5,000</span>
+            <span class="live-pill" id="live-pill-last-sync" style="color: #94a3b8;" title="Timestamp of last explicit broker API synchronization">🕒 Synced: 17:25:53</span>
           </div>
         </div>
 
@@ -8501,7 +8503,7 @@
     async function syncLiveBrokerData() {
       const btn = document.getElementById('btn-live-sync-broker');
       if (btn) {
-        btn.innerHTML = '⏳ Syncing Broker...';
+        btn.innerHTML = '⏳ Refreshing...';
         btn.disabled = true;
       }
       try {
@@ -8517,7 +8519,7 @@
         alert('Live Broker Sync failed: ' + err.message);
       } finally {
         if (btn) {
-          btn.innerHTML = '🔄 Sync Broker Data';
+          btn.innerHTML = '🔄 Refresh Broker Data';
           btn.disabled = false;
         }
       }
@@ -8827,6 +8829,19 @@
         const maxTr = cfg.max_trades_per_day || 4;
         const dayCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
         limitPill.textContent = `📊 Trades Today: ${dayCount} / ${maxTr}`;
+      }
+
+      const quotaPill = document.getElementById('live-pill-api-quota');
+      if (quotaPill) {
+        const qCount = bInfo.api_calls_count || 4;
+        const qLimit = bInfo.api_quota_limit || 5000;
+        quotaPill.textContent = `📡 API Quota: ${qCount} / ${qLimit.toLocaleString('en-IN')}`;
+      }
+
+      const lastSyncPill = document.getElementById('live-pill-last-sync');
+      if (lastSyncPill) {
+        const sTime = bInfo.last_broker_sync || '--:--:--';
+        lastSyncPill.textContent = `🕒 Synced: ${sTime}`;
       }
 
       // 3. Active Trade Card vs Idle Card

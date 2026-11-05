@@ -64,6 +64,11 @@ class LiveTradeDaemon:
         self.last_broker_sync: Optional[str] = None
         self._last_sync_timestamp: float = 0.0
 
+        # Strict Daily API Quota Tracking (Max 5,000 Breeze REST calls/day)
+        self.api_calls_count: int = 4
+        self.api_calls_date: str = datetime.now().strftime("%Y-%m-%d")
+        self.api_quota_limit: int = 5000
+
         # Configuration (synchronized with Config Cogwheel modal)
         self.strategy = "dual_xgboost_macro"
         self.initial_capital: float = 2336.00
@@ -209,6 +214,15 @@ class LiveTradeDaemon:
                     self.total_liquid_funds = float(data.get("total_liquid_funds", self.total_liquid_funds))
                     self.last_broker_sync = data.get("last_broker_sync", self.last_broker_sync)
 
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    self.api_calls_date = data.get("api_calls_date", today_str)
+                    if self.api_calls_date != today_str:
+                        self.api_calls_date = today_str
+                        self.api_calls_count = 0
+                    else:
+                        self.api_calls_count = int(data.get("api_calls_count", 4))
+                    self.api_quota_limit = int(data.get("api_quota_limit", 5000))
+
                     saved_cap = float(data.get("capital", self.capital))
                     if saved_cap == 20000.0:
                         saved_cap = self.allocated_fno
@@ -259,6 +273,9 @@ class LiveTradeDaemon:
                 "unallocated_balance": round(self.unallocated_balance, 2),
                 "total_liquid_funds": round(self.total_liquid_funds, 2),
                 "last_broker_sync": self.last_broker_sync,
+                "api_calls_count": self.api_calls_count,
+                "api_calls_date": self.api_calls_date,
+                "api_quota_limit": self.api_quota_limit,
                 "strategy": self.strategy,
                 "capital": round(self.capital, 2),
                 "total_capital": round(self.capital, 2),
@@ -738,6 +755,9 @@ class LiveTradeDaemon:
                 "total_liquid_funds": self.total_liquid_funds,
                 "trades_count": len(self.trade_history),
                 "last_broker_sync": self.last_broker_sync,
+                "api_calls_count": self.api_calls_count,
+                "api_quota_limit": self.api_quota_limit,
+                "api_quota_remaining": max(0, self.api_quota_limit - self.api_calls_count),
             }
 
         try:
@@ -751,6 +771,14 @@ class LiveTradeDaemon:
 
             self._last_sync_timestamp = now
             self.broker_connected = True
+
+            # Track Breeze API daily rate limit quota (4 calls per manual sync: funds, positions, orders, trades)
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            if self.api_calls_date != today_str:
+                self.api_calls_date = today_str
+                self.api_calls_count = 0
+            self.api_calls_count += 4
+            logger.info(f"📡 [BREEZE REST QUOTA] Explicit broker sync invoked. API Calls Today: {self.api_calls_count} / {self.api_quota_limit}")
 
             # 1. Fetch Real Funds
             try:
@@ -860,93 +888,8 @@ class LiveTradeDaemon:
             except Exception as e:
                 logger.error(f"Error fetching Breeze trades: {e}")
 
-            # 4. Fetch Real Indices Quotes (NIFTY 50, BANK NIFTY, SENSEX)
-            try:
-                # NIFTY 50
-                qn = client.get_quotes(stock_code="NIFTY", exchange_code="NSE")
-                if isinstance(qn, dict) and isinstance(qn.get("Success"), list) and qn["Success"]:
-                    q = qn["Success"][0]
-                    ltp = float(q.get("ltp") or 0.0)
-                    prev_c = float(q.get("previous_close") or 0.0)
-                    pct = float(q.get("ltp_percent_change") or 0.0)
-                    pts = round(ltp - prev_c, 2) if prev_c else 0.0
-                    if ltp > 0:
-                        self.current_spot = ltp
-                        self.indices["NIFTY"] = {
-                            "name": "NIFTY 50",
-                            "symbol": "NIFTY",
-                            "segment": "NSE Cash",
-                            "badge": "SPOT",
-                            "ltp": ltp,
-                            "atm_strike": int(round(ltp / 50.0) * 50),
-                            "strike_step": 50,
-                            "change_pts": pts,
-                            "change_pct": round(pct, 2),
-                            "trend": "UP" if pct >= 0 else "DOWN",
-                            "high": float(q.get("high") or ltp),
-                            "low": float(q.get("low") or ltp),
-                            "open": float(q.get("open") or ltp),
-                            "prev_close": prev_c,
-                            "updated_at": datetime.now().isoformat()
-                        }
-
-                # BANK NIFTY
-                qb = client.get_quotes(stock_code="CNXBAN", exchange_code="NSE")
-                if isinstance(qb, dict) and isinstance(qb.get("Success"), list) and qb["Success"]:
-                    q = qb["Success"][0]
-                    ltp = float(q.get("ltp") or 0.0)
-                    prev_c = float(q.get("previous_close") or 0.0)
-                    pct = float(q.get("ltp_percent_change") or 0.0)
-                    pts = round(ltp - prev_c, 2) if prev_c else 0.0
-                    if ltp > 0:
-                        self.indices["BANKNIFTY"] = {
-                            "name": "BANK NIFTY",
-                            "symbol": "BANKNIFTY",
-                            "segment": "NSE Cash",
-                            "badge": "SPOT",
-                            "ltp": ltp,
-                            "atm_strike": int(round(ltp / 100.0) * 100),
-                            "strike_step": 100,
-                            "change_pts": pts,
-                            "change_pct": round(pct, 2),
-                            "trend": "UP" if pct >= 0 else "DOWN",
-                            "high": float(q.get("high") or ltp),
-                            "low": float(q.get("low") or ltp),
-                            "open": float(q.get("open") or ltp),
-                            "prev_close": prev_c,
-                            "updated_at": datetime.now().isoformat()
-                        }
-
-                # SENSEX (filter exchange_code == "BSE")
-                qs = client.get_quotes(stock_code="BSESEN", exchange_code="BSE")
-                if isinstance(qs, dict) and isinstance(qs.get("Success"), list):
-                    bse_quotes = [q for q in qs["Success"] if isinstance(q, dict) and q.get("exchange_code") == "BSE"]
-                    if bse_quotes:
-                        q = bse_quotes[0]
-                        ltp = float(q.get("ltp") or 0.0)
-                        prev_c = float(q.get("previous_close") or 0.0)
-                        pct = float(q.get("ltp_percent_change") or 0.0)
-                        pts = round(ltp - prev_c, 2) if prev_c else 0.0
-                        if ltp > 0:
-                            self.indices["SENSEX"] = {
-                                "name": "BSE SENSEX",
-                                "symbol": "SENSEX",
-                                "segment": "BSE Cash",
-                                "badge": "SPOT",
-                                "ltp": ltp,
-                                "atm_strike": int(round(ltp / 100.0) * 100),
-                                "strike_step": 100,
-                                "change_pts": pts,
-                                "change_pct": round(pct, 2),
-                                "trend": "UP" if pct >= 0 else "DOWN",
-                                "high": float(q.get("high") or ltp),
-                                "low": float(q.get("low") or ltp),
-                                "open": float(q.get("open") or ltp),
-                                "prev_close": prev_c,
-                                "updated_at": datetime.now().isoformat()
-                            }
-            except Exception as e:
-                logger.error(f"Error fetching Breeze index quotes: {e}")
+            # Note: Index Quotes are streamed continuously via Zero-REST-call WebSocket ticks (on_tick),
+            # strictly protecting the daily 5,000 Breeze REST call limit.
 
             self.last_broker_sync = datetime.now().strftime("%H:%M:%S")
             self.save_state()
@@ -968,12 +911,34 @@ class LiveTradeDaemon:
             return {"status": "error", "message": str(e)}
 
     def get_state(self) -> Dict[str, Any]:
-        """Returns complete real-time live trading state."""
-        # Auto-sync with broker API using 15-second cache
-        try:
-            self.sync_broker_data(force=False)
-        except Exception as e:
-            logger.debug(f"sync_broker_data non-fatal error: {e}")
+        """
+        Returns complete real-time live trading state.
+        STRICT RATE-LIMIT COMPLIANT: ZERO REST API calls are performed here.
+        All data is served strictly from memory/cache and updated via WebSocket ticks.
+        Unrealized P&L is calculated 100% offline.
+        """
+        # Offline Unrealized P&L calculation for active position (0 REST calls)
+        if self.active_trade:
+            pos = self.active_trade
+            entry_px = float(pos.get("entry_price") or pos.get("entry_rate") or 0.0)
+            cur_px = float(pos.get("current_price") or entry_px)
+            qty = int(pos.get("quantity") or pos.get("units") or 65)
+
+            # Estimate option LTP movement from live benchmark spot tick if direct contract has not ticked
+            spot_px = float(self.current_spot or 0.0)
+            spot_entry = float(pos.get("spot_at_entry") or spot_px)
+            if spot_px > 0 and spot_entry > 0 and cur_px == entry_px:
+                trend = (pos.get("trend") or "BULLISH").upper()
+                delta = 0.55 if trend in ("BULLISH", "CALL", "CE") else -0.55
+                spot_diff = spot_px - spot_entry
+                cur_px = max(1.0, round(entry_px + spot_diff * delta, 2))
+                pos["current_price"] = cur_px
+
+            pts = round(cur_px - entry_px, 2)
+            u_pnl = round(pts * qty, 2)
+            pos["points"] = pts
+            pos["unrealized_pnl"] = u_pnl
+            pos["current_pnl"] = u_pnl
 
         today_str = datetime.now().strftime("%Y-%m-%d")
         all_tr = list(self.trade_history)
@@ -1038,7 +1003,10 @@ class LiveTradeDaemon:
                 "available_fno": self.available_fno,
                 "unallocated_balance": self.unallocated_balance,
                 "total_liquid_funds": self.total_liquid_funds,
-                "last_broker_sync": self.last_broker_sync
+                "last_broker_sync": self.last_broker_sync,
+                "api_calls_count": self.api_calls_count,
+                "api_quota_limit": self.api_quota_limit,
+                "api_quota_remaining": max(0, self.api_quota_limit - self.api_calls_count)
             }
         }
 
@@ -1057,7 +1025,10 @@ class LiveTradeDaemon:
                 "available_fno": self.available_fno,
                 "unallocated_balance": self.unallocated_balance,
                 "total_liquid_funds": self.total_liquid_funds,
-                "last_broker_sync": self.last_broker_sync
+                "last_broker_sync": self.last_broker_sync,
+                "api_calls_count": self.api_calls_count,
+                "api_quota_limit": self.api_quota_limit,
+                "api_quota_remaining": max(0, self.api_quota_limit - self.api_calls_count)
             },
             "config": {
                 "strategy": self.strategy,
