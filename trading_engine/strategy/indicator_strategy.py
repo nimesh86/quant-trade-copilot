@@ -104,7 +104,14 @@ class IndicatorStrategyAdapter(BaseStrategy):
         )
 
         try:
-            sig: Optional[IndicatorSignal] = self.indicator.on_bar(synced_bar)
+            import inspect
+            sig_params = inspect.signature(self.indicator.on_bar).parameters
+            if len(sig_params) >= 2 or "history" in sig_params:
+                import pandas as pd
+                hist_df = pd.DataFrame(self.bar_history) if self.bar_history else pd.DataFrame([bar])
+                sig: Optional[IndicatorSignal] = self.indicator.on_bar(bar, hist_df)
+            else:
+                sig: Optional[IndicatorSignal] = self.indicator.on_bar(synced_bar)
         except Exception as e:
             print(f"IndicatorStrategyAdapter [{self.name}]: Error evaluating on_bar: {e}", flush=True)
             return None
