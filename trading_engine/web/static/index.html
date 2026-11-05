@@ -6056,7 +6056,9 @@
 
     // ── 7. Run Button Handler (Connected to 3-Layer Quant Backend) ─────────
     async function executeBacktest() {
-      const selected = Array.from(document.querySelectorAll('.bt-indicator-chk:checked')).map(c => c.value);
+      const checkedBoxes = Array.from(document.querySelectorAll('.bt-indicator-chk:checked'));
+      const selected = checkedBoxes.map(c => c.value);
+      const selectedIndicatorNames = checkedBoxes.map(chk => chk.getAttribute('data-name') || chk.value);
       if (selected.length === 0) {
         alert('Please select at least one Strategy / Indicator.');
         return;
@@ -6116,7 +6118,7 @@
         const charges = summary.totalCharges || 0;
 
         // Update Summary DOM
-        const capitalVal = summary.capital || parseFloat(document.getElementById('bt-capital')?.value) || 50000;
+        const capitalVal = summary.capital || parseFloat(document.getElementById('bt-capital-input')?.value) || 20000;
         const finalBal = summary.finalBalance || summary.final_balance || (capitalVal + netPnl);
         const balEl = document.getElementById('bt-sum-final-balance');
         if (balEl) {
@@ -6160,8 +6162,10 @@
         currentBacktestTrades = data.trades || [];
         const uniqueDates = [...new Map(currentBacktestTrades.map(t => [t.date, { date: t.date, day: t.day }])).values()]
           .sort((a, b) => a.date.localeCompare(b.date));
+        const tradeIndicators = [...new Set(currentBacktestTrades.map(t => t.indicator).filter(Boolean))];
+        const indicatorFilterList = tradeIndicators.length > 0 ? tradeIndicators : selectedIndicatorNames;
         updateDateFilterList(uniqueDates);
-        updateIndicatorFilterList(selectedIndicatorNames);
+        updateIndicatorFilterList(indicatorFilterList);
         applyFiltersAndRender();
 
         // Record execution in Dashboard Log
