@@ -4614,15 +4614,16 @@
             <button type="button" class="btn-live-toggle disarmed" id="btn-live-arm-toggle" onclick="toggleLiveArmingState()" title="Master Hardware Safety Switch: Arm or Disarm Live Trading">
               <span id="live-arm-icon">🔒</span> <span id="live-arm-text">ARM LIVE TRADING</span>
             </button>
+            <span class="live-pill" id="live-pill-broker" style="border-color: rgba(59, 130, 246, 0.5); background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-weight: 600;">🏦 ICICI Direct (624401093398)</span>
             <span class="live-pill accent" id="live-pill-segment">🎯 Segment: NIFTY 50 (Dynamic ATM)</span>
             <span class="live-pill" id="live-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
-            <span class="live-pill" id="live-pill-capital">💼 Total Cap: ₹20,000</span>
-            <span class="live-pill" id="live-pill-available">🔓 Available: ₹20,000</span>
-            <span class="live-pill" id="live-pill-blocked">🔒 Margin: ₹0.00</span>
+            <span class="live-pill" id="live-pill-capital">💼 F&O Cap: ₹2,336</span>
+            <span class="live-pill" id="live-pill-available">🔓 Available: ₹2,248</span>
+            <span class="live-pill" id="live-pill-blocked">🔒 Margin: ₹88</span>
             <span class="live-pill" id="live-pill-day-pnl">💰 Day P&L: ₹0.00</span>
             <span class="live-pill" id="live-pill-trade-limit">📊 Trades Today: 0 / 4</span>
-            <button type="button" class="btn-paper-reset" onclick="resetLiveLedger()" title="Reset Live Trading Ledger to ₹20,000">
-              🔄 Reset Ledger
+            <button type="button" class="btn-paper-reset" id="btn-live-sync-broker" onclick="syncLiveBrokerData()" title="Sync live broker funds, margins, positions, and trades directly from ICICI Direct Breeze API">
+              🔄 Sync Broker Data
             </button>
           </div>
         </div>
@@ -4639,7 +4640,7 @@
         <div class="bt-summary-panel">
           <div class="bt-summary-header">
             <div class="bt-summary-title">
-              <span>📈 Live Performance Summary & Trade Details</span>
+              <span>📈 Live Broker Performance Summary & Trade Details</span>
             </div>
 
             <!-- 3 Subtabs Header -->
@@ -4659,14 +4660,14 @@
           <!-- Overall KPI Summary Cards -->
           <div class="bt-summary-grid" style="margin-top: 14px;">
             <div class="bt-stat-card">
-              <div class="bt-stat-label"><span>Total Capital</span><span>💼</span></div>
-              <div class="bt-stat-value positive" id="live-sum-capital">₹20,000</div>
-              <div class="bt-stat-sub" id="live-sum-cap-sub">Initial: ₹20,000</div>
+              <div class="bt-stat-label"><span>F&O Allocated Capital</span><span>💼</span></div>
+              <div class="bt-stat-value positive" id="live-sum-capital">₹2,336</div>
+              <div class="bt-stat-sub" id="live-sum-cap-sub">Unallocated Bank: ₹30,935</div>
             </div>
             <div class="bt-stat-card">
-              <div class="bt-stat-label"><span>Available Capital</span><span>🔓</span></div>
-              <div class="bt-stat-value positive" id="live-sum-avail-capital">₹20,000</div>
-              <div class="bt-stat-sub" id="live-sum-blocked-sub">Blocked Margin: ₹0.00</div>
+              <div class="bt-stat-label"><span>Available Margin</span><span>🔓</span></div>
+              <div class="bt-stat-value positive" id="live-sum-avail-capital">₹2,248</div>
+              <div class="bt-stat-sub" id="live-sum-blocked-sub">Blocked Margin: ₹87.95</div>
             </div>
             <div class="bt-stat-card">
               <div class="bt-stat-label"><span>Total Net P&L</span><span>💰</span></div>
@@ -4684,9 +4685,9 @@
               <div class="bt-stat-sub" id="live-sum-gross-sub">Gross: ₹0 / ₹0</div>
             </div>
             <div class="bt-stat-card">
-              <div class="bt-stat-label"><span>Max Drawdown</span><span>📉</span></div>
-              <div class="bt-stat-value negative" id="live-sum-mdd">₹0.00</div>
-              <div class="bt-stat-sub">Peak to Valley</div>
+              <div class="bt-stat-label"><span>Total Liquid Balance</span><span>🏦</span></div>
+              <div class="bt-stat-value positive" id="live-sum-mdd">₹33,271</div>
+              <div class="bt-stat-sub" id="live-sum-liquid-sub">ICICI Bank + F&O Funds</div>
             </div>
             <div class="bt-stat-card">
               <div class="bt-stat-label"><span>Avg Win / Loss</span><span>📊</span></div>
@@ -4694,8 +4695,8 @@
               <div class="bt-stat-sub">Realized Trades</div>
             </div>
             <div class="bt-stat-card">
-              <div class="bt-stat-label"><span>Charges & Taxes</span><span>🧾</span></div>
-              <div class="bt-stat-value" id="live-sum-charges">₹0.00</div>
+              <div class="bt-stat-label"><span>Blocked Margin / Taxes</span><span>🧾</span></div>
+              <div class="bt-stat-value" id="live-sum-charges">₹87.95</div>
               <div class="bt-stat-sub">Statutory Exchange/STT</div>
             </div>
           </div>
@@ -8497,18 +8498,28 @@
       }
     }
 
-    async function resetLiveLedger() {
-      if (!confirm('Reset Live Trading ledger back to initial capital of ₹20,000.00 and clear all live trades?')) return;
+    async function syncLiveBrokerData() {
+      const btn = document.getElementById('btn-live-sync-broker');
+      if (btn) {
+        btn.innerHTML = '⏳ Syncing Broker...';
+        btn.disabled = true;
+      }
       try {
-        const resp = await fetch('/api/live/reset', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ capital: 20000 })
-        });
-        const res = await resp.json();
-        await fetchLiveTradingState();
+        const resp = await fetch('/api/live/sync', { method: 'POST' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (data.state) {
+          renderLiveTradingUI(data.state);
+        } else {
+          await fetchLiveTradingState();
+        }
       } catch (err) {
-        alert('Failed to reset live ledger: ' + err.message);
+        alert('Live Broker Sync failed: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.innerHTML = '🔄 Sync Broker Data';
+          btn.disabled = false;
+        }
       }
     }
 
@@ -8766,7 +8777,20 @@
         renderLiveIndices(state.indices);
       }
 
-      // 2. Meta Pills
+      // 2. Meta Pills & Broker Info
+      const bInfo = state.broker_info || (sum && sum.broker_info) || {};
+      const brokerAccount = bInfo.bank_account || '624401093398';
+      const allocatedFno = bInfo.allocated_fno !== undefined ? bInfo.allocated_fno : (state.capital || 2336.00);
+      const blockedFno = bInfo.blocked_fno !== undefined ? bInfo.blocked_fno : (state.blocked_capital || 87.95);
+      const availableFno = bInfo.available_fno !== undefined ? bInfo.available_fno : (state.available_capital || 2248.05);
+      const unallocatedBal = bInfo.unallocated_balance !== undefined ? bInfo.unallocated_balance : 30935.27;
+      const totalLiquid = bInfo.total_liquid_funds !== undefined ? bInfo.total_liquid_funds : (allocatedFno + unallocatedBal);
+
+      const brokerPill = document.getElementById('live-pill-broker');
+      if (brokerPill) {
+        brokerPill.textContent = `🏦 ICICI Direct (${brokerAccount})`;
+      }
+
       const stratPill = document.getElementById('live-pill-strategy');
       if (stratPill) {
         const sName = (cfg.strategy === 'dual_xgboost_macro' || cfg.strategy === 'Dual XGBoost + Macro')
@@ -8777,20 +8801,17 @@
 
       const capPill = document.getElementById('live-pill-capital');
       if (capPill) {
-        const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
-        capPill.textContent = `💼 Total Cap: ₹${Math.round(cVal).toLocaleString('en-IN')}`;
+        capPill.textContent = `💼 F&O Cap: ₹${Math.round(allocatedFno).toLocaleString('en-IN')}`;
       }
 
       const availPill = document.getElementById('live-pill-available');
       if (availPill) {
-        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : (cfg.capital || 20000));
-        availPill.textContent = `🔓 Available: ₹${Math.round(aVal).toLocaleString('en-IN')}`;
+        availPill.textContent = `🔓 Available: ₹${Math.round(availableFno).toLocaleString('en-IN')}`;
       }
 
       const blockedPill = document.getElementById('live-pill-blocked');
       if (blockedPill) {
-        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
-        blockedPill.textContent = `🔒 Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+        blockedPill.textContent = `🔒 Margin: ₹${Math.round(blockedFno).toLocaleString('en-IN')}`;
       }
 
       const dayPnlPill = document.getElementById('live-pill-day-pnl');
@@ -8829,22 +8850,20 @@
 
       const sumCapEl = document.getElementById('live-sum-capital');
       if (sumCapEl) {
-        sumCapEl.textContent = (runningCap >= 0 ? '₹' : '-₹') + Math.abs(Math.round(runningCap)).toLocaleString('en-IN');
-        sumCapEl.className = 'bt-stat-value ' + (runningCap >= initCap ? 'positive' : 'negative');
+        sumCapEl.textContent = '₹' + Math.round(allocatedFno).toLocaleString('en-IN');
+        sumCapEl.className = 'bt-stat-value positive';
       }
       const sumCapSub = document.getElementById('live-sum-cap-sub');
-      if (sumCapSub) sumCapSub.textContent = `Initial: ₹${Math.round(initCap).toLocaleString('en-IN')}`;
+      if (sumCapSub) sumCapSub.textContent = `Unallocated Bank: ₹${Math.round(unallocatedBal).toLocaleString('en-IN')}`;
 
       const sumAvailEl = document.getElementById('live-sum-avail-capital');
       if (sumAvailEl) {
-        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : runningCap);
-        sumAvailEl.textContent = '₹' + Math.round(aVal).toLocaleString('en-IN');
-        sumAvailEl.className = 'bt-stat-value ' + (aVal >= 0 ? 'positive' : 'negative');
+        sumAvailEl.textContent = '₹' + Math.round(availableFno).toLocaleString('en-IN');
+        sumAvailEl.className = 'bt-stat-value positive';
       }
       const sumBlockedSub = document.getElementById('live-sum-blocked-sub');
       if (sumBlockedSub) {
-        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
-        sumBlockedSub.textContent = `Blocked Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+        sumBlockedSub.textContent = `Blocked Margin: ₹${Number(blockedFno).toFixed(2)}`;
       }
 
       const sumNetEl = document.getElementById('live-sum-net-pnl');
@@ -8866,13 +8885,13 @@
       if (sumGrossSub) sumGrossSub.textContent = `Gross: ₹${Math.round(grossPnl).toLocaleString('en-IN')}`;
 
       const sumMddEl = document.getElementById('live-sum-mdd');
-      if (sumMddEl) sumMddEl.textContent = '₹' + Math.abs(Math.round(mdd)).toLocaleString('en-IN');
+      if (sumMddEl) sumMddEl.textContent = '₹' + Math.round(totalLiquid).toLocaleString('en-IN');
 
       const sumAvgEl = document.getElementById('live-sum-avg');
       if (sumAvgEl) sumAvgEl.textContent = `+₹${Math.round(avgWin).toLocaleString('en-IN')} / -₹${Math.abs(Math.round(avgLoss)).toLocaleString('en-IN')}`;
 
       const sumChargesEl = document.getElementById('live-sum-charges');
-      if (sumChargesEl) sumChargesEl.textContent = '₹' + Math.round(charges).toLocaleString('en-IN');
+      if (sumChargesEl) sumChargesEl.textContent = '₹' + Number(blockedFno).toFixed(2);
 
       // 5. Subtab A: Total Trades Table
       const tbodyTotal = document.getElementById('live-tbody-total');

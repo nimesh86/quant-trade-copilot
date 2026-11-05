@@ -1595,13 +1595,28 @@ async def exit_live_trading_active_trade():
 @app.post("/api/live/reset")
 async def reset_live_trading_account(payload: Dict[str, Any] = Body(default={})):
     """Resets live account balance to initial capital and clears logs."""
-    cap = float(payload.get("capital", 20000.0))
+    cap = float(payload.get("capital", 2336.00))
     live_trade_daemon.reset_state(cap)
     try:
         await broadcast_live_full_state()
     except Exception:
         pass
     return live_trade_daemon.get_state()
+
+
+@app.post("/api/live/sync")
+async def sync_live_trading_broker():
+    """Forces direct synchronization with ICICI Direct Breeze API."""
+    sync_res = live_trade_daemon.sync_broker_data(force=True)
+    try:
+        await broadcast_live_full_state()
+    except Exception:
+        pass
+    return {
+        "status": "ok",
+        "sync_result": sync_res,
+        "state": live_trade_daemon.get_state()
+    }
 
 
 _live_websockets: List[WebSocket] = []

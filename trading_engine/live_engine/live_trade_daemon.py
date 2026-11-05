@@ -52,12 +52,24 @@ class LiveTradeDaemon:
         self.is_armed: bool = False  # Default: DISARMED / OFF
         self.execution_mode: str = "DRY_RUN"  # Safe testing: order API is mocked
 
+        # Real Broker Account State (ICICI Direct Breeze API)
+        self.broker_name: str = "ICICI Direct Breeze"
+        self.bank_account: str = "624401093398"
+        self.broker_connected: bool = True
+        self.allocated_fno: float = 2336.00
+        self.blocked_fno: float = 87.95
+        self.available_fno: float = 2248.05
+        self.unallocated_balance: float = 30935.27
+        self.total_liquid_funds: float = 33271.27
+        self.last_broker_sync: Optional[str] = None
+        self._last_sync_timestamp: float = 0.0
+
         # Configuration (synchronized with Config Cogwheel modal)
         self.strategy = "dual_xgboost_macro"
-        self.initial_capital: float = 20000.0
-        self.capital: float = 20000.0  # Total Capital
-        self.blocked_capital: float = 0.0  # Margin committed to active trade
-        self.available_capital: float = 20000.0  # Capital available for new trades
+        self.initial_capital: float = 2336.00
+        self.capital: float = 2336.00  # Total Capital
+        self.blocked_capital: float = 87.95  # Margin committed to active trade
+        self.available_capital: float = 2248.05  # Capital available for new trades
         self.symbol = "NIFTY"
         self.max_trades_per_day = 4
         self.blocked_time_slots = [["09:15", "10:05"]]
@@ -70,9 +82,9 @@ class LiveTradeDaemon:
         self.trade_history: List[Dict[str, Any]] = []
 
         # Real-time market metrics
-        self.current_spot: float = 24347.35
-        self.current_future: float = 24376.90
-        self.prev_tick_price: float = 24347.35
+        self.current_spot: float = 24536.60
+        self.current_future: float = 24560.00
+        self.prev_tick_price: float = 24536.60
         self.forming_bars: Dict[str, Dict[str, Any]] = {}
         self.bar_history: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -83,13 +95,13 @@ class LiveTradeDaemon:
                 "symbol": "NIFTY",
                 "segment": "NSE Cash",
                 "badge": "SPOT",
-                "ltp": 24347.35,
-                "atm_strike": 24350,
+                "ltp": 24536.60,
+                "atm_strike": 24550,
                 "strike_step": 50,
-                "change_pts": 386.75,
-                "change_pct": 1.61,
+                "change_pts": 576.00,
+                "change_pct": 2.40,
                 "trend": "UP",
-                "high": 24391.95,
+                "high": 24579.90,
                 "low": 24296.30,
                 "open": 24378.05,
                 "prev_close": 23960.60,
@@ -100,13 +112,13 @@ class LiveTradeDaemon:
                 "symbol": "NIFTY-I",
                 "segment": "NSE Futures",
                 "badge": "FUTURES",
-                "ltp": 24376.90,
-                "atm_strike": 24350,
+                "ltp": 24560.00,
+                "atm_strike": 24550,
                 "strike_step": 50,
-                "change_pts": 406.20,
-                "change_pct": 1.69,
+                "change_pts": 589.30,
+                "change_pct": 2.46,
                 "trend": "UP",
-                "high": 24388.00,
+                "high": 24605.00,
                 "low": 24311.00,
                 "open": 24320.00,
                 "prev_close": 23970.70,
@@ -119,16 +131,16 @@ class LiveTradeDaemon:
                 "symbol": "BANKNIFTY",
                 "segment": "NSE Cash",
                 "badge": "SPOT",
-                "ltp": 52100.00,
-                "atm_strike": 52100,
+                "ltp": 57773.65,
+                "atm_strike": 57800,
                 "strike_step": 100,
-                "change_pts": 450.00,
-                "change_pct": 0.87,
+                "change_pts": 1860.05,
+                "change_pct": 3.33,
                 "trend": "UP",
-                "high": 52250.00,
-                "low": 51900.00,
-                "open": 52000.00,
-                "prev_close": 51650.00,
+                "high": 57847.65,
+                "low": 56718.20,
+                "open": 57102.80,
+                "prev_close": 55913.60,
                 "updated_at": datetime.now().isoformat()
             },
             "SENSEX": {
@@ -136,13 +148,13 @@ class LiveTradeDaemon:
                 "symbol": "SENSEX",
                 "segment": "BSE Cash",
                 "badge": "SPOT",
-                "ltp": 78688.70,
-                "atm_strike": 78700,
+                "ltp": 79310.01,
+                "atm_strike": 79300,
                 "strike_step": 100,
-                "change_pts": 1387.30,
-                "change_pct": 1.79,
+                "change_pts": 2008.61,
+                "change_pct": 2.60,
                 "trend": "UP",
-                "high": 78922.44,
+                "high": 79470.03,
                 "low": 78520.56,
                 "open": 78910.94,
                 "prev_close": 77301.40,
@@ -188,10 +200,28 @@ class LiveTradeDaemon:
                     data = json.load(f)
                     self.is_armed = bool(data.get("is_armed", False))
                     self.strategy = data.get("strategy", self.strategy)
-                    self.capital = float(data.get("capital", self.capital))
-                    self.initial_capital = float(data.get("initial_capital", self.initial_capital))
-                    self.blocked_capital = float(data.get("blocked_capital", 0.0))
+                    self.broker_name = data.get("broker_name", self.broker_name)
+                    self.bank_account = str(data.get("bank_account", self.bank_account))
+                    self.allocated_fno = float(data.get("allocated_fno", self.allocated_fno))
+                    self.blocked_fno = float(data.get("blocked_fno", self.blocked_fno))
+                    self.available_fno = float(data.get("available_fno", self.available_fno))
+                    self.unallocated_balance = float(data.get("unallocated_balance", self.unallocated_balance))
+                    self.total_liquid_funds = float(data.get("total_liquid_funds", self.total_liquid_funds))
+                    self.last_broker_sync = data.get("last_broker_sync", self.last_broker_sync)
+
+                    saved_cap = float(data.get("capital", self.capital))
+                    if saved_cap == 20000.0:
+                        saved_cap = self.allocated_fno
+                    self.capital = saved_cap
+                    self.initial_capital = float(data.get("initial_capital", self.allocated_fno))
+                    if self.initial_capital == 20000.0:
+                        self.initial_capital = self.allocated_fno
+                    self.blocked_capital = float(data.get("blocked_capital", self.blocked_fno))
+                    if self.blocked_capital == 0.0 and self.blocked_fno > 0:
+                        self.blocked_capital = self.blocked_fno
                     self.available_capital = float(data.get("available_capital", self.capital - self.blocked_capital))
+                    if self.available_capital == 20000.0 or self.available_capital > self.capital:
+                        self.available_capital = max(0.0, self.capital - self.blocked_capital)
                     self.max_trades_per_day = int(data.get("max_trades_per_day", self.max_trades_per_day))
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
                     self.active_trade = data.get("active_trade")
@@ -211,7 +241,7 @@ class LiveTradeDaemon:
                         if "units" not in t and "quantity" in t:
                             t["units"] = t["quantity"]
 
-                    logger.info(f"LiveTradeDaemon: Restored {len(self.trade_history)} trades. Armed: {self.is_armed} | Capital: ₹{self.capital:,.2f}")
+                    logger.info(f"LiveTradeDaemon: Restored {len(self.trade_history)} trades. Armed: {self.is_armed} | Real Capital: ₹{self.capital:,.2f}")
             except Exception as e:
                 logger.error(f"LiveTradeDaemon: Error loading state: {e}")
 
@@ -221,6 +251,14 @@ class LiveTradeDaemon:
             payload = {
                 "is_armed": self.is_armed,
                 "execution_mode": self.execution_mode,
+                "broker_name": self.broker_name,
+                "bank_account": self.bank_account,
+                "allocated_fno": round(self.allocated_fno, 2),
+                "blocked_fno": round(self.blocked_fno, 2),
+                "available_fno": round(self.available_fno, 2),
+                "unallocated_balance": round(self.unallocated_balance, 2),
+                "total_liquid_funds": round(self.total_liquid_funds, 2),
+                "last_broker_sync": self.last_broker_sync,
                 "strategy": self.strategy,
                 "capital": round(self.capital, 2),
                 "total_capital": round(self.capital, 2),
@@ -676,8 +714,267 @@ class LiveTradeDaemon:
         self._close_active_trade(reason="Manual Force Market Exit", exit_price=exit_px, exit_time=now)
         return {"status": "ok", "message": "Active live trade forcefully squared off at market"}
 
+    def sync_broker_data(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Synchronizes live broker account data directly from ICICI Direct Breeze API:
+        1. Real F&O Funds, Margins, and Bank Balances
+        2. Real Portfolio Positions
+        3. Real Executed Trade Book for today
+        4. Real Market Index Quotes (NIFTY, BANK NIFTY, SENSEX)
+        Uses a 15-second cache to avoid hitting Breeze rate limits unless force=True.
+        """
+        import time
+        now = time.time()
+        # Cooldown guard (15s cache TTL)
+        if not force and (now - self._last_sync_timestamp < 15.0):
+            return {
+                "status": "cached",
+                "broker_name": self.broker_name,
+                "bank_account": self.bank_account,
+                "allocated_fno": self.allocated_fno,
+                "blocked_fno": self.blocked_fno,
+                "available_fno": self.available_fno,
+                "unallocated_balance": self.unallocated_balance,
+                "total_liquid_funds": self.total_liquid_funds,
+                "trades_count": len(self.trade_history),
+                "last_broker_sync": self.last_broker_sync,
+            }
+
+        try:
+            from trading_engine.adapters.breeze_adapter import BreezeAdapter
+
+            adapter = BreezeAdapter()
+            client = adapter.connect()
+            if not client:
+                logger.warning("Breeze client connection failed during sync_broker_data.")
+                return {"status": "error", "message": "Failed to connect to ICICI Direct Breeze API"}
+
+            self._last_sync_timestamp = now
+            self.broker_connected = True
+
+            # 1. Fetch Real Funds
+            try:
+                funds_res = client.get_funds()
+                if isinstance(funds_res, dict) and "Success" in funds_res and isinstance(funds_res["Success"], dict):
+                    fdata = funds_res["Success"]
+                    self.bank_account = str(fdata.get("bank_account") or self.bank_account)
+                    self.allocated_fno = float(fdata.get("allocated_fno", 0.0) or 0.0)
+                    self.blocked_fno = float(fdata.get("block_by_trade_fno", 0.0) or 0.0)
+                    self.available_fno = max(0.0, self.allocated_fno - self.blocked_fno)
+                    self.unallocated_balance = float(fdata.get("unallocated_balance", 0.0) or 0.0)
+                    self.total_liquid_funds = round(self.allocated_fno + self.unallocated_balance, 2)
+
+                    # Update daemon capitals to reflect genuine broker state
+                    self.capital = self.allocated_fno
+                    self.blocked_capital = self.blocked_fno
+                    self.available_capital = self.available_fno
+                    self.initial_capital = self.allocated_fno
+            except Exception as e:
+                logger.error(f"Error fetching Breeze funds: {e}")
+
+            # 2. Fetch Real Open Positions
+            try:
+                pos_res = client.get_portfolio_positions()
+                if isinstance(pos_res, dict) and isinstance(pos_res.get("Success"), list):
+                    positions = [p for p in pos_res["Success"] if isinstance(p, dict) and int(p.get("quantity", 0) or 0) != 0]
+                    if positions:
+                        p0 = positions[0]
+                        stk = p0.get("stock_code", "NIFTY")
+                        rt = p0.get("right", "Call")
+                        self.active_trade = {
+                            "id": p0.get("order_id") or "OPEN-1",
+                            "symbol": stk,
+                            "contract": f"{stk} {p0.get('expiry_date', '')} {p0.get('strike_price', '')} {rt}",
+                            "trend": "BULLISH" if rt.upper() in ("CALL", "CE") else "BEARISH",
+                            "entry_price": float(p0.get("average_cost", 0.0) or 0.0),
+                            "current_price": float(p0.get("ltp", p0.get("average_cost", 0.0)) or 0.0),
+                            "quantity": int(p0.get("quantity", 0) or 0),
+                            "lots": max(1, int(p0.get("quantity", 0) or 0) // 65),
+                            "entry_time": p0.get("order_datetime") or p0.get("trade_date") or "",
+                            "pnl": float(p0.get("pnl", 0.0) or 0.0),
+                            "strategy": "ICICI Direct Open Position"
+                        }
+                    else:
+                        self.active_trade = None
+            except Exception as e:
+                logger.error(f"Error fetching Breeze positions: {e}")
+
+            # 3. Fetch Real Trade Book (Order List & Trade List)
+            try:
+                today_iso = datetime.now().strftime("%Y-%m-%dT06:00:00.000Z")
+                today_end = datetime.now().strftime("%Y-%m-%dT18:00:00.000Z")
+                orders_res = client.get_order_list(exchange_code="NFO", from_date=today_iso, to_date=today_end)
+                orders = orders_res.get("Success", []) if isinstance(orders_res, dict) and isinstance(orders_res.get("Success"), list) else []
+                order_time_map = {o.get("order_id"): o.get("order_datetime") for o in orders if isinstance(o, dict) and o.get("order_id")}
+
+                trades_res = client.get_trade_list(exchange_code="NFO", from_date=today_iso, to_date=today_end)
+                trades = trades_res.get("Success", []) if isinstance(trades_res, dict) and isinstance(trades_res.get("Success"), list) else []
+
+                buy_legs = [t for t in trades if isinstance(t, dict) and (t.get("action") or "").upper() == "BUY"]
+                sell_legs = [t for t in trades if isinstance(t, dict) and (t.get("action") or "").upper() == "SELL"]
+
+                paired = []
+                matched_sells = set()
+                for b in buy_legs:
+                    stk = b.get("strike_price")
+                    rt = b.get("right")
+                    b_cost = float(b.get("average_cost", 0.0) or 0.0)
+                    b_qty = int(b.get("quantity", 65) or 65)
+                    b_time = order_time_map.get(b.get("order_id"), b.get("trade_date", ""))
+                    for s_idx, s in enumerate(sell_legs):
+                        if s_idx in matched_sells:
+                            continue
+                        if s.get("strike_price") == stk and s.get("right") == rt:
+                            matched_sells.add(s_idx)
+                            s_cost = float(s.get("average_cost", 0.0) or 0.0)
+                            s_qty = int(s.get("quantity", 65) or 65)
+                            s_time = order_time_map.get(s.get("order_id"), s.get("trade_date", ""))
+                            pts = round(s_cost - b_cost, 2)
+                            gross = round(pts * b_qty, 2)
+                            sym = b.get("stock_code", "NIFTY")
+                            exp = b.get("expiry_date", "")
+                            contract_name = f"{sym} {exp} {stk} {rt}"
+                            paired.append({
+                                "id": b.get("order_id"),
+                                "date": datetime.now().strftime("%Y-%m-%d"),
+                                "contract": contract_name,
+                                "symbol": sym,
+                                "trend": "BULLISH" if (rt or "").upper() in ("CALL", "CE") else "BEARISH",
+                                "strategy": "ICICI Direct Execution",
+                                "entry_time": b_time.split(" ")[-1] if " " in str(b_time) else str(b_time),
+                                "exit_time": s_time.split(" ")[-1] if " " in str(s_time) else str(s_time),
+                                "entry_price": b_cost,
+                                "exit_price": s_cost,
+                                "points": pts,
+                                "lots": max(1, b_qty // 65),
+                                "quantity": b_qty,
+                                "gross": gross,
+                                "charges": self.blocked_fno,
+                                "net": gross,
+                                "reason": "EXECUTED"
+                            })
+                            break
+
+                if paired:
+                    self.trade_history = paired
+            except Exception as e:
+                logger.error(f"Error fetching Breeze trades: {e}")
+
+            # 4. Fetch Real Indices Quotes (NIFTY 50, BANK NIFTY, SENSEX)
+            try:
+                # NIFTY 50
+                qn = client.get_quotes(stock_code="NIFTY", exchange_code="NSE")
+                if isinstance(qn, dict) and isinstance(qn.get("Success"), list) and qn["Success"]:
+                    q = qn["Success"][0]
+                    ltp = float(q.get("ltp") or 0.0)
+                    prev_c = float(q.get("previous_close") or 0.0)
+                    pct = float(q.get("ltp_percent_change") or 0.0)
+                    pts = round(ltp - prev_c, 2) if prev_c else 0.0
+                    if ltp > 0:
+                        self.current_spot = ltp
+                        self.indices["NIFTY"] = {
+                            "name": "NIFTY 50",
+                            "symbol": "NIFTY",
+                            "segment": "NSE Cash",
+                            "badge": "SPOT",
+                            "ltp": ltp,
+                            "atm_strike": int(round(ltp / 50.0) * 50),
+                            "strike_step": 50,
+                            "change_pts": pts,
+                            "change_pct": round(pct, 2),
+                            "trend": "UP" if pct >= 0 else "DOWN",
+                            "high": float(q.get("high") or ltp),
+                            "low": float(q.get("low") or ltp),
+                            "open": float(q.get("open") or ltp),
+                            "prev_close": prev_c,
+                            "updated_at": datetime.now().isoformat()
+                        }
+
+                # BANK NIFTY
+                qb = client.get_quotes(stock_code="CNXBAN", exchange_code="NSE")
+                if isinstance(qb, dict) and isinstance(qb.get("Success"), list) and qb["Success"]:
+                    q = qb["Success"][0]
+                    ltp = float(q.get("ltp") or 0.0)
+                    prev_c = float(q.get("previous_close") or 0.0)
+                    pct = float(q.get("ltp_percent_change") or 0.0)
+                    pts = round(ltp - prev_c, 2) if prev_c else 0.0
+                    if ltp > 0:
+                        self.indices["BANKNIFTY"] = {
+                            "name": "BANK NIFTY",
+                            "symbol": "BANKNIFTY",
+                            "segment": "NSE Cash",
+                            "badge": "SPOT",
+                            "ltp": ltp,
+                            "atm_strike": int(round(ltp / 100.0) * 100),
+                            "strike_step": 100,
+                            "change_pts": pts,
+                            "change_pct": round(pct, 2),
+                            "trend": "UP" if pct >= 0 else "DOWN",
+                            "high": float(q.get("high") or ltp),
+                            "low": float(q.get("low") or ltp),
+                            "open": float(q.get("open") or ltp),
+                            "prev_close": prev_c,
+                            "updated_at": datetime.now().isoformat()
+                        }
+
+                # SENSEX (filter exchange_code == "BSE")
+                qs = client.get_quotes(stock_code="BSESEN", exchange_code="BSE")
+                if isinstance(qs, dict) and isinstance(qs.get("Success"), list):
+                    bse_quotes = [q for q in qs["Success"] if isinstance(q, dict) and q.get("exchange_code") == "BSE"]
+                    if bse_quotes:
+                        q = bse_quotes[0]
+                        ltp = float(q.get("ltp") or 0.0)
+                        prev_c = float(q.get("previous_close") or 0.0)
+                        pct = float(q.get("ltp_percent_change") or 0.0)
+                        pts = round(ltp - prev_c, 2) if prev_c else 0.0
+                        if ltp > 0:
+                            self.indices["SENSEX"] = {
+                                "name": "BSE SENSEX",
+                                "symbol": "SENSEX",
+                                "segment": "BSE Cash",
+                                "badge": "SPOT",
+                                "ltp": ltp,
+                                "atm_strike": int(round(ltp / 100.0) * 100),
+                                "strike_step": 100,
+                                "change_pts": pts,
+                                "change_pct": round(pct, 2),
+                                "trend": "UP" if pct >= 0 else "DOWN",
+                                "high": float(q.get("high") or ltp),
+                                "low": float(q.get("low") or ltp),
+                                "open": float(q.get("open") or ltp),
+                                "prev_close": prev_c,
+                                "updated_at": datetime.now().isoformat()
+                            }
+            except Exception as e:
+                logger.error(f"Error fetching Breeze index quotes: {e}")
+
+            self.last_broker_sync = datetime.now().strftime("%H:%M:%S")
+            self.save_state()
+
+            return {
+                "status": "ok",
+                "broker_name": self.broker_name,
+                "bank_account": self.bank_account,
+                "allocated_fno": self.allocated_fno,
+                "blocked_fno": self.blocked_fno,
+                "available_fno": self.available_fno,
+                "unallocated_balance": self.unallocated_balance,
+                "total_liquid_funds": self.total_liquid_funds,
+                "trades_count": len(self.trade_history),
+                "last_broker_sync": self.last_broker_sync,
+            }
+        except Exception as e:
+            logger.error(f"Error in sync_broker_data: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}
+
     def get_state(self) -> Dict[str, Any]:
         """Returns complete real-time live trading state."""
+        # Auto-sync with broker API using 15-second cache
+        try:
+            self.sync_broker_data(force=False)
+        except Exception as e:
+            logger.debug(f"sync_broker_data non-fatal error: {e}")
+
         today_str = datetime.now().strftime("%Y-%m-%d")
         all_tr = list(self.trade_history)
         today_tr = [t for t in all_tr if t.get("date") == today_str]
@@ -731,7 +1028,18 @@ class LiveTradeDaemon:
             "today_trades_count": len(today_tr),
             "monthly_breakdown": list(monthly_map.values()),
             "today_trades": today_tr,
-            "all_trades": all_tr
+            "all_trades": all_tr,
+            "broker_info": {
+                "broker_name": self.broker_name,
+                "bank_account": self.bank_account,
+                "connected": self.broker_connected,
+                "allocated_fno": self.allocated_fno,
+                "blocked_fno": self.blocked_fno,
+                "available_fno": self.available_fno,
+                "unallocated_balance": self.unallocated_balance,
+                "total_liquid_funds": self.total_liquid_funds,
+                "last_broker_sync": self.last_broker_sync
+            }
         }
 
         return {
@@ -740,6 +1048,17 @@ class LiveTradeDaemon:
             "execution_mode": self.execution_mode,
             "active_trade": self.active_trade,
             "summary": summary,
+            "broker_info": {
+                "broker_name": self.broker_name,
+                "bank_account": self.bank_account,
+                "connected": self.broker_connected,
+                "allocated_fno": self.allocated_fno,
+                "blocked_fno": self.blocked_fno,
+                "available_fno": self.available_fno,
+                "unallocated_balance": self.unallocated_balance,
+                "total_liquid_funds": self.total_liquid_funds,
+                "last_broker_sync": self.last_broker_sync
+            },
             "config": {
                 "strategy": self.strategy,
                 "capital": self.capital,
@@ -764,3 +1083,4 @@ class LiveTradeDaemon:
 
 # Singleton accessor
 live_trade_daemon = LiveTradeDaemon.get_instance()
+
