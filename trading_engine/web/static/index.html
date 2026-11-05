@@ -3317,6 +3317,146 @@
       border-color: rgba(0, 240, 255, 0.3);
       background: rgba(0, 240, 255, 0.08);
     }
+
+    /* Live Indices Statistics Cards */
+    .paper-indices-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin-bottom: 2px;
+    }
+    .paper-index-card {
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.65));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 12px 14px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+      transition: all 0.2s ease;
+    }
+    .paper-index-card:hover {
+      border-color: rgba(56, 189, 248, 0.3);
+      transform: translateY(-2px);
+    }
+    .paper-index-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: #64748b;
+    }
+    .paper-index-card.trend-up::before {
+      background: linear-gradient(90deg, #10b981, #059669);
+    }
+    .paper-index-card.trend-down::before {
+      background: linear-gradient(90deg, #ef4444, #dc2626);
+    }
+    .paper-index-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .paper-index-name {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      letter-spacing: 0.3px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .paper-index-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .paper-index-badge.live {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .paper-index-badge.fut {
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+    .paper-index-main {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 6px;
+    }
+    .paper-index-strike-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+    .paper-index-strike-lbl {
+      font-size: 0.65rem;
+      color: #64748b;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+    .paper-index-strike {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #f8fafc;
+      letter-spacing: -0.3px;
+      line-height: 1.1;
+    }
+    .paper-index-ltp-sub {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 3px;
+    }
+    .paper-index-change-wrap {
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .paper-index-pills {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .paper-index-pills.pos {
+      background: rgba(16, 185, 129, 0.14);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .paper-index-pills.neg {
+      background: rgba(239, 68, 68, 0.14);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .paper-index-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.66rem;
+      color: #64748b;
+      font-family: 'JetBrains Mono', monospace;
+    }
     .paper-active-card {
       background: #111726;
       border: 1px solid rgba(0, 240, 255, 0.25);
@@ -4133,6 +4273,9 @@
             <span class="paper-pill" id="paper-pill-trade-limit">📊 Trades Today: 0 / 4</span>
           </div>
         </div>
+
+        <!-- Live Indices Statistics Ticker Cards -->
+        <div id="paper-indices-grid" class="paper-indices-grid"></div>
 
         <!-- Section 1: Active Trade Card -->
         <div id="paper-active-trade-container">
@@ -7479,6 +7622,55 @@
       const tradesList = sum.all_trades || state.trades || [];
       const monthlyList = sum.monthly_breakdown || state.monthly || [];
       const todayList = sum.today_trades || state.today_trades || [];
+
+      // 0. Live Indices Statistics Cards at the Top
+      const indicesGrid = document.getElementById('paper-indices-grid');
+      if (indicesGrid && state.indices && Array.isArray(state.indices)) {
+        indicesGrid.innerHTML = state.indices.map(idx => {
+          const isUp = (idx.trend || '').toUpperCase() === 'UP' || (Number(idx.change_pts || 0) >= 0);
+          const icon = isUp ? '▲' : '▼';
+          const ptsSign = Number(idx.change_pts || 0) >= 0 ? '+' : '';
+          const ptsText = `${ptsSign}${Number(idx.change_pts || 0).toFixed(2)}`;
+          const pctSign = Number(idx.change_pct || 0) >= 0 ? '+' : '';
+          const pctText = `${pctSign}${Number(idx.change_pct || 0).toFixed(2)}%`;
+          const ltpFormatted = Number(idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const strikeFormatted = Number(idx.atm_strike || 0).toLocaleString('en-IN');
+          const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+          return `
+            <div class="paper-index-card ${isUp ? 'trend-up' : 'trend-down'}">
+              <div class="paper-index-head">
+                <div class="paper-index-name">
+                  <span>${idx.name || idx.symbol}</span>
+                </div>
+                <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
+              </div>
+              <div class="paper-index-main">
+                <div class="paper-index-strike-wrap">
+                  <span class="paper-index-strike-lbl">Current Strike (ATM)</span>
+                  <span class="paper-index-strike">${strikeFormatted}</span>
+                  <span class="paper-index-ltp-sub">LTP: ₹${ltpFormatted}</span>
+                </div>
+                <div class="paper-index-change-wrap">
+                  <span class="paper-index-pills ${isUp ? 'pos' : 'neg'}">
+                    <span style="font-size: 0.85rem;">${icon}</span>
+                    <span>${ptsText}</span>
+                    <span style="font-size: 0.72rem; opacity: 0.9;">(${pctText})</span>
+                  </span>
+                  <span style="font-size: 0.65rem; color: #64748b; margin-top: 4px; text-transform: uppercase;">
+                    Trend: <strong style="color: ${isUp ? '#10b981' : '#ef4444'}">${isUp ? 'BULLISH' : 'BEARISH'}</strong>
+                  </span>
+                </div>
+              </div>
+              <div class="paper-index-footer">
+                <span>Low: ₹${dayLow}</span>
+                <span>High: ₹${dayHigh}</span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
 
       // 1. Meta Pills
       const stratPill = document.getElementById('paper-pill-strategy');

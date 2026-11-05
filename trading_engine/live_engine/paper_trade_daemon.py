@@ -74,11 +74,85 @@ class PaperTradeDaemon:
         self.trade_history: List[Dict[str, Any]] = []
 
         # Real-time market metrics
-        self.current_spot: float = 24500.0
-        self.current_future: float = 24520.0
-        self.prev_tick_price: float = 24500.0
+        self.current_spot: float = 24347.35
+        self.current_future: float = 24376.90
+        self.prev_tick_price: float = 24347.35
         self.forming_bars: Dict[str, Dict[str, Any]] = {}
         self.bar_history: Dict[str, List[Dict[str, Any]]] = {}
+
+        # Real-time Indices Statistics (NIFTY 50, NIFTY-I, BANKNIFTY, SENSEX)
+        self.indices: Dict[str, Dict[str, Any]] = {
+            "NIFTY": {
+                "name": "NIFTY 50",
+                "symbol": "NIFTY",
+                "segment": "NSE Cash",
+                "badge": "SPOT",
+                "ltp": 24347.35,
+                "atm_strike": 24350,
+                "strike_step": 50,
+                "change_pts": 386.75,
+                "change_pct": 1.61,
+                "trend": "UP",
+                "high": 24391.95,
+                "low": 24296.30,
+                "open": 24378.05,
+                "prev_close": 23960.60,
+                "updated_at": datetime.now().isoformat()
+            },
+            "NIFTY-I": {
+                "name": "NIFTY-I (Near Fut)",
+                "symbol": "NIFTY-I",
+                "segment": "NSE Futures",
+                "badge": "FUTURES",
+                "ltp": 24376.90,
+                "atm_strike": 24350,
+                "strike_step": 50,
+                "change_pts": 406.20,
+                "change_pct": 1.69,
+                "trend": "UP",
+                "high": 24388.00,
+                "low": 24311.00,
+                "open": 24320.00,
+                "prev_close": 23970.70,
+                "oi": 13602355,
+                "volume": 1195870,
+                "updated_at": datetime.now().isoformat()
+            },
+            "BANKNIFTY": {
+                "name": "BANK NIFTY",
+                "symbol": "BANKNIFTY",
+                "segment": "NSE Cash",
+                "badge": "SPOT",
+                "ltp": 52100.00,
+                "atm_strike": 52100,
+                "strike_step": 100,
+                "change_pts": 450.00,
+                "change_pct": 0.87,
+                "trend": "UP",
+                "high": 52250.00,
+                "low": 51900.00,
+                "open": 52000.00,
+                "prev_close": 51650.00,
+                "updated_at": datetime.now().isoformat()
+            },
+            "SENSEX": {
+                "name": "BSE SENSEX",
+                "symbol": "SENSEX",
+                "segment": "BSE Cash",
+                "badge": "SPOT",
+                "ltp": 78688.70,
+                "atm_strike": 78700,
+                "strike_step": 100,
+                "change_pts": 1387.30,
+                "change_pct": 1.79,
+                "trend": "UP",
+                "high": 78922.44,
+                "low": 78520.56,
+                "open": 78910.94,
+                "prev_close": 77301.40,
+                "updated_at": datetime.now().isoformat()
+            }
+        }
 
         # Buyer/Seller Strength Meter
         self.buyer_strength: float = 52.0
@@ -172,11 +246,59 @@ class PaperTradeDaemon:
 
         now = datetime.now()
 
-        # 1. Update benchmark spot / futures
-        if symbol in ("NIFTY", "NIFTY 50"):
+        # 1. Update benchmark spot / futures & Index Statistics
+        canon = symbol
+        if symbol in ("NIFTY 50", "NSE NIFTY"):
+            canon = "NIFTY"
+        elif symbol in ("NIFTY-I", "NIFTY I", "NIFTY_I", "NIFTY FUT", "NIFTY26NOVFUT"):
+            canon = "NIFTY-I"
+        elif symbol in ("NIFTY BANK", "CNXBAN"):
+            canon = "BANKNIFTY"
+        elif symbol in ("BSESEN", "BSE:SENSEX", "BSE SENSEX"):
+            canon = "SENSEX"
+
+        if canon == "NIFTY":
             self.current_spot = ltp
-        elif symbol in ("NIFTY-I", "NIFTY FUT", "NIFTY26NOVFUT"):
+        elif canon == "NIFTY-I":
             self.current_future = ltp
+
+        if hasattr(self, "indices") and canon in self.indices:
+            idx = self.indices[canon]
+            idx["ltp"] = round(ltp, 2)
+            step = idx.get("strike_step", 50)
+            idx["atm_strike"] = int(round(ltp / step) * step)
+
+            if "high" in tick and float(tick["high"]) > 0:
+                idx["high"] = round(float(tick["high"]), 2)
+            else:
+                idx["high"] = max(idx.get("high", ltp), ltp)
+
+            if "low" in tick and float(tick["low"]) > 0:
+                idx["low"] = round(float(tick["low"]), 2)
+            else:
+                idx["low"] = min(idx.get("low", ltp), ltp)
+
+            if "open" in tick and float(tick["open"]) > 0:
+                idx["open"] = round(float(tick["open"]), 2)
+
+            close_val = float(tick.get("close") or idx.get("prev_close") or 0.0)
+            if close_val > 0:
+                idx["prev_close"] = round(close_val, 2)
+                change_pts = round(ltp - close_val, 2)
+                change_pct = round((change_pts / close_val) * 100.0, 2)
+            else:
+                change_pts = round(float(tick.get("change") or 0.0), 2)
+                change_pct = 0.0
+
+            idx["change_pts"] = change_pts
+            idx["change_pct"] = change_pct
+            idx["trend"] = "UP" if change_pts >= 0 else "DOWN"
+
+            if "volume" in tick:
+                idx["volume"] = int(tick["volume"])
+            if "oi" in tick:
+                idx["oi"] = int(tick["oi"])
+            idx["updated_at"] = now.isoformat()
 
         # 2. Update Buyer / Seller Strength from depth or tick momentum
         self._update_strength_meter(tick, ltp)
@@ -623,6 +745,7 @@ class PaperTradeDaemon:
             "seller_strength": self.seller_strength,
             "current_spot": self.current_spot,
             "current_future": self.current_future,
+            "indices": list(self.indices.values()) if hasattr(self, "indices") else [],
             "timestamp": datetime.now().isoformat()
         }
 
