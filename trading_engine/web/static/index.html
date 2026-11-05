@@ -1053,7 +1053,7 @@
 
     .bt-calendar-weekdays {
       display: grid;
-      grid-template-columns: repeat(7, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 4px;
       text-align: center;
       font-size: 0.68rem;
@@ -1066,7 +1066,7 @@
 
     .bt-calendar-days {
       display: grid;
-      grid-template-columns: repeat(7, 1fr);
+      grid-template-columns: repeat(5, 1fr);
       gap: 4px;
     }
 
@@ -6738,15 +6738,16 @@
           'January', 'February', 'March', 'April', 'May', 'June',
           'July', 'August', 'September', 'October', 'November', 'December'
         ];
-        const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
         let html = `<div class="bt-calendar-grid">`;
 
         monthList.forEach(({ year, month }) => {
           const monthTitle = `${monthNames[month]} ${year}`;
           const numDays = new Date(year, month + 1, 0).getDate();
-          // Calculate first day of week: (getDay() + 6) % 7 gives 0 for Mon, 6 for Sun
-          const firstDayDow = (new Date(year, month, 1).getDay() + 6) % 7;
+          // Leading empty cells for 5-day week (Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat/Sun=0)
+          const dow1 = new Date(year, month, 1).getDay();
+          const leadingEmpty = (dow1 >= 1 && dow1 <= 5) ? (dow1 - 1) : 0;
 
           // Calculate monthly stats
           let monthNet = 0;
@@ -6793,12 +6794,17 @@
           `;
 
           // Leading empty cells
-          for (let e = 0; e < firstDayDow; e++) {
+          for (let e = 0; e < leadingEmpty; e++) {
             html += `<div class="bt-cal-cell empty"></div>`;
           }
 
-          // Day cells
+          // Day cells (excluding weekends)
           for (let day = 1; day <= numDays; day++) {
+            const curDate = new Date(year, month, day);
+            const dow = curDate.getDay();
+            if (dow === 0 || dow === 6) {
+              continue; // Exclude Sat and Sun completely
+            }
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
             const hasTrades = allDateNet[dateStr] !== undefined;
 

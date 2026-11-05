@@ -1,19 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quant Studio Chart</title>
+  <title>Quant Studio: Institutional Backtest Engine</title>
+  <!-- Google Fonts: Inter, JetBrains Mono, Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap"
+    rel="stylesheet">
+
   <style>
     :root {
-      --bg-primary: #0f172a;
-      --bg-secondary: #1e293b;
-      --border-color: #334155;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent-cyan: #38bdf8;
-      --accent-green: #10b981;
-      --accent-red: #ef4444;
+      --bg-darkest: #080b11;
+      --bg-panel: #0e1320;
+      --bg-card: #141b2d;
+      --bg-card-hover: #1a233a;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-cyan: rgba(0, 240, 255, 0.35);
+      --accent-cyan: #00f0ff;
+      --accent-green: #00f2a9;
+      --accent-red: #ff3860;
+      --accent-purple: #c084fc;
+      --accent-amber: #fbbf24;
+      --text-main: #f1f5f9;
+      --text-muted: #8da2bb;
+      --text-dim: #64748b;
     }
 
     * {
@@ -23,687 +37,2511 @@
     }
 
     body {
-      background-color: var(--bg-primary);
+      background-color: var(--bg-darkest);
       color: var(--text-main);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      font-size: 12px;
-      overflow: hidden;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Top Replay Control Toolbar */
-    .studio-toolbar {
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-      z-index: 10;
-    }
-
-    .toolbar-group {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .btn {
-      background: #334155;
-      color: var(--text-main);
-      border: 1px solid #475569;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 11px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .btn:hover {
-      background: #475569;
-      border-color: var(--accent-cyan);
-    }
-
-    .btn-primary {
-      background: #0284c7;
-      border-color: #0369a1;
-    }
-
-    .btn-primary:hover {
-      background: #0369a1;
-    }
-
-    .speed-select {
-      background: #334155;
-      color: var(--text-main);
-      border: 1px solid #475569;
-      padding: 4px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      outline: none;
-      cursor: pointer;
-    }
-
-    /* Scrubber slider */
-    .scrubber-container {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-grow: 1;
-      max-width: 500px;
-    }
-
-    #replay-scrubber {
-      flex: 1;
-      min-width: 140px;
-      height: 6px;
-      background: #334155;
-      border-radius: 3px;
-      outline: none;
-      accent-color: var(--accent-cyan);
-      cursor: pointer;
-    }
-
-    .scrubber-badge {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 10px;
-      background: #090d16;
-      border: 1px solid var(--border-color);
-      color: var(--accent-cyan);
-      padding: 3px 8px;
-      border-radius: 4px;
-      white-space: nowrap;
-      min-width: 220px;
-      text-align: center;
-    }
-
-    .session-status {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-left: auto;
-    }
-
-    .session-status.connected {
-      color: var(--accent-green);
-    }
-
-    /* Chart Workspaces */
-    .charts-wrapper {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-      height: calc(100vh - 48px);
-      min-height: 0;
-      min-width: 0;
-      overflow: hidden;
-    }
-
-    .chart-panel {
-      flex: 1 1 50%;
-      height: 50%;
-      min-height: 0;
-      min-width: 0;
-      position: relative;
-      border-bottom: 1px solid var(--border-color);
-      overflow: hidden;
-    }
-
-    .chart-panel:last-child {
-      border-bottom: none;
-    }
-
-    .panel-header {
-      position: absolute;
-      top: 8px;
-      left: 12px;
-      z-index: 5;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      pointer-events: none;
-    }
-
-    .panel-title {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      color: var(--text-main);
-      background: rgba(15, 23, 42, 0.75);
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid rgba(51, 65, 85, 0.6);
-      backdrop-filter: blur(4px);
-    }
-
-    .indicator-hud {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 10px;
-      font-weight: 600;
-      color: #38bdf8;
-      background: rgba(15, 23, 42, 0.85);
-      padding: 2px 8px;
-      border-radius: 4px;
-      border: 1px solid rgba(51, 65, 85, 0.6);
-      backdrop-filter: blur(4px);
-      white-space: nowrap;
-    }
-
-    .toolbar-label {
-      font-size: 10px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    .date-input {
-      background: #1e293b;
-      color: var(--text-main);
-      border: 1px solid #475569;
-      padding: 3px 6px;
-      border-radius: 4px;
-      font-size: 11px;
-      outline: none;
-      font-family: inherit;
-    }
-
-    .date-input:focus {
-      border-color: var(--accent-cyan);
-    }
-
-    .btn-accent {
-      background: #7c3aed;
-      border-color: #6d28d9;
-    }
-
-    .btn-accent:hover {
-      background: #6d28d9;
-      border-color: #a78bfa;
-    }
-
-    /* Backtest Drawer Panel */
-    .backtest-drawer {
-      position: absolute;
-      top: 48px;
-      right: 0;
-      bottom: 0;
-      width: 580px;
-      max-width: 95vw;
-      background: #0f172a;
-      border-left: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-      z-index: 20;
-      box-shadow: -6px 0 24px rgba(0, 0, 0, 0.65);
-      transform: translateX(100%);
-      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-
-    .backtest-drawer.open {
-      transform: translateX(0);
-    }
-
-    .drawer-header {
-      padding: 10px 14px;
-      background: #1e293b;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .drawer-title {
-      font-weight: 700;
-      font-size: 12px;
-      color: var(--text-main);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .drawer-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .drawer-close {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 16px;
-      padding: 2px 6px;
-      line-height: 1;
-    }
-
-    .drawer-close:hover {
-      color: var(--text-main);
-    }
-
-    /* Charges Config Section */
-    .charges-config-section {
-      background: #131d33;
-      border-bottom: 1px solid var(--border-color);
-      padding: 10px 14px;
-      transition: all 0.2s ease;
-    }
-
-    .charges-config-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .charges-config-header:hover {
-      color: var(--text-main);
-    }
-
-    .charges-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-top: 10px;
-    }
-
-    .config-group {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-
-    .config-label {
-      font-size: 9px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-
-    .config-input, .config-select {
-      background: #1e293b;
-      border: 1px solid #334155;
-      color: var(--text-main);
-      border-radius: 4px;
-      padding: 4px 6px;
-      font-size: 11px;
-      font-family: inherit;
-      outline: none;
-    }
-
-    .config-input:focus, .config-select:focus {
-      border-color: var(--accent-cyan);
-    }
-
-    .scorecard-metrics {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 6px;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border-color);
-      background: #090d16;
-    }
-
-    .metric-card {
-      background: #1e293b;
-      border: 1px solid #334155;
-      padding: 6px 8px;
-      border-radius: 4px;
-    }
-
-    .metric-label {
-      font-size: 9px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .metric-value {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       font-size: 13px;
-      font-weight: 700;
-      margin-top: 2px;
-      font-family: "SFMono-Regular", Consolas, monospace;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      line-height: 1.4;
+      overflow-x: hidden;
+      overflow-y: auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
-    .metric-value.profit { color: #10b981; }
-    .metric-value.loss { color: #ef4444; }
-    .metric-value.neutral { color: #38bdf8; }
-    .metric-value.charges { color: #f59e0b; }
-
-    /* Bifurcation Summary Pill Bar */
-    .bifurcation-bar {
+    /* Top Studio Brand Header */
+    .studio-header {
+      background: #0b0f1a;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 10px 18px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      overflow-x: auto;
-      padding: 6px 14px;
-      background: #0d1526;
-      border-bottom: 1px solid var(--border-color);
-      font-size: 10px;
-      font-family: "SFMono-Regular", Consolas, monospace;
-    }
-
-    .bif-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 6px;
-      border-radius: 3px;
-      background: rgba(30, 41, 59, 0.8);
-      border: 1px solid #334155;
-      white-space: nowrap;
-      color: #cbd5e1;
-    }
-
-    .bif-pill strong {
-      color: #94a3b8;
-      font-weight: 500;
-    }
-
-    .trades-container {
-      flex: 1;
-      overflow-y: auto;
-      padding: 6px 10px;
-    }
-
-    .trades-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 11px;
-    }
-
-    .trades-table th {
-      text-align: left;
-      padding: 6px 6px;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--border-color);
-      font-weight: 600;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
       position: sticky;
       top: 0;
-      background: #0f172a;
-      z-index: 2;
+      z-index: 100;
     }
 
-    .trades-table td {
-      padding: 6px 6px;
-      border-bottom: 1px solid rgba(51, 65, 85, 0.35);
-      cursor: pointer;
-      font-family: "SFMono-Regular", Consolas, monospace;
-    }
-
-    .trades-table tr:hover td {
-      background: rgba(56, 189, 248, 0.08);
-    }
-
-    .trades-table tr.active-trade-row td {
-      background: rgba(124, 58, 237, 0.22) !important;
-      border-bottom: 1px solid #a78bfa;
-    }
-
-    .badge-win {
-      color: #10b981;
-      font-weight: 600;
-    }
-
-    .badge-loss {
-      color: #ef4444;
-      font-weight: 600;
-    }
-
-    /* Charges Bifurcation Interactive Badge */
-    .charges-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 1px 5px;
-      border-radius: 3px;
-      background: rgba(245, 158, 11, 0.12);
-      border: 1px solid rgba(245, 158, 11, 0.4);
-      color: #fbbf24;
-      font-size: 10px;
-      position: relative;
-    }
-
-    .charges-pill:hover {
-      background: rgba(245, 158, 11, 0.25);
-    }
-
-    /* Floating Trade Navigation Toast */
-    .trade-nav-toast {
-      position: absolute;
-      bottom: 12px;
-      left: 16px;
-      z-index: 15;
-      background: rgba(15, 23, 42, 0.92);
-      border: 1px solid #7c3aed;
-      color: #e2e8f0;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 11px;
+    .studio-brand {
       display: flex;
       align-items: center;
       gap: 10px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-      backdrop-filter: blur(6px);
-      pointer-events: auto;
-      animation: fadeIn 0.2s ease-in-out;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
+    .brand-icon {
+      font-size: 1.2rem;
+      background: rgba(0, 240, 255, 0.12);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    .chart-container {
+    .brand-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: -0.2px;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-pill {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: rgba(0, 240, 255, 0.14);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+    }
+
+    .studio-status-box {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .status-badge {
+      font-size: 0.72rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: #111726;
+      border: 1px solid var(--border-subtle);
+      padding: 3px 9px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-badge.connected {
+      color: var(--accent-green);
+      border-color: rgba(0, 242, 169, 0.3);
+      background: rgba(0, 242, 169, 0.08);
+    }
+
+    /* Main Container */
+    .bt-container {
+      padding: 16px 20px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 auto;
+      box-sizing: border-box;
+    }
+
+    /* ── Controls Toolbar ── */
+    .bt-toolbar {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .bt-control-item {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .bt-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    /* Inputs, Selects & Triggers */
+    .bt-input,
+    .bt-select,
+    .bt-dropdown-trigger {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      height: 42px;
+      color: #f1f5f9;
+      font-family: inherit;
+      font-size: 0.86rem;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .bt-input:focus,
+    .bt-select:focus,
+    .bt-dropdown-trigger.open {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.15);
+    }
+
+    /* 1. Date Range */
+    .bt-date-inputs {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-input.bt-date {
+      padding: 0 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color-scheme: dark;
+      width: 100%;
+    }
+
+    .bt-date-arrow {
+      color: var(--text-dim);
+      font-size: 0.8rem;
+      user-select: none;
+    }
+
+    /* 2. Custom Dropdowns */
+    .bt-dropdown-box {
+      position: relative;
+    }
+
+    .bt-dropdown-trigger {
+      width: 100%;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .bt-chevron {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      transition: transform 0.2s;
+    }
+
+    .bt-dropdown-trigger.open .bt-chevron {
+      transform: rotate(180deg);
+    }
+
+    .bt-dropdown-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      background: #111726;
+      border: 1px solid var(--border-cyan);
+      border-radius: 8px;
+      padding: 6px;
+      z-index: 50;
+      display: none;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    }
+
+    .bt-dropdown-menu.open {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .bt-menu-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      color: #cbd5e1;
+      border-left: 2px solid transparent;
+      user-select: none;
+    }
+
+    .bt-menu-item:hover {
+      background: rgba(0, 240, 255, 0.08);
+      color: #ffffff;
+    }
+
+    .bt-menu-item.selected {
+      background: rgba(0, 240, 255, 0.14);
+      color: var(--accent-cyan);
+      border-left: 2px solid var(--accent-cyan);
+    }
+
+    .bt-menu-item-left {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .bt-menu-item-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 0.86rem;
+    }
+
+    .bt-menu-item-sub {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+
+    .bt-checkmark {
+      font-size: 0.8rem;
+      color: var(--accent-cyan);
+      opacity: 0;
+      transition: opacity 0.12s;
+    }
+
+    .bt-menu-item.selected .bt-checkmark {
+      opacity: 1;
+    }
+
+    /* Searchable Symbol Box */
+    .bt-search-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #090d16;
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      border-radius: 6px;
+      padding: 0 10px;
+      height: 34px;
+      margin-bottom: 6px;
+    }
+
+    .bt-search-bar input {
+      background: transparent;
+      border: none;
+      color: #f1f5f9;
+      font-size: 0.82rem;
+      width: 100%;
+      outline: none;
+    }
+
+    .bt-category-pills {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .bt-cat-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.12s ease;
+    }
+
+    .bt-cat-pill:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .bt-cat-pill.active {
+      background: rgba(0, 240, 255, 0.15);
+      color: var(--accent-cyan);
+      border-color: rgba(0, 240, 255, 0.4);
+    }
+
+    .bt-symbol-scroll-list {
+      max-height: 220px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .bt-tag-pill {
+      font-size: 0.68rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #94a3b8;
+    }
+
+    .bt-tag-pill.index {
+      background: rgba(0, 240, 255, 0.15);
+      color: var(--accent-cyan);
+    }
+
+    .bt-tag-pill.equity {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+    }
+
+    .bt-tag-pill.commodity {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+    }
+
+    /* 3. CE / PE Dual Toggle */
+    .bt-dual-toggle {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      height: 42px;
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 4px;
+    }
+
+    .bt-toggle-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+    }
+
+    .bt-toggle-btn.active.ce {
+      background: rgba(16, 185, 129, 0.22);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.45);
+    }
+
+    .bt-toggle-btn.active.pe {
+      background: rgba(239, 68, 68, 0.22);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.45);
+    }
+
+    /* 4. Capital Input */
+    .bt-capital-input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+
+    .bt-currency-symbol {
+      position: absolute;
+      left: 12px;
+      color: var(--accent-cyan);
+      font-weight: 700;
+      font-size: 0.92rem;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .bt-input.bt-capital-input {
+      width: 100%;
+      padding-left: 28px;
+      padding-right: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 0.88rem;
+      color: #f1f5f9;
+      -moz-appearance: textfield;
+    }
+
+    /* 5. Strategy Checkbox Rows */
+    .bt-check-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.12s ease;
+      color: #cbd5e1;
+      font-size: 0.84rem;
+    }
+
+    .bt-check-row:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #ffffff;
+    }
+
+    .bt-check-row input[type="checkbox"] {
+      accent-color: var(--accent-cyan);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* 6. Blocked Time Slots Dropdown */
+    .bt-blocked-slots-menu {
+      width: 330px !important;
+      padding: 10px 12px !important;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      background: #111726;
+      border: 1px solid var(--border-cyan);
+      border-radius: 8px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 1px rgba(0, 240, 255, 0.4);
+      z-index: 60;
+    }
+
+    .bt-blocked-slots-menu.open {
+      display: flex !important;
+    }
+
+    .bt-blocked-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 6px;
+    }
+
+    .bt-blocked-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .bt-blocked-inputs-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-blocked-inputs-row .bt-time-input {
+      background: #0d121f;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      height: 30px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      padding: 0 6px;
+      color: #f1f5f9;
+      flex: 1;
+      box-sizing: border-box;
+      outline: none;
+    }
+
+    .bt-blocked-inputs-row .bt-time-input:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .bt-blocked-inputs-row .bt-time-input::-webkit-calendar-picker-indicator {
+      filter: invert(0.8);
+      cursor: pointer;
+    }
+
+    .bt-btn-add-slot {
+      background: rgba(0, 240, 255, 0.15);
+      border: 1px solid rgba(0, 240, 255, 0.4);
+      color: var(--accent-cyan);
+      border-radius: 6px;
+      height: 30px;
+      padding: 0 10px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+
+    .bt-btn-add-slot:hover {
+      background: rgba(0, 240, 255, 0.25);
+      color: #ffffff;
+    }
+
+    .bt-blocked-presets {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
+    }
+
+    .bt-presets-lbl {
+      font-size: 0.65rem;
+      color: #64748b;
+      margin-right: 2px;
+    }
+
+    .bt-preset-chip {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
+      border-radius: 4px;
+      font-size: 0.66rem;
+      padding: 2px 6px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .bt-preset-chip:hover {
+      background: rgba(0, 240, 255, 0.1);
+      color: var(--accent-cyan);
+      border-color: rgba(0, 240, 255, 0.25);
+    }
+
+    .bt-blocked-slots-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 120px;
+      overflow-y: auto;
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .bt-slot-chip-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 0.72rem;
+      color: #fca5a5;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .bt-slot-chip-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-slot-chip-lbl {
+      font-size: 0.64rem;
+      color: #f87171;
+      opacity: 0.85;
+    }
+
+    .bt-slot-del-btn {
+      background: none;
+      border: none;
+      color: #f87171;
+      font-size: 0.85rem;
+      cursor: pointer;
+      padding: 0 4px;
+      display: flex;
+      align-items: center;
+      transition: color 0.12s;
+    }
+
+    .bt-slot-del-btn:hover {
+      color: #ef4444;
+      font-weight: 700;
+    }
+
+    /* 7. Run Button */
+    .bt-btn-run {
+      background: linear-gradient(135deg, #00f0ff 0%, #00b4d8 100%);
+      color: #080b11;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 0.92rem;
+      border: none;
+      border-radius: 8px;
+      height: 42px;
+      padding: 0 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 0 16px rgba(0, 240, 255, 0.3);
+      transition: all 0.15s ease;
+      width: 100%;
+      white-space: nowrap;
+    }
+
+    .bt-btn-run:hover:not(:disabled) {
+      box-shadow: 0 0 24px rgba(0, 240, 255, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .bt-btn-run:disabled {
+      background: #1e293b;
+      color: #64748b;
+      box-shadow: none;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    /* ── Summary Cards Grid ── */
+    .bt-summary-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .bt-summary-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 10px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .bt-summary-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.3px;
+    }
+
+    .bt-summary-meta {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-summary-meta .pill {
+      background: rgba(0, 240, 255, 0.1);
+      color: var(--accent-cyan);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .bt-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 12px;
+    }
+
+    .bt-stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .bt-stat-card:hover {
+      border-color: rgba(255, 255, 255, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .bt-stat-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .bt-stat-value {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #f8fafc;
+      letter-spacing: -0.2px;
+      line-height: 1.2;
+    }
+
+    .bt-stat-value.positive {
+      color: var(--accent-green);
+      text-shadow: 0 0 16px rgba(0, 242, 169, 0.25);
+    }
+
+    .bt-stat-value.negative {
+      color: var(--accent-red);
+      text-shadow: 0 0 16px rgba(255, 56, 96, 0.25);
+    }
+
+    .bt-stat-sub {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      font-family: 'Inter', sans-serif;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bt-win-progress-wrap {
+      width: 100%;
+      height: 4px;
+      background: rgba(239, 68, 68, 0.35);
+      border-radius: 2px;
+      margin-top: 4px;
+      overflow: hidden;
+    }
+
+    .bt-win-progress-bar {
+      height: 100%;
+      background: var(--accent-green);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+
+    /* ── Trade Details Ledger Panel ── */
+    .bt-details-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      width: 100%;
+      position: relative;
+      overflow: visible;
+    }
+
+    .bt-details-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 10px;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .bt-details-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.3px;
+      margin-right: auto;
+    }
+
+    .bt-details-btn-action {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #94a3b8;
+      border-radius: 6px;
+      height: 32px;
+      padding: 0 12px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .bt-details-btn-action:hover,
+    .bt-details-btn-action.open {
+      background: rgba(0, 240, 255, 0.12);
+      color: var(--accent-cyan);
+      border-color: rgba(0, 240, 255, 0.3);
+    }
+
+    /* ── Ledger Tabs ── */
+    .bt-ledger-tabs {
+      display: inline-flex;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 4px;
+      margin-right: 12px;
+    }
+
+    .bt-ledger-tab {
+      background: transparent;
+      border: 1px solid transparent;
+      color: #94a3b8;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.80rem;
+      font-weight: 600;
+      padding: 5px 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .bt-ledger-tab:hover {
+      color: #f1f5f9;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .bt-ledger-tab.active {
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), rgba(0, 242, 169, 0.18));
+      color: #00f0ff;
+      border-color: rgba(0, 240, 255, 0.4);
+      box-shadow: 0 2px 8px rgba(0, 240, 255, 0.15);
+    }
+
+    /* ── Calendar View ── */
+    .bt-calendar-view-container {
+      width: 100%;
+      padding: 6px 0;
+    }
+
+    .bt-calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 16px;
+      width: 100%;
+    }
+
+    .bt-month-card {
+      background: #0f1626;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      transition: border-color 0.2s;
+    }
+
+    .bt-month-card:hover {
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    .bt-month-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 8px;
+      gap: 8px;
+    }
+
+    .bt-month-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      letter-spacing: 0.3px;
+    }
+
+    .bt-month-stats {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-month-pnl-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+    }
+
+    .bt-month-pnl-pill.pos {
+      background: rgba(16, 185, 129, 0.16);
+      color: #10b981;
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
+    .bt-month-pnl-pill.neg {
+      background: rgba(239, 68, 68, 0.16);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+
+    .bt-calendar-weekdays {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+      text-align: center;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #64748b;
+      padding: 2px 0 4px 0;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .bt-calendar-days {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 4px;
+    }
+
+    .bt-cal-cell {
+      min-height: 56px;
+      border-radius: 6px;
+      padding: 4px 5px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      transition: all 0.18s ease;
+      position: relative;
+      box-sizing: border-box;
+    }
+
+    .bt-cal-cell.empty {
+      background: transparent;
+      border-color: transparent;
+      min-height: 56px;
+    }
+
+    .bt-cal-cell.non-trading {
+      opacity: 0.4;
+      border-color: rgba(255, 255, 255, 0.02);
+    }
+
+    .bt-cal-cell.non-trading .bt-cal-day-num {
+      color: #475569;
+    }
+
+    .bt-cal-cell.trading {
+      cursor: pointer;
+    }
+
+    .bt-cal-cell.trading:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+      z-index: 5;
+    }
+
+    .bt-cal-cell.win {
+      background: linear-gradient(145deg, rgba(6, 78, 59, 0.55), rgba(6, 95, 70, 0.35));
+      border: 1px solid rgba(16, 185, 129, 0.45);
+    }
+
+    .bt-cal-cell.win:hover {
+      border-color: #10b981;
+      box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
+    }
+
+    .bt-cal-cell.loss {
+      background: linear-gradient(145deg, rgba(127, 29, 29, 0.55), rgba(153, 27, 27, 0.35));
+      border: 1px solid rgba(239, 68, 68, 0.45);
+    }
+
+    .bt-cal-cell.loss:hover {
+      border-color: #ef4444;
+      box-shadow: 0 4px 16px rgba(239, 68, 68, 0.35);
+    }
+
+    .bt-cal-day-num {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #94a3b8;
+      line-height: 1;
+    }
+
+    .bt-cal-cell.win .bt-cal-day-num {
+      color: #a7f3d0;
+    }
+
+    .bt-cal-cell.loss .bt-cal-day-num {
+      color: #fecaca;
+    }
+
+    .bt-cal-cell-bottom {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      margin-top: auto;
+    }
+
+    .bt-cal-pnl {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      font-weight: 800;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.15;
+    }
+
+    .bt-cal-pnl.pos {
+      color: #34d399;
+    }
+
+    .bt-cal-pnl.neg {
+      color: #f87171;
+    }
+
+    .bt-cal-bal {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      color: #94a3b8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1;
+    }
+
+    @keyframes groupGlow {
+      0% {
+        box-shadow: 0 0 0 0 rgba(0, 240, 255, 0.8);
+        border-color: #00f0ff;
+      }
+      50% {
+        box-shadow: 0 0 24px 4px rgba(0, 240, 255, 0.6);
+        border-color: #00f0ff;
+      }
+      100% {
+        box-shadow: none;
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+    }
+
+    .bt-group-highlight {
+      animation: groupGlow 2.5s ease-out forwards;
+    }
+
+    /* Filter Popover */
+    .bt-filter-box {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      z-index: 1000;
+    }
+
+    .bt-filter-popover {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: #111726;
+      border: 1px solid var(--border-cyan);
+      border-radius: 8px;
+      padding: 10px 12px;
+      z-index: 1050;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 1px rgba(0, 240, 255, 0.4);
+      width: 320px;
+      max-width: calc(100vw - 28px);
+      max-height: calc(100vh - 100px);
+      overflow-y: auto;
+    }
+
+    .bt-filter-popover.open {
+      display: flex;
+    }
+
+    .bt-filter-section {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .bt-filter-sec-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .bt-filter-sec-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+
+    .bt-filter-sec-action {
+      background: none;
+      border: none;
+      color: var(--accent-cyan);
+      font-size: 0.68rem;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .bt-filter-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .bt-fpill {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #cbd5e1;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .bt-fpill:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }
+
+    .bt-fpill.active {
+      background: rgba(0, 240, 255, 0.15);
+      color: var(--accent-cyan);
+      border-color: rgba(0, 240, 255, 0.45);
+    }
+
+    .bt-filter-check-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 90px;
+      overflow-y: auto;
+      padding: 4px;
+      background: #0d121f;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+    }
+
+    .bt-filter-check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.74rem;
+      color: #cbd5e1;
+      cursor: pointer;
+      padding: 3px 6px;
+      border-radius: 4px;
+      user-select: none;
+    }
+
+    .bt-filter-check-row:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .bt-filter-check-row input[type="checkbox"] {
+      accent-color: var(--accent-cyan);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
+
+    .bt-filter-num-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-filter-num-input {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      height: 30px;
+      width: 90px;
+      padding: 0 8px;
+      color: #f1f5f9;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      outline: none;
+    }
+
+    .bt-filter-time-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-filter-time-col {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+    }
+
+    .bt-filter-time-lbl {
+      font-size: 0.65rem;
+      color: var(--text-dim, #64748b);
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      font-weight: 600;
+    }
+
+    .bt-filter-time-input {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      height: 28px;
+      padding: 0 6px;
+      color: #f1f5f9;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      outline: none;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    .bt-filter-time-input:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .bt-filter-time-input::-webkit-calendar-picker-indicator {
+      filter: invert(0.8);
+      cursor: pointer;
+    }
+
+    .bt-filter-time-sep {
+      color: var(--text-dim, #64748b);
+      font-size: 0.72rem;
+      margin-top: 14px;
+    }
+
+    .bt-filter-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding-top: 8px;
+      margin-top: 2px;
+    }
+
+    .bt-filter-reset-btn {
+      background: none;
+      border: none;
+      color: #94a3b8;
+      font-size: 0.72rem;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+
+    .bt-filter-apply-btn {
+      background: rgba(0, 240, 255, 0.15);
+      border: 1px solid rgba(0, 240, 255, 0.35);
+      color: var(--accent-cyan);
+      padding: 3px 12px;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* Date Groups in Trade Ledger */
+    .bt-date-group {
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      background: #111726;
+      overflow: hidden;
+      margin-bottom: 8px;
+      transition: border-color 0.15s ease;
+    }
+
+    .bt-date-group:hover {
+      border-color: rgba(255, 255, 255, 0.12);
+    }
+
+    .bt-date-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .bt-date-group-header {
+      background: var(--bg-card);
+      padding: 7px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .bt-date-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-date-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-day-pill {
+      font-size: 0.68rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(0, 240, 255, 0.1);
+      color: var(--accent-cyan);
+    }
+
+    .bt-date-header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+
+    .bt-date-chevron {
+      color: var(--text-dim);
+      font-size: 0.72rem;
+      transition: transform 0.2s ease;
+    }
+
+    .bt-date-group.collapsed .bt-date-chevron {
+      transform: rotate(-90deg);
+    }
+
+    .bt-date-group.collapsed .bt-date-table-wrap {
+      display: none;
+    }
+
+    /* Dense Trade Table */
+    .bt-date-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .bt-trade-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.82rem;
+      white-space: nowrap;
+      text-align: left;
+    }
+
+    .bt-trade-table th {
+      background: #0f1422;
+      color: #7e91a8;
+      font-size: 0.70rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .bt-trade-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      color: #cbd5e1;
+    }
+
+    .bt-trade-table tr:hover td {
+      background: rgba(0, 240, 255, 0.04);
+      cursor: pointer;
+    }
+
+    .bt-trade-table tr.active-trade td {
+      background: rgba(0, 240, 255, 0.12);
+      border-color: rgba(0, 240, 255, 0.3);
+    }
+
+    .bt-mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bt-text-right {
+      text-align: right;
+    }
+
+    .bt-text-center {
+      text-align: center;
+    }
+
+    /* Badges */
+    .bt-trend-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      font-size: 0.70rem;
+      font-weight: 800;
+    }
+
+    .bt-trend-badge.bullish {
+      background: rgba(0, 242, 169, 0.14);
+      color: var(--accent-green);
+      border: 1px solid rgba(0, 242, 169, 0.3);
+    }
+
+    .bt-trend-badge.bearish {
+      background: rgba(255, 56, 96, 0.14);
+      color: var(--accent-red);
+      border: 1px solid rgba(255, 56, 96, 0.3);
+    }
+
+    .bt-contract-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      color: var(--accent-cyan);
+      white-space: nowrap;
+    }
+
+    .bt-indicator-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: rgba(99, 102, 241, 0.12);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.22);
+    }
+
+    .bt-prob-pill {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      background: rgba(0, 240, 255, 0.08);
+      color: #38bdf8;
+    }
+
+    .bt-lot-pill {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      background: rgba(168, 85, 247, 0.12);
+      border: 1px solid rgba(168, 85, 247, 0.28);
+      color: #c084fc;
+    }
+
+    .bt-reason-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+    }
+
+    .bt-reason-badge.t1,
+    .bt-reason-badge.t2 {
+      background: rgba(0, 242, 169, 0.12);
+      color: var(--accent-green);
+      border: 1px solid rgba(0, 242, 169, 0.25);
+    }
+
+    .bt-reason-badge.max {
+      background: rgba(168, 85, 247, 0.14);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
+
+    .bt-reason-badge.sl {
+      background: rgba(255, 56, 96, 0.12);
+      color: var(--accent-red);
+      border: 1px solid rgba(255, 56, 96, 0.25);
+    }
+
+    .bt-reason-badge.tsl {
+      background: rgba(245, 158, 11, 0.14);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .bt-reason-badge.se {
+      background: rgba(0, 240, 255, 0.1);
+      color: #38bdf8;
+      border: 1px solid rgba(0, 240, 255, 0.25);
+    }
+
+    .bt-val-pos {
+      color: var(--accent-green) !important;
+      font-weight: 700;
+    }
+
+    .bt-val-neg {
+      color: var(--accent-red) !important;
+      font-weight: 700;
+    }
+
+    .bt-charges-pill {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.2);
+      cursor: help;
+    }
+
+    /* ── Trade Verification Candlestick Chart Modal ── */
+    .bt-chart-modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(4, 8, 20, 0.88);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .bt-chart-modal-backdrop.open {
+      display: flex;
+    }
+
+    .bt-chart-modal-card {
+      background: #090e1a;
+      border: 1px solid rgba(0, 240, 255, 0.35);
+      border-radius: 12px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75), 0 0 35px rgba(0, 240, 255, 0.10);
+      width: 100%;
+      max-width: 1240px;
+      height: 90vh;
+      max-height: 860px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes modalScaleIn {
+      from {
+        transform: scale(0.96);
+        opacity: 0;
+      }
+
+      to {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .bt-chart-modal-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      background: #0d1527;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .bt-modal-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .bt-modal-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .bt-modal-contract-pill {
+      background: rgba(0, 240, 255, 0.12);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      color: var(--accent-cyan);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.76rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 5px;
+    }
+
+    .bt-modal-date-pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #94a3b8;
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 5px;
+    }
+
+    .bt-modal-idx-pill {
+      background: rgba(148, 163, 184, 0.1);
+      color: #cbd5e1;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 7px;
+      border-radius: 4px;
+    }
+
+    .bt-modal-header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bt-modal-pnl-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    .bt-modal-pnl-pill.pos {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #34d399;
+    }
+
+    .bt-modal-pnl-pill.neg {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #f87171;
+    }
+
+    .bt-modal-nav-group {
+      display: flex;
+      gap: 4px;
+    }
+
+    .bt-modal-nav-btn {
+      background: #151f35;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #cbd5e1;
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 5px 9px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .bt-modal-nav-btn:hover:not(:disabled) {
+      background: #1e2c4a;
+      border-color: rgba(0, 240, 255, 0.4);
+      color: var(--accent-cyan);
+    }
+
+    .bt-modal-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .bt-modal-close-btn {
+      background: #172033;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #94a3b8;
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .bt-modal-close-btn:hover {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #ef4444;
+    }
+
+    .bt-chart-modal-summary {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      background: #0a1122;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .bt-sum-chip {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+
+    .bt-sum-chip .chip-lbl {
+      font-size: 0.62rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-dim);
+      font-weight: 700;
+    }
+
+    .bt-sum-chip .chip-val {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+
+    .bt-sum-chip .chip-cyan {
+      color: var(--accent-cyan);
+    }
+
+    .bt-sum-chip.chip-highlight {
+      background: rgba(0, 240, 255, 0.06);
+      border-color: rgba(0, 240, 255, 0.25);
+    }
+
+    .bt-chart-modal-body {
+      position: relative;
+      background: #070b14;
+      flex: 1 1 auto;
+      min-height: 250px;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    #bt-modal-chart-canvas {
+      position: absolute;
+      inset: 0;
       width: 100%;
       height: 100%;
     }
+
+    .bt-chart-modal-footer {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      background: #0d1527;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .bt-chart-legend {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 0.74rem;
+      color: #94a3b8;
+    }
+
+    .bt-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .bt-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .bt-dot.dot-green {
+      background: #10b981;
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    }
+
+    .bt-dot.dot-cyan {
+      background: #00f0ff;
+      box-shadow: 0 0 6px rgba(0, 240, 255, 0.6);
+    }
+
+    .bt-chart-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .bt-chart-action-btn {
+      background: #151f35;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #cbd5e1;
+      padding: 4px 10px;
+      border-radius: 5px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .bt-chart-action-btn:hover {
+      background: #1f2d4d;
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    /* Responsive Layout */
+    @media (min-width: 1280px) {
+      .bt-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 12px;
+      }
+
+      .bt-btn-run {
+        width: auto;
+      }
+    }
+
+    @media (min-width: 900px) and (max-width: 1279px) {
+      .bt-toolbar {
+        grid-template-columns: repeat(4, 1fr);
+        align-items: flex-end;
+      }
+
+      .bt-run-item {
+        grid-column: span 4;
+      }
+
+      .bt-summary-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+    }
+
+    @media (min-width: 681px) and (max-width: 899px) {
+      .bt-toolbar {
+        grid-template-columns: repeat(3, 1fr);
+        align-items: flex-end;
+      }
+
+      .bt-run-item {
+        grid-column: span 3;
+      }
+
+      .bt-summary-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+
+    @media (max-width: 680px) {
+      .bt-summary-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
   </style>
 </head>
+
 <body>
 
-  <!-- Replay & Backtest Toolbar -->
-  <header class="studio-toolbar">
-    <div class="toolbar-group">
-      <button id="btn-play" class="btn btn-primary">▶ Play</button>
-      <button id="btn-step-tick" class="btn" title="Step 1 Tick">+1 Tick</button>
-      <button id="btn-step-bar" class="btn" title="Step 1 Candle">+1 Bar</button>
-      <select id="speed-select" class="speed-select" title="Playback Speed">
-        <option value="1">1x (Realtime: 1m/candle)</option>
-        <option value="2">2x (30s/candle)</option>
-        <option value="5" selected>5x (12s/candle)</option>
-        <option value="10">10x (6s/candle)</option>
-        <option value="30">30x (2s/candle)</option>
-        <option value="60">60x (1s/candle)</option>
-      </select>
+  <!-- Top Studio Brand Header -->
+  <header class="studio-header">
+    <div class="studio-brand">
+      <div class="brand-icon">⚡</div>
+      <div class="brand-title">
+        <span>Quant Studio</span>
+        <span class="brand-pill">BACKTEST ENGINE</span>
+      </div>
     </div>
-
-    <!-- Date Range & Backtest Controls -->
-    <div class="toolbar-group">
-      <span class="toolbar-label">Date:</span>
-      <input type="date" id="date-start" class="date-input" title="Start Date / Replay Date" value="2026-10-29">
-      <span class="toolbar-label">to</span>
-      <input type="date" id="date-end" class="date-input" title="End Date for Backtest" value="2026-10-30">
-      <button id="btn-load-date" class="btn" title="Load Selected Date into Replay Session">📅 Load Date</button>
-      <button id="btn-run-backtest" class="btn btn-accent" title="Run Vectorized Backtest across Date Range">📊 Run Backtest</button>
-      <button id="btn-toggle-backtest" class="btn" title="Toggle Backtest Scorecard Drawer" style="display: none;">📋 Scorecard</button>
+    <div class="studio-status-box">
+      <div id="session-status" class="status-badge connected">🟢 Engine Ready | Port 8765</div>
     </div>
-
-    <!-- Scrubber Slider -->
-    <div class="scrubber-container">
-      <input type="range" id="replay-scrubber" min="0" max="1000" value="0">
-      <div id="scrubber-badge" class="scrubber-badge">Initializing Replay...</div>
-    </div>
-
-    <div id="session-status" class="session-status">Initializing IPC...</div>
   </header>
 
-  <!-- Dual Chart View -->
-  <main class="charts-wrapper">
-    <!-- Spot Index Chart -->
-    <section class="chart-panel">
-      <div class="panel-header">
-        <span class="panel-title">SPOT INDEX (NIFTY)</span>
-        <span id="spot-hud" class="indicator-hud" style="display: none;"></span>
-      </div>
-      <div id="spot-chart-container" class="chart-container"></div>
-    </section>
+  <!-- Auxiliary Elements for Replay Compatibility -->
+  <div style="display: none;" aria-hidden="true">
+    <div id="spot-chart-container"></div>
+    <div id="opt-chart-container"></div>
+    <input type="range" id="replay-scrubber" />
+    <div id="scrubber-badge"></div>
+    <button id="btn-play"></button>
+    <button id="btn-step-tick"></button>
+    <button id="btn-step-bar"></button>
+    <input type="date" id="date-start" />
+    <input type="date" id="date-end" />
+    <button id="btn-load-date"></button>
+    <aside id="backtest-drawer"></aside>
+  </div>
 
-    <!-- Option Strike Chart -->
-    <section class="chart-panel">
-      <div class="panel-header">
-        <span class="panel-title">OPTION STRIKE (EXECUTION)</span>
-        <span id="opt-hud" class="indicator-hud" style="display: none;"></span>
-      </div>
-      <div id="opt-chart-container" class="chart-container"></div>
-    </section>
-  </main>
+  <!-- Main Backtest Viewport (Exact App UI Parity) -->
+  <main class="bt-container">
 
-    <!-- Trade Navigation Indicator Toast -->
-    <div id="trade-nav-toast" class="trade-nav-toast" style="display: none;">
-      <span id="toast-title" style="font-weight: 700; color: #a78bfa;">Trade Navigation</span>
-      <span id="toast-body">--</span>
-      <button id="toast-close" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 0 4px;">✕</button>
-    </div>
-  </main>
+    <!-- 1. Controls Toolbar -->
+    <section class="bt-toolbar">
 
-  <!-- Backtest Scorecard Slide-Out Drawer -->
-  <aside id="backtest-drawer" class="backtest-drawer">
-    <div class="drawer-header">
-      <div class="drawer-title">
-        <span>📊 Backtest Performance & Charges Scorecard</span>
+      <!-- 1. Date Range Control -->
+      <div class="bt-control-item bt-date-item">
+        <span class="bt-label">Date Range</span>
+        <div class="bt-date-inputs">
+          <input type="date" id="bt-start-date" class="bt-input bt-date" title="Start Date" value="2026-05-04"
+            oninput="onStartDateChange(this.value)" onchange="onStartDateChange(this.value)" />
+          <span class="bt-date-arrow">→</span>
+          <input type="date" id="bt-end-date" class="bt-input bt-date" title="End Date" value="2026-11-03"
+            oninput="onEndDateChange(this.value)" onchange="onEndDateChange(this.value)" />
+        </div>
       </div>
-      <div class="drawer-actions">
-        <button id="btn-toggle-charges" class="btn" style="padding: 2px 8px; font-size: 10px;" title="Show / Hide Charges Configuration">⚙️ Charges</button>
-        <button id="btn-close-drawer" class="drawer-close" title="Close Drawer">✕</button>
-      </div>
-    </div>
 
-    <!-- Charges Configuration Panel (ICICI Direct Default) -->
-    <div id="charges-config-section" class="charges-config-section">
-      <div class="charges-config-header" id="charges-toggle-head">
-        <span>⚙️ Charges Settings: <span id="lbl-broker-name" style="color: #38bdf8; font-weight: 700;">ICICI Direct</span></span>
-        <span style="font-size: 10px; color: #94a3b8;">Preset: Flat ₹20/Order Leg</span>
+      <!-- 2. Segment Selector -->
+      <div class="bt-control-item bt-exchange-item">
+        <span class="bt-label">Segment</span>
+        <input type="hidden" id="bt-exchange-select" value="NSE" />
+        <div class="bt-dropdown-box" id="bt-exchange-dropdown-box">
+          <button type="button" class="bt-dropdown-trigger" id="bt-exchange-trigger"
+            onclick="toggleExchangeDropdown(event)">
+            <span id="bt-exchange-label"
+              style="font-family: 'Outfit', sans-serif; font-weight: 700; color: #f1f5f9;">NSE</span>
+            <span class="bt-chevron">▾</span>
+          </button>
+          <div class="bt-dropdown-menu" id="bt-exchange-menu">
+            <div class="bt-menu-item selected" data-value="NSE" onclick="selectExchange('NSE')">
+              <div class="bt-menu-item-left">
+                <span class="bt-menu-item-title">NSE</span>
+                <span class="bt-menu-item-sub">Equities & F&O</span>
+              </div>
+              <span class="bt-checkmark">✓</span>
+            </div>
+            <div class="bt-menu-item" data-value="BSE" onclick="selectExchange('BSE')">
+              <div class="bt-menu-item-left">
+                <span class="bt-menu-item-title">BSE</span>
+                <span class="bt-menu-item-sub">Equities</span>
+              </div>
+              <span class="bt-checkmark">✓</span>
+            </div>
+            <div class="bt-menu-item" data-value="MCX" onclick="selectExchange('MCX')">
+              <div class="bt-menu-item-left">
+                <span class="bt-menu-item-title">MCX</span>
+                <span class="bt-menu-item-sub">Commodities</span>
+              </div>
+              <span class="bt-checkmark">✓</span>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="charges-grid" id="charges-grid-body">
-        <div class="config-group">
-          <label class="config-label">Broker Preset</label>
-          <select id="cfg-broker-preset" class="config-select">
-            <option value="icici" selected>ICICI Direct (₹20/leg)</option>
-            <option value="zerodha">Zerodha / Angel (₹20/leg)</option>
-            <option value="custom">Custom Rates</option>
+
+      <!-- 3. Searchable Symbol Dropdown -->
+      <div class="bt-control-item bt-symbol-item">
+        <span class="bt-label">Symbol / Underlying</span>
+        <input type="hidden" id="bt-symbol-select" value="NIFTY" />
+        <div class="bt-dropdown-box" id="bt-symbol-dropdown-box">
+          <button type="button" class="bt-dropdown-trigger" id="bt-symbol-trigger"
+            onclick="toggleSymbolDropdown(event)">
+            <span id="bt-symbol-label"
+              style="font-family: 'Outfit', sans-serif; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; gap: 6px;">
+              <span>NIFTY 50</span>
+              <span class="bt-tag-pill index">INDEX</span>
+            </span>
+            <span class="bt-chevron">▾</span>
+          </button>
+          <div class="bt-dropdown-menu" id="bt-symbol-menu" style="min-width: 310px;">
+            <div class="bt-search-bar">
+              <span style="color: #64748b; font-size: 0.8rem;">🔍</span>
+              <input type="text" id="bt-symbol-search-input" placeholder="Search Index, Equity..."
+                oninput="onSymbolSearchInput(this.value)" autocomplete="off" />
+            </div>
+            <div class="bt-category-pills">
+              <button type="button" class="bt-cat-pill active" onclick="filterSymbolCategory('ALL', this)">ALL</button>
+              <button type="button" class="bt-cat-pill" onclick="filterSymbolCategory('INDEX', this)">INDICES</button>
+              <button type="button" class="bt-cat-pill" onclick="filterSymbolCategory('EQUITY', this)">EQUITIES</button>
+            </div>
+            <div class="bt-symbol-scroll-list" id="bt-symbol-scroll-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. CE / PE / Dynamic ATM Toggle -->
+      <div class="bt-control-item bt-option-item">
+        <span class="bt-label">Option Contract</span>
+        <div class="bt-dual-toggle" id="bt-option-toggle">
+          <button type="button" class="bt-toggle-btn active atm" id="btn-opt-atm" onclick="setOptionType('ATM')"
+            title="Dynamic ATM Strike: Buys CE on Bullish, Reverses to PE on Bearish">⚡ Dynamic ATM (CE & PE)</button>
+          <button type="button" class="bt-toggle-btn ce" id="btn-opt-ce" onclick="setOptionType('CE')">CE Only</button>
+          <button type="button" class="bt-toggle-btn pe" id="btn-opt-pe" onclick="setOptionType('PE')">PE Only</button>
+        </div>
+      </div>
+
+      <!-- 5. Initial Capital -->
+      <div class="bt-control-item bt-capital-item">
+        <span class="bt-label">Capital (₹)</span>
+        <div class="bt-capital-input-wrap">
+          <span class="bt-currency-symbol">₹</span>
+          <input type="number" id="bt-capital-input" class="bt-input bt-capital-input" value="50000" min="0" step="any"
+            oninput="onCapitalChange(this.value)" onchange="onCapitalChange(this.value)"
+            onblur="onCapitalChange(this.value)" />
+        </div>
+      </div>
+
+      <!-- 6. Indicator Strategy Selector -->
+      <div class="bt-control-item bt-indicator-item">
+        <span class="bt-label">Strategy / Indicator</span>
+        <div class="bt-dropdown-box" id="bt-indicator-dropdown-box">
+          <button type="button" class="bt-dropdown-trigger" id="bt-indicator-trigger"
+            onclick="toggleIndicatorDropdown(event)">
+            <span id="bt-indicator-label">Adaptive Trend Pro</span>
+            <span class="bt-chevron">▾</span>
+          </button>
+          <div class="bt-dropdown-menu" id="bt-indicator-menu">
+            <label class="bt-check-row">
+              <input type="checkbox" class="bt-indicator-chk" value="dual_xgboost_macro" data-name="🤖 Dual XGBoost + Macro (AI-Trader 78L)"
+                onchange="onIndicatorSelectionChange(this)" />
+              <span class="bt-check-title" style="color:#38bdf8;font-weight:600;">🤖 Dual XGBoost + Macro (AI-Trader 78L)</span>
+            </label>
+            <label class="bt-check-row">
+              <input type="checkbox" class="bt-indicator-chk" value="adaptive_trend_pro" data-name="Adaptive Trend Pro"
+                checked onchange="onIndicatorSelectionChange(this)" />
+              <span class="bt-check-title">Adaptive Trend Pro</span>
+            </label>
+            <label class="bt-check-row">
+              <input type="checkbox" class="bt-indicator-chk" value="bss_pro_v5" data-name="BSS Pro v5"
+                onchange="onIndicatorSelectionChange(this)" />
+              <span class="bt-check-title">BSS Pro v5</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. Blocked Trading Time Slots -->
+      <div class="bt-control-item bt-blocked-slots-item">
+        <span class="bt-label">Blocked Time Slots</span>
+        <div class="bt-dropdown-box" id="bt-blocked-slots-dropdown-box">
+          <button type="button" class="bt-dropdown-trigger" id="bt-blocked-slots-trigger" onclick="toggleBlockedSlotsDropdown(event)">
+            <span id="bt-blocked-slots-label">🚫 None</span>
+            <span class="bt-chevron">▾</span>
+          </button>
+          <div class="bt-dropdown-menu bt-blocked-slots-menu" id="bt-blocked-slots-menu" onclick="event.stopPropagation()">
+            <div class="bt-blocked-header">
+              <span class="bt-blocked-title">Add Blocked Trading Window</span>
+              <button type="button" class="bt-filter-sec-action" onclick="clearAllBlockedSlots()">Clear All</button>
+            </div>
+            
+            <!-- Input Row: From Time to To Time + Add Button -->
+            <div class="bt-blocked-inputs-row">
+              <input type="time" id="bt-new-slot-from" class="bt-time-input" value="12:00" />
+              <span class="bt-time-sep" style="color:#64748b;font-size:0.75rem;">to</span>
+              <input type="time" id="bt-new-slot-to" class="bt-time-input" value="13:30" />
+              <button type="button" class="bt-btn-add-slot" onclick="addCustomBlockedSlot()">+ Add</button>
+            </div>
+
+            <!-- Quick Preset Chips -->
+            <div class="bt-blocked-presets">
+              <span class="bt-presets-lbl">Presets:</span>
+              <button type="button" class="bt-preset-chip" onclick="addPresetSlot('12:00', '13:30', 'Midday Chop')">+ 12:00-13:30</button>
+              <button type="button" class="bt-preset-chip" onclick="addPresetSlot('15:15', '15:30', 'Market Close')">+ 15:15-15:30</button>
+              <button type="button" class="bt-preset-chip" onclick="addPresetSlot('09:15', '09:30', 'Opening')">+ 09:15-09:30</button>
+            </div>
+
+            <!-- Active Blocked Slots List with Delete Button -->
+            <div class="bt-blocked-slots-list" id="bt-blocked-slots-list">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7B. Max Trades Per Day -->
+      <div class="bt-control-item">
+        <span class="bt-label">Trades/Day</span>
+        <div class="bt-dropdown-box">
+          <select id="bt-max-trades-day" class="bt-select" style="background:#131722;color:#d1d4dc;border:1px solid #2a2e39;border-radius:4px;padding:3px 8px;font-size:11px;font-family:inherit;height:24px;" onchange="onMaxTradesDayChange(this.value)">
+            <option value="4" selected>4 / day (~80/mo)</option>
+            <option value="3">3 / day (~66/mo)</option>
+            <option value="5">5 / day (~110/mo)</option>
+            <option value="0">Uncapped</option>
           </select>
         </div>
-        <div class="config-group">
-          <label class="config-label">Brokerage / Leg (₹)</label>
-          <input type="number" id="cfg-brokerage" class="config-input" value="20" step="1" min="0">
-        </div>
-        <div class="config-group">
-          <label class="config-label">Lot Size (Qty)</label>
-          <input type="number" id="cfg-lotsize" class="config-input" value="65" step="1" min="1">
-        </div>
-        <div class="config-group">
-          <label class="config-label">STT (% on Sell)</label>
-          <input type="number" id="cfg-stt" class="config-input" value="0.10" step="0.01" min="0">
-        </div>
-        <div class="config-group">
-          <label class="config-label">Exchange Txn (%)</label>
-          <input type="number" id="cfg-exchange" class="config-input" value="0.03503" step="0.001" min="0">
-        </div>
-        <div class="config-group">
-          <label class="config-label">GST Rate (%)</label>
-          <input type="number" id="cfg-gst" class="config-input" value="18" step="1" min="0">
-        </div>
       </div>
-    </div>
 
-    <!-- Key Metrics Cards (Gross, Charges, Net, Win Rate, etc.) -->
-    <div class="scorecard-metrics">
-      <div class="metric-card">
-        <div class="metric-label">Net Realized P&L</div>
-        <div id="bt-pnl-inr" class="metric-value">₹0.00</div>
+      <!-- 7C. Position Sizing & Compounding Mode -->
+      <div class="bt-control-item bt-sizing-item">
+        <span class="bt-label">Sizing / Compounding</span>
+        <div class="bt-dropdown-box">
+          <select id="bt-sizing-mode" class="bt-select" style="background:#131722;color:#d1d4dc;border:1px solid #2a2e39;border-radius:4px;padding:3px 8px;font-size:11px;font-family:inherit;height:24px;" onchange="onSizingModeChange(this.value)">
+            <option value="conservative" selected>🛡️ Conservative (1–10 Lots)</option>
+            <option value="compounding_7pct">🚀 Compounding (7% Risk)</option>
+            <option value="compounding_4pct">📈 Compounding (4% Risk)</option>
+            <option value="fixed_1">⚖️ Fixed 1 Lot (Pure Edge)</option>
+          </select>
+        </div>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Gross P&L</div>
-        <div id="bt-gross-inr" class="metric-value neutral">₹0.00</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Total Charges</div>
-        <div id="bt-total-charges" class="metric-value charges">₹0.00</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Net Return (Pts)</div>
-        <div id="bt-pnl-pts" class="metric-value">0.0 pts</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Win Rate</div>
-        <div id="bt-winrate" class="metric-value">--%</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Profit Factor</div>
-        <div id="bt-pf" class="metric-value">--</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Max Drawdown</div>
-        <div id="bt-drawdown" class="metric-value loss">--%</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Total Trades</div>
-        <div id="bt-trades" class="metric-value">--</div>
-      </div>
-    </div>
 
-    <!-- Charges Bifurcation Breakdown Summary Bar -->
-    <div id="bt-bifurcation-bar" class="bifurcation-bar">
-      <span style="color: var(--text-muted); font-size: 9px; text-transform: uppercase;">Charges Breakdown:</span>
-      <span class="bif-pill"><strong>Brokerage:</strong> <span id="bif-brokerage">₹0.00</span></span>
-      <span class="bif-pill"><strong>STT:</strong> <span id="bif-stt">₹0.00</span></span>
-      <span class="bif-pill"><strong>Exchange:</strong> <span id="bif-exchange">₹0.00</span></span>
-      <span class="bif-pill"><strong>GST:</strong> <span id="bif-gst">₹0.00</span></span>
-      <span class="bif-pill"><strong>Stamp:</strong> <span id="bif-stamp">₹0.00</span></span>
-      <span class="bif-pill"><strong>SEBI:</strong> <span id="bif-sebi">₹0.00</span></span>
-    </div>
+      <!-- 8. Run Button -->
+      <div class="bt-control-item bt-run-item">
+        <button type="button" id="btn-run-backtest" class="bt-btn-run" onclick="executeBacktest()">
+          ▶ Run Backtest
+        </button>
+      </div>
 
-    <!-- Interactive Trade Ledger with Click Navigation -->
-    <div class="trades-container">
-      <table class="trades-table">
-        <thead>
-          <tr>
-            <th style="width: 24px;">#</th>
-            <th>Entry</th>
-            <th>Exit</th>
-            <th>Type</th>
-            <th>Gross P&L</th>
-            <th>Charges</th>
-            <th>Net Realized</th>
-          </tr>
-        </thead>
-        <tbody id="bt-trades-body">
-          <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No backtest run yet. Configure charges, select dates, and click Run Backtest.</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </aside>
+    </section>
 
-  <!-- Lightweight Charts Production Library & Controller Script -->
+    <!-- 2. Performance Summary Panel -->
+    <section id="bt-summary-section" class="bt-summary-panel">
+      <div class="bt-summary-header">
+        <div class="bt-summary-title">
+          <span>⚡ Performance Summary</span>
+        </div>
+        <div class="bt-summary-meta">
+          <span id="bt-sum-status" class="pill">SIMULATED</span>
+          <span id="bt-sum-latency">Latency: 14ms</span>
+        </div>
+      </div>
+
+      <div class="bt-summary-grid">
+        <!-- 1. Final Balance -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Final Balance</span>
+            <span>💼</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-final-balance">--</div>
+          <div class="bt-stat-sub" id="bt-sum-balance-sub">Awaiting backtest...</div>
+        </div>
+
+        <!-- 2. Net P&L -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Net P&L</span>
+            <span>💰</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-pnl">--</div>
+          <div class="bt-stat-sub" id="bt-sum-pnl-sub">-- pts &bull; --% ROI</div>
+        </div>
+
+        <!-- 2. Win Rate -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Win Rate</span>
+            <span>🎯</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-winrate">--%</div>
+          <div class="bt-stat-sub" id="bt-sum-win-sub">0 Wins / 0 Losses (0 Trades)</div>
+          <div class="bt-win-progress-wrap">
+            <div class="bt-win-progress-bar" id="bt-sum-win-bar" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- 3. Profit Factor -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Profit Factor</span>
+            <span>⚖️</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-pf">--</div>
+          <div class="bt-stat-sub" id="bt-sum-pf-sub">Gross: -- / --</div>
+        </div>
+
+        <!-- 4. Max Drawdown -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Max Drawdown</span>
+            <span>📉</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-mdd">--%</div>
+          <div class="bt-stat-sub" id="bt-sum-mdd-sub">--</div>
+        </div>
+
+        <!-- 5. Avg Trade & R:R -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Avg Trade & R:R</span>
+            <span>📊</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-rr">--</div>
+          <div class="bt-stat-sub" id="bt-sum-avg-sub">Avg Win: -- | Loss: --</div>
+        </div>
+
+        <!-- 6. Charges & Taxes -->
+        <div class="bt-stat-card">
+          <div class="bt-stat-label">
+            <span>Charges & Taxes</span>
+            <span>🧾</span>
+          </div>
+          <div class="bt-stat-value" id="bt-sum-charges">--</div>
+          <div class="bt-stat-sub" id="bt-sum-charges-sub">Brokerage, STT, Exchange, GST</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Trade Details Ledger Panel (Date-Grouped) -->
+    <section id="bt-details-section" class="bt-details-panel">
+      <div class="bt-details-header">
+        <!-- Two Primary Tabs: 1st Calendar, 2nd Details -->
+        <div class="bt-ledger-tabs">
+          <button type="button" class="bt-ledger-tab active" id="bt-tab-calendar" onclick="switchLedgerTab('calendar')">
+            <span>📅 Calendar</span>
+          </button>
+          <button type="button" class="bt-ledger-tab" id="bt-tab-details" onclick="switchLedgerTab('details')">
+            <span>📋 Details</span>
+          </button>
+        </div>
+
+        <div class="bt-details-title">
+          <span id="bt-trade-count-badge" class="bt-day-pill" style="font-size: 0.70rem; padding: 2px 8px;">Loading Trades...</span>
+        </div>
+
+        <button type="button" class="bt-details-btn-action" id="bt-btn-toggle-all" onclick="toggleAllDateGroups()" style="display: none;">
+          <span id="bt-toggle-all-icon">↕️</span>
+          <span id="bt-toggle-all-text">Collapse All</span>
+        </button>
+
+        <!-- Filter Popover Box -->
+        <div class="bt-filter-box" id="bt-filter-container" style="display: none;">
+          <button type="button" class="bt-details-btn-action" id="bt-filter-btn" onclick="toggleDetailsFilter(event)">
+            <span>🔍</span>
+            <span id="bt-filter-label">Filter: All</span>
+            <span class="bt-chevron">▾</span>
+          </button>
+          <div class="bt-filter-popover" id="bt-filter-popover" onclick="event.stopPropagation()">
+            <!-- P&L Outcome -->
+            <div class="bt-filter-section">
+              <div class="bt-filter-sec-title">P&L Outcome</div>
+              <div class="bt-filter-pill-row">
+                <button type="button" class="bt-fpill active" data-ftype="pnl" data-fval="all"
+                  onclick="setTradeFilter('pnl', 'all', this)">All</button>
+                <button type="button" class="bt-fpill" data-ftype="pnl" data-fval="profit"
+                  onclick="setTradeFilter('pnl', 'profit', this)">💰 Profit</button>
+                <button type="button" class="bt-fpill" data-ftype="pnl" data-fval="loss"
+                  onclick="setTradeFilter('pnl', 'loss', this)">🔻 Loss</button>
+              </div>
+            </div>
+
+            <!-- Trend -->
+            <div class="bt-filter-section">
+              <div class="bt-filter-sec-title">Trend</div>
+              <div class="bt-filter-pill-row">
+                <button type="button" class="bt-fpill active" data-ftype="trend" data-fval="all"
+                  onclick="setTradeFilter('trend', 'all', this)">All</button>
+                <button type="button" class="bt-fpill" data-ftype="trend" data-fval="BULLISH"
+                  onclick="setTradeFilter('trend', 'BULLISH', this)">▲ Bullish</button>
+                <button type="button" class="bt-fpill" data-ftype="trend" data-fval="BEARISH"
+                  onclick="setTradeFilter('trend', 'BEARISH', this)">▼ Bearish</button>
+              </div>
+            </div>
+
+            <!-- Date Sessions -->
+            <div class="bt-filter-section">
+              <div class="bt-filter-sec-header">
+                <span class="bt-filter-sec-title">Date Sessions</span>
+                <div>
+                  <button type="button" class="bt-filter-sec-action" onclick="toggleAllDatesFilter(true)">All</button>
+                  <span style="color:#64748b;font-size:0.65rem;">|</span>
+                  <button type="button" class="bt-filter-sec-action" onclick="toggleAllDatesFilter(false)">None</button>
+                </div>
+              </div>
+              <div class="bt-filter-check-list" id="bt-date-filter-list"></div>
+            </div>
+
+            <!-- Timeframe Window -->
+            <div class="bt-filter-section">
+              <div class="bt-filter-sec-header">
+                <span class="bt-filter-sec-title">Timeframe (Entry Window)</span>
+                <button type="button" class="bt-filter-sec-action" onclick="clearTimeframeFilter()">Clear</button>
+              </div>
+              <div class="bt-filter-time-wrap">
+                <div class="bt-filter-time-col">
+                  <label class="bt-filter-time-lbl" for="bt-filter-from-time">From Time</label>
+                  <input type="time" id="bt-filter-from-time" class="bt-filter-time-input" value="" onchange="onTimeframeFilterChange()" />
+                </div>
+                <span class="bt-filter-time-sep">to</span>
+                <div class="bt-filter-time-col">
+                  <label class="bt-filter-time-lbl" for="bt-filter-to-time">To Time</label>
+                  <input type="time" id="bt-filter-to-time" class="bt-filter-time-input" value="" onchange="onTimeframeFilterChange()" />
+                </div>
+              </div>
+              <div class="bt-filter-pill-row" style="margin-top: 4px;">
+                <button type="button" class="bt-fpill bt-time-preset" onclick="setTimePreset('09:15', '10:05', this)">9:15-10:05</button>
+                <button type="button" class="bt-fpill bt-time-preset" onclick="setTimePreset('10:05', '12:00', this)">10:05-12:00</button>
+                <button type="button" class="bt-fpill bt-time-preset" onclick="setTimePreset('12:00', '13:30', this)">12:00-13:30</button>
+                <button type="button" class="bt-fpill bt-time-preset" onclick="setTimePreset('13:30', '15:15', this)">13:30-15:15</button>
+              </div>
+            </div>
+
+            <!-- Probability -->
+            <div class="bt-filter-section">
+              <div class="bt-filter-sec-title">Min Probability</div>
+              <div class="bt-filter-num-wrap">
+                <input type="number" id="bt-filter-prob-input" class="bt-filter-num-input" min="0" max="100" step="1"
+                  placeholder="Min %" oninput="onFilterProbInput(this.value)" />
+                <button type="button" class="bt-fpill" onclick="clearProbFilter()">Clear</button>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="bt-filter-footer">
+              <button type="button" class="bt-filter-reset-btn" onclick="resetTradeFilters()">Reset Filters</button>
+              <button type="button" class="bt-filter-apply-btn" onclick="closeDetailsFilter()">Done</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1st Tab: Dynamic Calendar View -->
+      <div id="bt-calendar-view" class="bt-calendar-view-container"></div>
+
+      <!-- 2nd Tab: Dynamic Date Groups Content (Existing Details) -->
+      <div id="bt-details-content" style="display: none;"></div>
+    </section>
+
+  </main>
+
+  <!-- ── Trade Verification Candlestick Chart Modal ── -->
+  <div id="bt-trade-chart-modal" class="bt-chart-modal-backdrop" onclick="handleTradeChartBackdropClick(event)">
+    <div class="bt-chart-modal-card" onclick="event.stopPropagation()">
+
+      <!-- Modal Header -->
+      <div class="bt-chart-modal-header">
+        <div class="bt-modal-header-left">
+          <div class="bt-modal-title">
+            <span>📈 Intraday Verification Chart</span>
+            <span class="bt-modal-contract-pill" id="bt-modal-contract">NIFTY CE</span>
+            <button type="button" class="bt-modal-nav-btn" id="bt-modal-toggle-source"
+              onclick="toggleTradeChartSource()"
+              style="margin-left: 8px; font-size: 0.72rem; padding: 3px 8px; cursor: pointer; background: rgba(0,240,255,0.1); border: 1px solid rgba(0,240,255,0.3); color: #00f0ff; border-radius: 4px;"
+              title="Toggle between Traded Option and Spot Index candlesticks">📊 Option View</button>
+            <span class="bt-modal-date-pill" id="bt-modal-date">📅 2026-10-30</span>
+            <span class="bt-modal-idx-pill" id="bt-modal-trade-num">Trade 1 of 4</span>
+          </div>
+        </div>
+        <div class="bt-modal-header-right">
+          <div class="bt-modal-pnl-pill" id="bt-modal-pnl-pill">
+            <span class="bt-modal-pnl-net">+₹0.00</span>
+            <span class="bt-modal-pnl-pts">(+0.00 pts)</span>
+          </div>
+          <div class="bt-modal-nav-group">
+            <button type="button" class="bt-modal-nav-btn" id="bt-modal-prev-btn" onclick="navigateTrade(-1)"
+              title="Previous trade (←)">◀ Prev</button>
+            <button type="button" class="bt-modal-nav-btn" id="bt-modal-next-btn" onclick="navigateTrade(1)"
+              title="Next trade (→)">Next ▶</button>
+          </div>
+          <button type="button" class="bt-modal-close-btn" onclick="closeTradeChart()" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+
+      <!-- Trade Signal & Execution Summary Bar -->
+      <div class="bt-chart-modal-summary" id="bt-modal-summary-bar">
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Contract</span>
+          <span class="chip-val chip-cyan bt-mono" id="bt-chip-contract">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Strategy</span>
+          <span class="chip-val chip-cyan" id="bt-chip-indicator">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Trend</span>
+          <span class="chip-val" id="bt-chip-trend">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Probability</span>
+          <span class="chip-val chip-cyan" id="bt-chip-prob">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Entry</span>
+          <span class="chip-val bt-mono" id="bt-chip-entry">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Exit</span>
+          <span class="chip-val bt-mono" id="bt-chip-exit">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Exit Reason</span>
+          <span class="chip-val" id="bt-chip-reason">--</span>
+        </div>
+        <div class="bt-sum-chip">
+          <span class="chip-lbl">Points</span>
+          <span class="chip-val bt-mono" id="bt-chip-points">--</span>
+        </div>
+        <div class="bt-sum-chip chip-highlight">
+          <span class="chip-lbl">Net P&L</span>
+          <span class="chip-val bt-mono" id="bt-chip-net">--</span>
+        </div>
+      </div>
+
+      <!-- Chart Canvas Viewport -->
+      <div class="bt-chart-modal-body">
+        <div id="bt-modal-chart-canvas"></div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="bt-chart-modal-footer">
+        <div class="bt-chart-legend">
+          <span class="bt-legend-item"><span class="bt-dot dot-green"></span> Entry Signal Marker</span>
+          <span class="bt-legend-item"><span class="bt-dot dot-cyan"></span> Exit Trigger Marker</span>
+        </div>
+        <div class="bt-chart-controls">
+          <button type="button" class="bt-chart-action-btn" onclick="fitTradeChartFullSession()">⛶ Full Session (09:15 -
+            15:30)</button>
+          <button type="button" class="bt-chart-action-btn" onclick="zoomTradeChartToWindow()">🔍 Zoom Trade
+            Window</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Lightweight Charts Library & Studio Webview Controller -->
   <script src="{{LIGHTWEIGHT_CHARTS_URI}}"></script>
   <script src="{{CHART_VIEW_URI}}"></script>
 </body>
+
 </html>
