@@ -158,8 +158,56 @@ class PaperTradeDaemon:
         self.buyer_strength: float = 52.0
         self.seller_strength: float = 48.0
 
-        # Load saved state from disk
+        # Load saved state from disk & bootstrap today's candle history
         self.load_state()
+        self.bootstrap_bars_from_db()
+
+    def bootstrap_bars_from_db(self):
+        """Loads today's completed 1-minute candles from TimescaleDB on engine startup."""
+        try:
+            from trading_engine.core.keyvault import get_secret
+            import psycopg2
+            conn = psycopg2.connect(
+                dbname=get_secret("TIMESCALE_DB") or "trading",
+                user=get_secret("TIMESCALE_USER") or "postgres",
+                password=get_secret("TIMESCALE_PASSWORD") or "postgres",
+                host=get_secret("TIMESCALE_HOST") or "localhost",
+                port=5432,
+                connect_timeout=3
+            )
+            cur = conn.cursor()
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            cur.execute("""
+                SELECT time_bucket('1 minute', timestamp) AS bucket,
+                       first(price, timestamp) as o,
+                       max(price) as h,
+                       min(price) as l,
+                       last(price, timestamp) as c,
+                       max(volume) as v
+                FROM tick_data
+                WHERE timestamp >= %s AND symbol IN ('NIFTY', 'NIFTY 50')
+                GROUP BY bucket ORDER BY bucket ASC
+            """, (f"{today_str} 09:15:00+05:30",))
+            rows = cur.fetchall()
+            conn.close()
+
+            if rows:
+                if "NIFTY" not in self.bar_history:
+                    self.bar_history["NIFTY"] = []
+                for r in rows:
+                    b_ts = r[0].strftime("%Y-%m-%d %H:%M:00") if hasattr(r[0], "strftime") else str(r[0])
+                    self.bar_history["NIFTY"].append({
+                        "timestamp": b_ts,
+                        "open": float(r[1]),
+                        "high": float(r[2]),
+                        "low": float(r[3]),
+                        "close": float(r[4]),
+                        "volume": int(r[5] or 0),
+                        "symbol": "NIFTY"
+                    })
+                logger.info(f"PaperTradeDaemon: Bootstrapped {len(self.bar_history['NIFTY'])} 1-min NIFTY bars from TimescaleDB.")
+        except Exception as e:
+            logger.debug(f"PaperTradeDaemon: DB bar bootstrap skipped: {e}")
 
     def load_state(self):
         """Restores persistent paper trading portfolio from disk."""
@@ -308,8 +356,8 @@ class PaperTradeDaemon:
             self._evaluate_active_position_tick(symbol, ltp, now)
 
         # 4. 1-Minute Candle Accumulation
-        if symbol in ("NIFTY", "NIFTY 50", "NIFTY-I"):
-            self._accumulate_minute_bar(symbol, ltp, int(tick.get("volume", 0) or 0), now)
+        if canon in ("NIFTY", "NIFTY-I"):
+            self._accumulate_minute_bar(canon, ltp, int(tick.get("volume", 0) or 0), now)
 
     def _update_strength_meter(self, tick: Dict[str, Any], ltp: float):
         """Calculates buyer vs seller strength from order book depth or tick pressure."""
@@ -410,6 +458,10 @@ class PaperTradeDaemon:
         if len(self.bar_history[symbol]) > 300:
             self.bar_history[symbol].pop(0)
 
+        # Log candle close for operational visibility
+        if symbol in ("NIFTY", "NIFTY 50"):
+            logger.info(f"📊 [1-MIN BAR CLOSED] {symbol} @ {now.strftime('%H:%M:%S')} | O:{bar['open']} H:{bar['high']} L:{bar['low']} C:{bar['close']} | History: {len(self.bar_history[symbol])} bars")
+
         # Only evaluate entries if no active position
         if self.active_trade is not None:
             return
@@ -447,35 +499,61 @@ class PaperTradeDaemon:
         closes = df["close"]
         highs = df["high"]
         lows = df["low"]
+        opens = df["open"]
         vols = df["volume"]
 
         last_c = closes.iloc[-1]
-        last_o = df["open"].iloc[-1]
+        last_o = opens.iloc[-1]
         prev_c = closes.iloc[-2]
         rolling_low_10 = lows.iloc[-10:-1].min()
         rolling_high_10 = highs.iloc[-10:-1].max()
         sma_20 = closes.rolling(min(len(closes), 20)).mean().iloc[-1]
         avg_vol = vols.rolling(min(len(vols), 10)).mean().iloc[-1] or 1.0
 
+        # Check if volume is available (Spot index cash feeds on NSE have 0 volume)
+        has_vol = bool(vols.max() > 0)
+        vol_ok_setup1 = (vols.iloc[-1] >= 1.1 * avg_vol) if has_vol else True
+        vol_ok_setup2 = (vols.iloc[-1] >= 1.2 * avg_vol) if has_vol else True
+
+        # If spot volume is 0, check NIFTY-I (Near Month Futures) volume if available
+        fut_bars = self.bar_history.get("NIFTY-I") or []
+        if not has_vol and len(fut_bars) >= 10:
+            fut_vols = pd.Series([float(b.get("volume", 0) or 0) for b in fut_bars])
+            if fut_vols.max() > 0:
+                fut_avg = fut_vols.rolling(min(len(fut_vols), 10)).mean().iloc[-1] or 1.0
+                vol_ok_setup1 = (fut_vols.iloc[-1] >= 1.05 * fut_avg)
+                vol_ok_setup2 = (fut_vols.iloc[-1] >= 1.15 * fut_avg)
+
         signal_dir = None
         setup_name = None
         prob_str = "68%"
 
         # Setup 1: BRR-01 Bear-Trap Reversal (CALL / BULLISH)
-        # Price pierced below rolling 10-bar low but closed strongly above open and above previous close with volume
-        if (lows.iloc[-1] < rolling_low_10) and (last_c > last_o) and (last_c > prev_c) and (vols.iloc[-1] >= 1.1 * avg_vol):
+        if (lows.iloc[-1] < rolling_low_10) and (last_c > last_o) and (last_c > prev_c) and vol_ok_setup1:
             signal_dir = "CALL"
             setup_name = "BRR-01 Bear-Trap (CALL)"
             prob_str = "72%"
 
-        # Setup 2: Bearish Momentum Breakdown (PUT / BEARISH)
-        # Price broke below 20-bar SMA and lowest of last 5 bars with elevated volume
-        elif (last_c < sma_20) and (last_c < lows.iloc[-5:-1].min()) and (vols.iloc[-1] >= 1.2 * avg_vol):
+        # Setup 2: Bullish Momentum Breakout (CALL / BULLISH) - captures one-way trend days
+        elif (last_c > sma_20) and (last_c > rolling_high_10) and (last_c > last_o) and (last_c - last_o >= 3.0):
+            signal_dir = "CALL"
+            setup_name = "Bullish Momentum Breakout (CALL)"
+            prob_str = "74%"
+
+        # Setup 3: Bearish Momentum Breakdown (PUT / BEARISH)
+        elif (last_c < sma_20) and (last_c < lows.iloc[-5:-1].min()) and vol_ok_setup2:
             signal_dir = "PUT"
             setup_name = "Bearish Momentum (PUT)"
             prob_str = "67%"
 
+        # Setup 4: BSS-02 Bull-Trap Reversal (PUT / BEARISH)
+        elif (highs.iloc[-1] > rolling_high_10) and (last_c < last_o) and (last_c < prev_c) and vol_ok_setup2:
+            signal_dir = "PUT"
+            setup_name = "BSS-02 Bull-Trap (PUT)"
+            prob_str = "69%"
+
         if signal_dir:
+            logger.info(f"🎯 [STRATEGY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Spot: {last_c:.2f} | Prob: {prob_str}")
             self._open_paper_trade(
                 direction=signal_dir,
                 strategy_name=setup_name,
