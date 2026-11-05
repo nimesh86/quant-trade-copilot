@@ -3269,7 +3269,7 @@ async def run_broker_websocket_stream():
             adapter = get_active_broker_adapter()
             broker = (get_secret("ACTIVE_BROKER") or "kite").strip().lower()
             if adapter.is_configured():
-                if not adapter.is_connected and broker == "kite":
+                if not adapter.is_connected:
                     await asyncio.to_thread(adapter.connect)
                 if adapter.is_connected and not adapter.ws_connected:
                     connected = await asyncio.to_thread(adapter.start_websocket, on_broker_websocket_tick)

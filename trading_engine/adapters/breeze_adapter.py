@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, date
 from typing import Dict, List, Optional, Any, Callable, Tuple, Set
 
-from trading_engine.core.keyvault import get_secret
+from trading_engine.core.keyvault import get_secret, get_breeze_credentials
 from trading_engine.adapters.symbol_translator import to_breeze_params
 
 logger = logging.getLogger("breeze_adapter")
@@ -48,10 +48,7 @@ class BreezeBrokerAdapter:
 
     def is_configured(self) -> bool:
         """Returns True if all required Breeze credentials exist in KeyVault."""
-        api_key = get_secret("BREEZE_API_KEY")
-        api_secret = get_secret("BREEZE_API_SECRET")
-        session_token = get_secret("BREEZE_SESSION_TOKEN")
-        return bool(api_key and api_secret and session_token and len(api_key.strip()) > 3 and len(session_token.strip()) > 3)
+        return get_breeze_credentials().is_configured
 
     def connect(self) -> Optional[Any]:
         """Initializes BreezeConnect and generates daily session."""
@@ -69,23 +66,32 @@ class BreezeBrokerAdapter:
 
         self._last_connect_attempt = now
 
-        if not self.is_configured():
+        creds = get_breeze_credentials()
+        if not creds.is_configured:
             logger.warning("BreezeBrokerAdapter: Incomplete credentials in KeyVault.")
             return None
 
         try:
-            from breeze_connect import BreezeConnect
+            from breeze_connect import BreezeConnect, breeze_connect
+            # Monkey-patch SocketEventBreeze.connect with resilient timeouts
+            if hasattr(breeze_connect, "SocketEventBreeze"):
+                def _resilient_socket_connect(s_self, hostname, is_ohlc_stream=False, strategy_flag=False):
+                    if hasattr(s_self, "sio") and hasattr(s_self.sio, "eio"):
+                        s_self.sio.eio.request_timeout = 30
+                    auth = {"user": s_self.breeze.user_id, "token": s_self.breeze.session_key}
+                    if is_ohlc_stream:
+                        s_self.sio.connect(hostname, socketio_path="ohlcvstream", headers={"User-Agent": "python-socketio[client]/socket"}, auth=auth, transports="websocket", wait_timeout=30)
+                    else:
+                        s_self.sio.connect(hostname, headers={"User-Agent": "python-socketio[client]/socket"}, auth=auth, transports="websocket", wait_timeout=30)
+                    s_self.sio.on("connect_error", s_self.my_connect_error)
+                breeze_connect.SocketEventBreeze.connect = _resilient_socket_connect
         except ImportError:
             logger.error("BreezeBrokerAdapter: 'breeze-connect' package not installed.")
             return None
 
-        api_key = get_secret("BREEZE_API_KEY")
-        api_secret = get_secret("BREEZE_API_SECRET")
-        session_token = get_secret("BREEZE_SESSION_TOKEN")
-
         try:
-            breeze = BreezeConnect(api_key=api_key.strip())
-            res = breeze.generate_session(api_secret=api_secret.strip(), session_token=session_token.strip())
+            breeze = BreezeConnect(api_key=creds.api_key)
+            res = breeze.generate_session(api_secret=creds.api_secret, session_token=creds.session_token)
             logger.info(f"BreezeBrokerAdapter: Session generated: {res}")
             _breeze_client = breeze
             self.client = breeze
@@ -282,7 +288,7 @@ class BreezeBrokerAdapter:
         if symbol in self._subscribed_symbols and symbol in self._symbol_to_tokens:
             return True
 
-        # Fast-path for spot indices
+        # Fast-path for spot & index futures
         if symbol in ("SENSEX", "BSESEN", "BSE:SENSEX", "BSE SENSEX"):
             quotes_tok = "1.1!SENSEX"
             depth_tok = "1.2!SENSEX"
@@ -297,6 +303,57 @@ class BreezeBrokerAdapter:
             self._subscribed_symbols.add(symbol)
             logger.info(f"BreezeBrokerAdapter: Subscribed SENSEX spot feed (token={quotes_tok})")
             return True
+
+        if symbol in ("NIFTY", "NIFTY 50", "NSE NIFTY"):
+            quotes_tok = "4.1!NIFTY 50"
+            depth_tok = "4.2!NIFTY 50"
+            self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+            self._token_to_symbol[quotes_tok] = "NIFTY"
+            self._token_to_symbol["4.1!NIFTY 50"] = "NIFTY"
+            self._token_to_symbol["4.2!NIFTY 50"] = "NIFTY"
+            self._token_to_symbol["NIFTY 50"] = "NIFTY"
+            self._token_to_symbol["NIFTY"] = "NIFTY"
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed NIFTY 50 spot feed (token={quotes_tok})")
+            return True
+
+        if symbol in ("BANKNIFTY", "NIFTY BANK"):
+            quotes_tok = "4.1!NIFTY BANK"
+            depth_tok = "4.2!NIFTY BANK"
+            self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+            self._token_to_symbol[quotes_tok] = "BANKNIFTY"
+            self._token_to_symbol["4.1!NIFTY BANK"] = "BANKNIFTY"
+            self._token_to_symbol["4.2!NIFTY BANK"] = "BANKNIFTY"
+            self._token_to_symbol["NIFTY BANK"] = "BANKNIFTY"
+            self._token_to_symbol["BANKNIFTY"] = "BANKNIFTY"
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed BANKNIFTY spot feed (token={quotes_tok})")
+            return True
+
+        if symbol in ("NIFTY-I", "NIFTY I", "NIFTY_I", "NIFTY FUT", "NIFTYFUT"):
+            if not getattr(breeze, "stock_script_dict_list", None) or not breeze.stock_script_dict_list[0]:
+                breeze.get_stock_script_list()
+            d = getattr(breeze, "stock_script_dict_list", [{}, {}, {}, {}, {}])[4]
+            fut_matches = [(k, v) for k, v in d.items() if k.startswith("FUT-NIFTY-")]
+            if fut_matches:
+                fut_name, fut_code = fut_matches[0]
+                quotes_tok = f"4.1!{fut_code}"
+                depth_tok = f"4.2!{fut_code}"
+                self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+                self._token_to_symbol[quotes_tok] = "NIFTY-I"
+                self._token_to_symbol[depth_tok] = "NIFTY-I"
+                self._token_to_symbol[str(fut_code)] = "NIFTY-I"
+                self._token_to_symbol[fut_name] = "NIFTY-I"
+                if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                    breeze.sio_rate_refresh_handler.watch(quotes_tok)
+                    breeze.sio_rate_refresh_handler.watch(depth_tok)
+                self._subscribed_symbols.add(symbol)
+                logger.info(f"BreezeBrokerAdapter: Subscribed NIFTY-I near-month future {fut_name} (token={quotes_tok})")
+                return True
 
         params = to_breeze_params(symbol)
         if not params:
@@ -414,27 +471,31 @@ class BreezeBrokerAdapter:
         canonical_symbol = self._token_to_symbol.get(sym_token) or self._token_to_symbol.get(token_num)
 
         if not canonical_symbol:
-            if sym_token in ("BSE SENSEX", "SENSEX", "BSESEN"):
+            if sym_token in ("BSE SENSEX", "SENSEX", "BSESEN", "1.1!SENSEX"):
                 canonical_symbol = "SENSEX"
-            elif sym_token in ("NSE NIFTY", "NIFTY 50", "NIFTY"):
+            elif sym_token in ("NSE NIFTY", "NIFTY 50", "NIFTY", "4.1!NIFTY 50"):
                 canonical_symbol = "NIFTY"
-            elif sym_token in ("NIFTY BANK", "BANKNIFTY"):
+            elif sym_token in ("NIFTY BANK", "BANKNIFTY", "4.1!NIFTY BANK"):
                 canonical_symbol = "BANKNIFTY"
             else:
                 stk_name = data.get("stock_name") or data.get("stock_code")
-                strike = data.get("strike_price")
-                right = data.get("right")
-                exp = data.get("expiry_date")
-                if stk_name and strike and right:
-                    from trading_engine.adapters.symbol_translator import to_canonical_symbol
-                    canonical_symbol = to_canonical_symbol(stk_name, strike, right, exp)
-                elif stk_name:
-                    canonical_symbol = stk_name
+                prod = str(data.get("product_type") or "").lower()
+                if "future" in prod and "nifty" in str(stk_name).lower():
+                    canonical_symbol = "NIFTY-I"
+                else:
+                    strike = data.get("strike_price")
+                    right = data.get("right")
+                    exp = data.get("expiry_date")
+                    if stk_name and strike and right:
+                        from trading_engine.adapters.symbol_translator import to_canonical_symbol
+                        canonical_symbol = to_canonical_symbol(stk_name, strike, right, exp)
+                    elif stk_name:
+                        canonical_symbol = stk_name
 
         if not canonical_symbol:
             return
 
-        # 2. Extract price
+        # 2. Extract price & depth
         ltp = float(data.get("last") or data.get("last_trade_price") or data.get("close") or 0.0)
         if ltp <= 0:
             return
@@ -446,6 +507,10 @@ class BreezeBrokerAdapter:
         open_px = float(data.get("open") or ltp)
         close_px = float(data.get("close") or ltp)
         ltt = data.get("ltt") or data.get("last_traded_time") or datetime.now().isoformat()
+        buy_qty = int(data.get("totalBuyQt") or data.get("bQty") or 0)
+        sell_qty = int(data.get("totalSellQ") or data.get("sQty") or 0)
+        bid_price = float(data.get("bPrice") or ltp)
+        ask_price = float(data.get("sPrice") or ltp)
 
         tick_packet = {
             "symbol": canonical_symbol,
@@ -456,6 +521,10 @@ class BreezeBrokerAdapter:
             "low": round(low, 2),
             "open": round(open_px, 2),
             "close": round(close_px, 2),
+            "buy_qty": buy_qty,
+            "sell_qty": sell_qty,
+            "bid_price": round(bid_price, 2),
+            "ask_price": round(ask_price, 2),
             "timestamp": str(ltt),
             "source": "breeze_websocket"
         }
