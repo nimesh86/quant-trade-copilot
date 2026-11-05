@@ -7696,6 +7696,13 @@
       const buyerPct = Math.min(100, Math.max(0, Math.round(Number(rawBuyer) * 100)));
       const sellerPct = 100 - buyerPct;
 
+      const actLots = act.lots || 1;
+      const actQty = act.quantity || act.units || (actLots * 65);
+      const entryPx = Number(act.entry_price || act.entry_rate || 0).toFixed(2);
+      const curPx = Number(act.current_price || act.entry_price || act.entry_rate || 0).toFixed(2);
+      const slPx = Number(act.sl || act.stop_loss || 0).toFixed(2);
+      const tgtPx = Number(act.target || 0).toFixed(2);
+
       actContainer.innerHTML = `
         <div class="paper-active-card">
           <div class="paper-active-header">
@@ -7705,7 +7712,7 @@
               <span class="paper-trend-pill ${isTrendBull ? 'bullish' : 'bearish'}">
                 ${isTrendBull ? '▲ BULLISH (CE)' : '▼ BEARISH (PE)'}
               </span>
-              <span class="paper-qty-pill">${act.lots || 2} Lots (${act.quantity || 130} Qty)</span>
+              <span class="paper-qty-pill">${actLots} Lot${actLots > 1 ? 's' : ''} (${actQty} Qty)</span>
             </div>
             <div class="paper-active-header-right">
               <button type="button" class="btn-paper-force-exit" onclick="forceExitPaperTrade('${act.trade_id || ''}')" title="Instantly force market exit for active paper position">
@@ -7721,11 +7728,11 @@
             </div>
             <div class="paper-active-cell">
               <span class="paper-cell-label">Entry Price</span>
-              <span class="paper-cell-val mono">₹${Number(act.entry_price || 0).toFixed(2)}</span>
+              <span class="paper-cell-val mono">₹${entryPx}</span>
             </div>
             <div class="paper-active-cell">
               <span class="paper-cell-label">Current LTP</span>
-              <span class="paper-cell-val mono live">₹${Number(act.current_price || act.entry_price || 0).toFixed(2)}</span>
+              <span class="paper-cell-val mono live">₹${curPx}</span>
             </div>
             <div class="paper-active-cell highlight">
               <span class="paper-cell-label">Unrealized P&L</span>
@@ -7735,11 +7742,11 @@
             </div>
             <div class="paper-active-cell">
               <span class="paper-cell-label">Stop Loss (-30%)</span>
-              <span class="paper-cell-val mono val-neg">₹${Number(act.stop_loss || 0).toFixed(2)}</span>
+              <span class="paper-cell-val mono val-neg">₹${slPx}</span>
             </div>
             <div class="paper-active-cell">
               <span class="paper-cell-label">Target (+50%)</span>
-              <span class="paper-cell-val mono val-pos">₹${Number(act.target || 0).toFixed(2)}</span>
+              <span class="paper-cell-val mono val-pos">₹${tgtPx}</span>
             </div>
           </div>
 
@@ -7878,6 +7885,11 @@
             const ptsStr = (ptsVal >= 0 ? '+' : '') + ptsVal.toFixed(2);
             const isBull = (t.trend || 'BULLISH').toUpperCase() === 'BULLISH';
 
+            const tLots = t.lots || 1;
+            const tQty = t.quantity || t.units || (tLots * 65);
+            const entryVal = Number(t.entry_price !== undefined ? t.entry_price : (t.entry_rate || 0)).toFixed(2);
+            const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
+
             rowsHtml += `
               <tr class="bt-trade-row">
                 <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)}</td>
@@ -7887,10 +7899,10 @@
                   <span class="bt-trend-badge ${isBull ? 'bullish' : 'bearish'}">${isBull ? '▲ CE' : '▼ PE'}</span>
                 </td>
                 <td><span class="bt-indicator-pill">${t.strategy || cfg.strategy || 'Dual XGBoost'}</span></td>
-                <td class="bt-mono">${t.entry_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${Number(t.entry_price || 0).toFixed(2)}</span></td>
-                <td class="bt-mono">${t.exit_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${Number(t.exit_price || 0).toFixed(2)}</span></td>
+                <td class="bt-mono">${t.entry_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${entryVal}</span></td>
+                <td class="bt-mono">${t.exit_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${exitVal}</span></td>
                 <td class="bt-mono bt-text-right ${ptsVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${ptsStr}</td>
-                <td class="bt-mono bt-text-center"><span class="bt-lot-pill">${t.lots || 2}(${t.quantity || 130})</span></td>
+                <td class="bt-mono bt-text-center"><span class="bt-lot-pill">${tLots} (${tQty})</span></td>
                 <td class="bt-mono bt-text-right ${grossVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${grossStr}</td>
                 <td class="bt-mono bt-text-right bt-val-muted">${chgStr}</td>
                 <td class="bt-mono bt-text-right ${isPos ? 'bt-val-pos' : 'bt-val-neg'}">${netStr}</td>
@@ -7951,6 +7963,11 @@
             const ptsStr = (ptsVal >= 0 ? '+' : '') + ptsVal.toFixed(2);
             const isBull = (t.trend || 'BULLISH').toUpperCase() === 'BULLISH';
 
+            const tLots = t.lots || 1;
+            const tQty = t.quantity || t.units || (tLots * 65);
+            const entryVal = Number(t.entry_price !== undefined ? t.entry_price : (t.entry_rate || 0)).toFixed(2);
+            const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
+
             rowsHtml += `
               <tr class="bt-trade-row">
                 <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)}</td>
@@ -7958,10 +7975,10 @@
                 <td class="bt-mono">${t.exit_time || '--'}</td>
                 <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
                 <td class="bt-text-center"><span class="bt-trend-badge ${isBull ? 'bullish' : 'bearish'}">${isBull ? '▲ CE' : '▼ PE'}</span></td>
-                <td class="bt-mono">₹${Number(t.entry_price || 0).toFixed(2)}</td>
-                <td class="bt-mono">₹${Number(t.exit_price || 0).toFixed(2)}</td>
+                <td class="bt-mono">₹${entryVal}</td>
+                <td class="bt-mono">₹${exitVal}</td>
                 <td class="bt-mono bt-text-right ${ptsVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${ptsStr}</td>
-                <td class="bt-mono bt-text-center">${t.quantity || 130}</td>
+                <td class="bt-mono bt-text-center"><span class="bt-lot-pill">${tLots} (${tQty})</span></td>
                 <td class="bt-mono bt-text-right ${isPos ? 'bt-val-pos' : 'bt-val-neg'}">${netStr}</td>
                 <td class="bt-text-center"><span class="bt-reason-badge ${(t.reason || t.exit_reason || 'TARGET').toLowerCase()}">${t.reason || t.exit_reason || 'TARGET'}</span></td>
               </tr>

@@ -228,6 +228,31 @@ class PaperTradeDaemon:
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
                     self.active_trade = data.get("active_trade")
                     self.trade_history = data.get("trade_history", [])
+                    # Auto-normalize legacy trade records for backwards compatibility
+                    for t in self.trade_history:
+                        if "entry_price" not in t and "entry_rate" in t:
+                            t["entry_price"] = t["entry_rate"]
+                        if "entry_rate" not in t and "entry_price" in t:
+                            t["entry_rate"] = t["entry_price"]
+                        if "exit_price" not in t and "exit_rate" in t:
+                            t["exit_price"] = t["exit_rate"]
+                        if "exit_rate" not in t and "exit_price" in t:
+                            t["exit_rate"] = t["exit_price"]
+                        if "quantity" not in t and "units" in t:
+                            t["quantity"] = t["units"]
+                        if "units" not in t and "quantity" in t:
+                            t["units"] = t["quantity"]
+                        if "strategy" not in t and "indicator" in t:
+                            t["strategy"] = t["indicator"]
+                    if self.active_trade:
+                        if "entry_price" not in self.active_trade and "entry_rate" in self.active_trade:
+                            self.active_trade["entry_price"] = self.active_trade["entry_rate"]
+                        if "entry_rate" not in self.active_trade and "entry_price" in self.active_trade:
+                            self.active_trade["entry_rate"] = self.active_trade["entry_price"]
+                        if "quantity" not in self.active_trade and "units" in self.active_trade:
+                            self.active_trade["quantity"] = self.active_trade["units"]
+                        if "units" not in self.active_trade and "quantity" in self.active_trade:
+                            self.active_trade["units"] = self.active_trade["quantity"]
                     logger.info(f"PaperTradeDaemon: Restored {len(self.trade_history)} trades. Capital: ₹{self.capital:,.2f}")
             except Exception as e:
                 logger.error(f"PaperTradeDaemon: Error loading state: {e}")
@@ -396,16 +421,24 @@ class PaperTradeDaemon:
 
     def _evaluate_active_position_tick(self, symbol: str, ltp: float, now: datetime):
         pos = self.active_trade
+        if not pos:
+            return
         contract_sym = pos.get("contract", "")
 
-        # Option LTP update (either direct contract tick or delta-estimated from spot)
+        # Option LTP update:
+        # 1. Exact match if direct contract tick arrives from broker WebSocket
+        # 2. Delta estimation ONLY against spot index benchmark (NIFTY / NIFTY 50)
+        # Note: Do NOT match substring (e.g. 'NIFTY' in 'NIFTY26N0924600PE') and do NOT evaluate against futures (NIFTY-I)
         opt_ltp = pos.get("current_price", pos["entry_price"])
-        if symbol == contract_sym or symbol in contract_sym:
+        if symbol == contract_sym:
             opt_ltp = ltp
-        elif symbol in ("NIFTY", "NIFTY 50", "NIFTY-I"):
+        elif symbol in ("NIFTY", "NIFTY 50"):
             spot_diff = ltp - pos.get("spot_at_entry", ltp)
-            delta = 0.55 if pos["trend"] == "BULLISH" else -0.55
-            opt_ltp = max(5.0, pos["entry_price"] + spot_diff * delta)
+            delta = 0.55 if pos.get("trend") == "BULLISH" else -0.55
+            opt_ltp = max(5.0, round(pos["entry_price"] + spot_diff * delta, 2))
+        else:
+            # Irrelevant tick (BANKNIFTY, SENSEX, or NIFTY-I futures) - do not touch active position
+            return
 
         pos["current_price"] = round(opt_ltp, 2)
         pos["unrealized_pnl"] = round((opt_ltp - pos["entry_price"]) * pos["units"], 2)
@@ -470,6 +503,10 @@ class PaperTradeDaemon:
 
         # Only evaluate entries if no active position
         if self.active_trade is not None:
+            return
+
+        # Only evaluate strategy entries on primary benchmark candle close (avoids duplicate signals on futures candle close)
+        if symbol not in ("NIFTY", "NIFTY 50"):
             return
 
         # Gating 1: Blocked Time Slots (e.g. 09:15 to 10:05)
@@ -612,8 +649,10 @@ class PaperTradeDaemon:
             "option_type": opt_type,
             "trend": "BULLISH" if direction == "CALL" else "BEARISH",
             "entry_price": est_prem,
+            "entry_rate": est_prem,
             "current_price": est_prem,
             "spot_at_entry": spot_price,
+            "benchmark_symbol": "NIFTY",
             "lots": lots,
             "units": units,
             "quantity": units,
@@ -621,6 +660,7 @@ class PaperTradeDaemon:
             "sl": sl_px,
             "stop_loss": sl_px,
             "strategy": strategy_name,
+            "indicator": strategy_name,
             "probability": probability,
             "unrealized_pnl": 0.0,
             "points_gained": 0.0,
@@ -650,6 +690,7 @@ class PaperTradeDaemon:
 
         closed_rec = {
             "id": pos["id"],
+            "trade_id": pos["id"],
             "date": pos["date"],
             "day": pos["day"],
             "symbol": pos["symbol"],
@@ -659,12 +700,16 @@ class PaperTradeDaemon:
             "trend": pos["trend"],
             "action": f"BUY_{pos['option_type']}",
             "indicator": pos["strategy"],
+            "strategy": pos["strategy"],
             "probability": pos["probability"],
             "entry_time": pos["entry_time"],
+            "entry_price": pos["entry_price"],
             "entry_rate": pos["entry_price"],
             "exit_time": exit_time.strftime("%H:%M:%S"),
+            "exit_price": round(exit_price, 2),
             "exit_rate": round(exit_price, 2),
             "reason": reason,
+            "exit_reason": reason,
             "points": pts,
             "gross": gross,
             "charges": charges,
@@ -672,6 +717,7 @@ class PaperTradeDaemon:
             "roi": roi,
             "lots": pos["lots"],
             "units": pos["units"],
+            "quantity": pos["units"],
             "segment": pos.get("segment", "NIFTY")
         }
 
