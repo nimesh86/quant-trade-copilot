@@ -35,6 +35,12 @@ from trading_engine.quant_core.contracts import Bar, Signal, Position, TradeReco
 from trading_engine.quant_core.costs import CostCalculator
 
 logger = logging.getLogger("paper_trade_daemon")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setLevel(logging.INFO)
+    _sh.setFormatter(logging.Formatter("[%(levelname)s] PaperDaemon: %(message)s"))
+    logger.addHandler(_sh)
 
 DATA_DIR = ROOT_DIR / "data"
 STATE_FILE = DATA_DIR / "paper_trade_state.json"
