@@ -62,7 +62,7 @@ class SynchronizedBar:
     opt_low: float
     opt_close: float
     opt_volume: int
-    opt_oi: int
+    opt_oi: int = 0
 
 
 class InputDescriptor:

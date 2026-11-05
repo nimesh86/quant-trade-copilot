@@ -7611,6 +7611,149 @@
       }
     }
 
+    function renderPaperIndices(indices) {
+      const indicesGrid = document.getElementById('paper-indices-grid');
+      if (!indicesGrid || !Array.isArray(indices) || indices.length === 0) return;
+
+      indicesGrid.innerHTML = indices.map(idx => {
+        const isUp = (idx.trend || '').toUpperCase() === 'UP' || (Number(idx.change_pts || 0) >= 0);
+        const icon = isUp ? '▲' : '▼';
+        const ptsSign = Number(idx.change_pts || 0) >= 0 ? '+' : '';
+        const ptsText = `${ptsSign}${Number(idx.change_pts || 0).toFixed(2)}`;
+        const pctSign = Number(idx.change_pct || 0) >= 0 ? '+' : '';
+        const pctText = `${pctSign}${Number(idx.change_pct || 0).toFixed(2)}%`;
+        const ltpFormatted = Number(idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const strikeFormatted = Number(idx.atm_strike || 0).toLocaleString('en-IN');
+        const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        return `
+          <div class="paper-index-card ${isUp ? 'trend-up' : 'trend-down'}">
+            <div class="paper-index-head">
+              <div class="paper-index-name">
+                <span>${idx.name || idx.symbol}</span>
+              </div>
+              <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
+            </div>
+            <div class="paper-index-main">
+              <div class="paper-index-strike-wrap">
+                <span class="paper-index-strike-lbl">Current Strike (ATM)</span>
+                <span class="paper-index-strike">${strikeFormatted}</span>
+                <span class="paper-index-ltp-sub">LTP: ₹${ltpFormatted}</span>
+              </div>
+              <div class="paper-index-change-wrap">
+                <span class="paper-index-pills ${isUp ? 'pos' : 'neg'}">
+                  <span style="font-size: 0.85rem;">${icon}</span>
+                  <span>${ptsText}</span>
+                  <span style="font-size: 0.72rem; opacity: 0.9;">(${pctText})</span>
+                </span>
+                <span style="font-size: 0.65rem; color: #64748b; margin-top: 4px; text-transform: uppercase;">
+                  Trend: <strong style="color: ${isUp ? '#10b981' : '#ef4444'}">${isUp ? 'BULLISH' : 'BEARISH'}</strong>
+                </span>
+              </div>
+            </div>
+            <div class="paper-index-footer">
+              <span>Low: ₹${dayLow}</span>
+              <span>High: ₹${dayHigh}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderPaperActiveTrade(act, meta = {}) {
+      const actContainer = document.getElementById('paper-active-trade-container');
+      if (!actContainer) return;
+      const cfg = (meta && meta.config) || {};
+
+      if (!act) {
+        actContainer.innerHTML = `
+          <div class="paper-no-active-card">
+            <div class="paper-no-active-icon">⏳</div>
+            <div class="paper-no-active-title">No Active Position</div>
+            <div class="paper-no-active-sub">
+              Autonomous engine is actively monitoring real-time tick stream for <strong>${cfg.symbol || 'NIFTY'}</strong> Dynamic ATM signals...
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const isTrendBull = (act.trend || 'BULLISH').toUpperCase() === 'BULLISH';
+      const uPnl = Number(act.unrealized_pnl) || 0;
+      const uPts = Number(act.points) || 0;
+      const isPnlPos = uPnl >= 0;
+      const pnlSign = isPnlPos ? '+₹' : '-₹';
+      const pnlStr = `${pnlSign}${Math.abs(uPnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const ptsSign = uPts >= 0 ? '+' : '';
+      const ptsStr = `${ptsSign}${uPts.toFixed(2)} pts`;
+
+      const rawBuyer = act.buyer_strength !== undefined ? act.buyer_strength : (meta.buyer_strength !== undefined ? meta.buyer_strength : 0.5);
+      const buyerPct = Math.min(100, Math.max(0, Math.round(Number(rawBuyer) * 100)));
+      const sellerPct = 100 - buyerPct;
+
+      actContainer.innerHTML = `
+        <div class="paper-active-card">
+          <div class="paper-active-header">
+            <div class="paper-active-header-left">
+              <span class="paper-trade-badge active">LIVE ACTIVE POSITION</span>
+              <span class="paper-active-contract">${act.contract || act.symbol || 'NIFTY Dynamic ATM'}</span>
+              <span class="paper-trend-pill ${isTrendBull ? 'bullish' : 'bearish'}">
+                ${isTrendBull ? '▲ BULLISH (CE)' : '▼ BEARISH (PE)'}
+              </span>
+              <span class="paper-qty-pill">${act.lots || 2} Lots (${act.quantity || 130} Qty)</span>
+            </div>
+            <div class="paper-active-header-right">
+              <button type="button" class="btn-paper-force-exit" onclick="forceExitPaperTrade('${act.trade_id || ''}')" title="Instantly force market exit for active paper position">
+                ⚡ Force Market Exit
+              </button>
+            </div>
+          </div>
+
+          <div class="paper-active-grid">
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Entry Time</span>
+              <span class="paper-cell-val mono">${act.entry_time || '--'}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Entry Price</span>
+              <span class="paper-cell-val mono">₹${Number(act.entry_price || 0).toFixed(2)}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Current LTP</span>
+              <span class="paper-cell-val mono live">₹${Number(act.current_price || act.entry_price || 0).toFixed(2)}</span>
+            </div>
+            <div class="paper-active-cell highlight">
+              <span class="paper-cell-label">Unrealized P&L</span>
+              <span class="paper-cell-val mono ${isPnlPos ? 'val-pos' : 'val-neg'}">
+                ${pnlStr} <small style="font-size:0.75rem;">(${ptsStr})</small>
+              </span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Stop Loss (-30%)</span>
+              <span class="paper-cell-val mono val-neg">₹${Number(act.stop_loss || 0).toFixed(2)}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Target (+50%)</span>
+              <span class="paper-cell-val mono val-pos">₹${Number(act.target || 0).toFixed(2)}</span>
+            </div>
+          </div>
+
+          <!-- Buyer vs Seller Strength Meter -->
+          <div class="paper-strength-section">
+            <div class="paper-strength-header">
+              <span class="strength-lbl">Order Book Dynamics & Tick Flow</span>
+              <span class="strength-split">Buyers: <strong>${buyerPct}%</strong> • Sellers: <strong>${sellerPct}%</strong></span>
+            </div>
+            <div class="paper-strength-bar-bg">
+              <div class="paper-strength-fill buyer" style="width: ${buyerPct}%;"></div>
+              <div class="paper-strength-fill seller" style="width: ${sellerPct}%;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     function renderPaperTradingUI(state) {
       if (!state) return;
       const cfg = state.config || {};
@@ -7624,52 +7767,8 @@
       const todayList = sum.today_trades || state.today_trades || [];
 
       // 0. Live Indices Statistics Cards at the Top
-      const indicesGrid = document.getElementById('paper-indices-grid');
-      if (indicesGrid && state.indices && Array.isArray(state.indices)) {
-        indicesGrid.innerHTML = state.indices.map(idx => {
-          const isUp = (idx.trend || '').toUpperCase() === 'UP' || (Number(idx.change_pts || 0) >= 0);
-          const icon = isUp ? '▲' : '▼';
-          const ptsSign = Number(idx.change_pts || 0) >= 0 ? '+' : '';
-          const ptsText = `${ptsSign}${Number(idx.change_pts || 0).toFixed(2)}`;
-          const pctSign = Number(idx.change_pct || 0) >= 0 ? '+' : '';
-          const pctText = `${pctSign}${Number(idx.change_pct || 0).toFixed(2)}%`;
-          const ltpFormatted = Number(idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          const strikeFormatted = Number(idx.atm_strike || 0).toLocaleString('en-IN');
-          const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-          return `
-            <div class="paper-index-card ${isUp ? 'trend-up' : 'trend-down'}">
-              <div class="paper-index-head">
-                <div class="paper-index-name">
-                  <span>${idx.name || idx.symbol}</span>
-                </div>
-                <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
-              </div>
-              <div class="paper-index-main">
-                <div class="paper-index-strike-wrap">
-                  <span class="paper-index-strike-lbl">Current Strike (ATM)</span>
-                  <span class="paper-index-strike">${strikeFormatted}</span>
-                  <span class="paper-index-ltp-sub">LTP: ₹${ltpFormatted}</span>
-                </div>
-                <div class="paper-index-change-wrap">
-                  <span class="paper-index-pills ${isUp ? 'pos' : 'neg'}">
-                    <span style="font-size: 0.85rem;">${icon}</span>
-                    <span>${ptsText}</span>
-                    <span style="font-size: 0.72rem; opacity: 0.9;">(${pctText})</span>
-                  </span>
-                  <span style="font-size: 0.65rem; color: #64748b; margin-top: 4px; text-transform: uppercase;">
-                    Trend: <strong style="color: ${isUp ? '#10b981' : '#ef4444'}">${isUp ? 'BULLISH' : 'BEARISH'}</strong>
-                  </span>
-                </div>
-              </div>
-              <div class="paper-index-footer">
-                <span>Low: ₹${dayLow}</span>
-                <span>High: ₹${dayHigh}</span>
-              </div>
-            </div>
-          `;
-        }).join('');
+      if (state.indices && Array.isArray(state.indices)) {
+        renderPaperIndices(state.indices);
       }
 
       // 1. Meta Pills
@@ -7703,94 +7802,7 @@
       }
 
       // 2. Active Trade Card vs Idle Card
-      const actContainer = document.getElementById('paper-active-trade-container');
-      if (actContainer) {
-        if (!act) {
-          actContainer.innerHTML = `
-            <div class="paper-no-active-card">
-              <div class="paper-no-active-icon">⏳</div>
-              <div class="paper-no-active-title">No Active Position</div>
-              <div class="paper-no-active-sub">
-                Autonomous engine is actively monitoring real-time tick stream for <strong>${cfg.symbol || 'NIFTY'}</strong> Dynamic ATM signals...
-              </div>
-            </div>
-          `;
-        } else {
-          const isTrendBull = (act.trend || 'BULLISH').toUpperCase() === 'BULLISH';
-          const uPnl = Number(act.unrealized_pnl) || 0;
-          const uPts = Number(act.points) || 0;
-          const isPnlPos = uPnl >= 0;
-          const pnlSign = isPnlPos ? '+₹' : '-₹';
-          const pnlStr = `${pnlSign}${Math.abs(uPnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-          const ptsSign = uPts >= 0 ? '+' : '';
-          const ptsStr = `${ptsSign}${uPts.toFixed(2)} pts`;
-
-          const rawBuyer = act.buyer_strength !== undefined ? act.buyer_strength : (state.buyer_strength !== undefined ? state.buyer_strength : 0.5);
-          const buyerPct = Math.min(100, Math.max(0, Math.round(Number(rawBuyer) * 100)));
-          const sellerPct = 100 - buyerPct;
-
-          actContainer.innerHTML = `
-            <div class="paper-active-card">
-              <div class="paper-active-header">
-                <div class="paper-active-header-left">
-                  <span class="paper-trade-badge active">LIVE ACTIVE POSITION</span>
-                  <span class="paper-active-contract">${act.contract || act.symbol || 'NIFTY Dynamic ATM'}</span>
-                  <span class="paper-trend-pill ${isTrendBull ? 'bullish' : 'bearish'}">
-                    ${isTrendBull ? '▲ BULLISH (CE)' : '▼ BEARISH (PE)'}
-                  </span>
-                  <span class="paper-qty-pill">${act.lots || 2} Lots (${act.quantity || 130} Qty)</span>
-                </div>
-                <div class="paper-active-header-right">
-                  <button type="button" class="btn-paper-force-exit" onclick="forceExitPaperTrade('${act.trade_id || ''}')" title="Instantly force market exit for active paper position">
-                    ⚡ Force Market Exit
-                  </button>
-                </div>
-              </div>
-
-              <div class="paper-active-grid">
-                <div class="paper-active-cell">
-                  <span class="paper-cell-label">Entry Time</span>
-                  <span class="paper-cell-val mono">${act.entry_time || '--'}</span>
-                </div>
-                <div class="paper-active-cell">
-                  <span class="paper-cell-label">Entry Price</span>
-                  <span class="paper-cell-val mono">₹${Number(act.entry_price || 0).toFixed(2)}</span>
-                </div>
-                <div class="paper-active-cell">
-                  <span class="paper-cell-label">Current LTP</span>
-                  <span class="paper-cell-val mono live">₹${Number(act.current_price || act.entry_price || 0).toFixed(2)}</span>
-                </div>
-                <div class="paper-active-cell highlight">
-                  <span class="paper-cell-label">Unrealized P&L</span>
-                  <span class="paper-cell-val mono ${isPnlPos ? 'val-pos' : 'val-neg'}">
-                    ${pnlStr} <small style="font-size:0.75rem;">(${ptsStr})</small>
-                  </span>
-                </div>
-                <div class="paper-active-cell">
-                  <span class="paper-cell-label">Stop Loss (-30%)</span>
-                  <span class="paper-cell-val mono val-neg">₹${Number(act.stop_loss || 0).toFixed(2)}</span>
-                </div>
-                <div class="paper-active-cell">
-                  <span class="paper-cell-label">Target (+50%)</span>
-                  <span class="paper-cell-val mono val-pos">₹${Number(act.target || 0).toFixed(2)}</span>
-                </div>
-              </div>
-
-              <!-- Buyer vs Seller Strength Meter -->
-              <div class="paper-strength-section">
-                <div class="paper-strength-header">
-                  <span class="strength-lbl">Order Book Dynamics & Tick Flow</span>
-                  <span class="strength-split">Buyers: <strong>${buyerPct}%</strong> • Sellers: <strong>${sellerPct}%</strong></span>
-                </div>
-                <div class="paper-strength-bar-bg">
-                  <div class="paper-strength-fill buyer" style="width: ${buyerPct}%;"></div>
-                  <div class="paper-strength-fill seller" style="width: ${sellerPct}%;"></div>
-                </div>
-              </div>
-            </div>
-          `;
-        }
-      }
+      renderPaperActiveTrade(act, state);
 
       // 3. Summary KPI Cards
       const runningCap = sum.capital !== undefined ? sum.capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
@@ -7973,10 +7985,77 @@
       }
     }
 
+    let paperWs = null;
+    let paperWsReconnectTimer = null;
+    let lastPaperActiveTradeState = false;
+
+    function connectPaperWebSocket() {
+      if (paperWs && (paperWs.readyState === WebSocket.OPEN || paperWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${window.location.host}/ws/paper`;
+
+      try {
+        paperWs = new WebSocket(wsUrl);
+
+        paperWs.onopen = () => {
+          console.log('⚡ Paper WebSocket connected for real-time sub-second live feed');
+          if (paperWsReconnectTimer) {
+            clearTimeout(paperWsReconnectTimer);
+            paperWsReconnectTimer = null;
+          }
+        };
+
+        paperWs.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'PAPER_INIT' || msg.type === 'PAPER_FULL_STATE') {
+              renderPaperTradingUI(msg.state);
+            } else if (msg.type === 'PAPER_TICK') {
+              // Instantaneous sub-second updates (< 15ms)
+              if (msg.indices && Array.isArray(msg.indices)) {
+                renderPaperIndices(msg.indices);
+              }
+              if (msg.active_trade !== undefined) {
+                renderPaperActiveTrade(msg.active_trade, msg);
+                const hasTrade = Boolean(msg.active_trade);
+                if (hasTrade !== lastPaperActiveTradeState) {
+                  lastPaperActiveTradeState = hasTrade;
+                  fetchPaperTradingState();
+                }
+              }
+              if (msg.capital !== undefined) {
+                const capPill = document.getElementById('paper-pill-capital');
+                if (capPill) capPill.textContent = `💼 Capital: ₹${Math.round(msg.capital).toLocaleString('en-IN')}`;
+              }
+            }
+          } catch (e) {
+            console.warn('Error parsing paper WS message:', e);
+          }
+        };
+
+        paperWs.onclose = () => {
+          paperWs = null;
+          if (!paperWsReconnectTimer) {
+            paperWsReconnectTimer = setTimeout(connectPaperWebSocket, 2500);
+          }
+        };
+
+        paperWs.onerror = () => {
+          // Handled by onclose reconnect
+        };
+      } catch (err) {
+        console.warn('Paper WS init error:', err);
+      }
+    }
+
     function startPaperAutoRefresh() {
+      connectPaperWebSocket();
       fetchPaperTradingState();
       if (!paperRefreshTimer) {
-        paperRefreshTimer = setInterval(fetchPaperTradingState, 2000);
+        // Low-frequency polling (every 6s) as secondary safety net
+        paperRefreshTimer = setInterval(fetchPaperTradingState, 6000);
       }
     }
 
@@ -7984,6 +8063,10 @@
       if (paperRefreshTimer) {
         clearInterval(paperRefreshTimer);
         paperRefreshTimer = null;
+      }
+      if (paperWs) {
+        try { paperWs.close(); } catch (e) {}
+        paperWs = null;
       }
     }
 

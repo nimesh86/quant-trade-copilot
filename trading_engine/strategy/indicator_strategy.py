@@ -99,7 +99,8 @@ class IndicatorStrategyAdapter(BaseStrategy):
             opt_high=opt_high,
             opt_low=opt_low,
             opt_close=opt_close,
-            opt_volume=opt_vol
+            opt_volume=opt_vol,
+            opt_oi=int(bar.get("opt_oi", 0) or 0)
         )
 
         try:

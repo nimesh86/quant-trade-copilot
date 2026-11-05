@@ -1417,7 +1417,12 @@ async def get_paper_trading_state():
 @app.post("/api/paper/exit")
 async def exit_paper_trading_active_trade():
     """1-click Market Exit for the active paper trade."""
-    return paper_daemon.force_exit()
+    res = paper_daemon.force_exit()
+    try:
+        await broadcast_paper_full_state()
+    except Exception:
+        pass
+    return res
 
 
 @app.get("/api/paper/config")
@@ -1429,7 +1434,12 @@ async def get_paper_trading_config():
 @app.post("/api/paper/config")
 async def update_paper_trading_config(payload: Dict[str, Any] = Body(...)):
     """Updates paper trading parameters from cogwheel modal."""
-    return paper_daemon.update_config(payload)
+    res = paper_daemon.update_config(payload)
+    try:
+        await broadcast_paper_full_state()
+    except Exception:
+        pass
+    return res
 
 
 @app.post("/api/paper/reset")
@@ -1441,7 +1451,64 @@ async def reset_paper_trading_account(payload: Dict[str, Any] = Body(default={})
     paper_daemon.active_trade = None
     paper_daemon.trade_history = []
     paper_daemon.save_state()
+    try:
+        await broadcast_paper_full_state()
+    except Exception:
+        pass
     return paper_daemon.get_full_state()
+
+
+_paper_websockets: List[WebSocket] = []
+
+def register_paper_client(ws: WebSocket):
+    if ws not in _paper_websockets:
+        _paper_websockets.append(ws)
+
+def unregister_paper_client(ws: WebSocket):
+    if ws in _paper_websockets:
+        try:
+            _paper_websockets.remove(ws)
+        except ValueError:
+            pass
+
+async def _broadcast_paper_tick(packet: Dict[str, Any]):
+    if not _paper_websockets:
+        return
+    dead = []
+    for ws in list(_paper_websockets):
+        try:
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.15)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        unregister_paper_client(ws)
+
+async def broadcast_paper_full_state():
+    """Broadcasts full paper trading state packet to all connected /ws/paper clients."""
+    if not _paper_websockets:
+        return
+    packet = {
+        "type": "PAPER_FULL_STATE",
+        "state": paper_daemon.get_full_state()
+    }
+    await _broadcast_paper_tick(packet)
+
+@app.websocket("/ws/paper")
+async def paper_websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    register_paper_client(ws)
+    try:
+        init_state = paper_daemon.get_full_state()
+        await ws.send_json({"type": "PAPER_INIT", "state": init_state})
+        while True:
+            msg = await ws.receive_text()
+            data = json.loads(msg)
+            if data.get("type") == "PING":
+                await ws.send_json({"type": "PONG"})
+    except WebSocketDisconnect:
+        unregister_paper_client(ws)
+    except Exception:
+        unregister_paper_client(ws)
 
 
 
@@ -3222,6 +3289,19 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
         # 2b. Autonomous Background Paper Trade Daemon
         try:
             paper_daemon.on_tick(tick)
+            if _paper_websockets and _server_event_loop and not _server_event_loop.is_closed():
+                paper_packet = {
+                    "type": "PAPER_TICK",
+                    "symbol": symbol,
+                    "ltp": round(ltp, 2),
+                    "indices": list(paper_daemon.indices.values()) if hasattr(paper_daemon, "indices") else [],
+                    "active_trade": paper_daemon.active_trade,
+                    "buyer_strength": round(paper_daemon.buyer_strength, 1),
+                    "seller_strength": round(paper_daemon.seller_strength, 1),
+                    "capital": round(paper_daemon.capital, 2),
+                    "timestamp": ts
+                }
+                asyncio.run_coroutine_threadsafe(_broadcast_paper_tick(paper_packet), _server_event_loop)
         except Exception:
             pass
 
