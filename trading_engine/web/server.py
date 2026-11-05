@@ -3646,7 +3646,7 @@ async def run_broker_subscription_manager():
     """
     print("BrokerSubscriptionManager: Started background multi-index subscription daemon.", flush=True)
     subscribed_symbols = set()
-    core_index_symbols = {"NIFTY", "SENSEX", "BANKNIFTY", "NIFTY-I"}
+    core_index_symbols = {"NIFTY", "SENSEX", "BANKNIFTY", "NIFTY-I", "CRUDEOIL", "NATURALGAS"}
 
     while True:
         try:

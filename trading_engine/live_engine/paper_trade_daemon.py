@@ -159,6 +159,40 @@ class PaperTradeDaemon:
                 "open": 78910.94,
                 "prev_close": 77301.40,
                 "updated_at": datetime.now().isoformat()
+            },
+            "CRUDEOIL": {
+                "name": "Crude Oil (Near Fut)",
+                "symbol": "CRUDEOIL",
+                "segment": "MCX Commodity",
+                "badge": "COMMODITY",
+                "ltp": 8551.00,
+                "atm_strike": 8550,
+                "strike_step": 50,
+                "change_pts": 187.00,
+                "change_pct": 2.24,
+                "trend": "UP",
+                "high": 8594.00,
+                "low": 8191.00,
+                "open": 8219.00,
+                "prev_close": 8364.00,
+                "updated_at": datetime.now().isoformat()
+            },
+            "NATURALGAS": {
+                "name": "Natural Gas (Near Fut)",
+                "symbol": "NATURALGAS",
+                "segment": "MCX Commodity",
+                "badge": "COMMODITY",
+                "ltp": 282.40,
+                "atm_strike": 280,
+                "strike_step": 5,
+                "change_pts": 2.35,
+                "change_pct": 0.84,
+                "trend": "UP",
+                "high": 289.10,
+                "low": 277.50,
+                "open": 280.05,
+                "prev_close": 280.05,
+                "updated_at": datetime.now().isoformat()
             }
         }
 
@@ -356,6 +390,10 @@ class PaperTradeDaemon:
             canon = "BANKNIFTY"
         elif symbol in ("BSESEN", "BSE:SENSEX", "BSE SENSEX"):
             canon = "SENSEX"
+        elif symbol in ("CRUDEOIL", "CRUDE", "MCX:CRUDEOIL") or "573422" in symbol:
+            canon = "CRUDEOIL"
+        elif symbol in ("NATURALGAS", "NATGAS", "MCX:NATURALGAS") or "574319" in symbol:
+            canon = "NATURALGAS"
 
         if canon == "NIFTY":
             self.current_spot = ltp
@@ -408,7 +446,7 @@ class PaperTradeDaemon:
             self._evaluate_active_position_tick(symbol, ltp, now)
 
         # 4. 1-Minute Candle Accumulation
-        if canon in ("NIFTY", "NIFTY-I"):
+        if canon in ("NIFTY", "NIFTY-I", "CRUDEOIL", "NATURALGAS"):
             self._accumulate_minute_bar(canon, ltp, int(tick.get("volume", 0) or 0), now)
 
     def _update_strength_meter(self, tick: Dict[str, Any], ltp: float):
@@ -445,6 +483,40 @@ class PaperTradeDaemon:
         if not pos:
             return
         contract_sym = pos.get("contract", "")
+        pos_sym = pos.get("symbol", "")
+
+        # MCX Commodity Position Evaluation
+        if pos.get("segment") == "MCX Commodity" or pos_sym in ("CRUDEOIL", "NATURALGAS"):
+            if symbol == contract_sym or symbol == pos_sym:
+                trend = pos.get("trend", "BULLISH")
+                pts = (ltp - pos["entry_price"]) if trend in ("BULLISH", "LONG", "CALL") else (pos["entry_price"] - ltp)
+                pos["current_price"] = round(ltp, 2)
+                pos["points_gained"] = round(pts, 2)
+                pos["points"] = round(pts, 2)
+                pos["unrealized_pnl"] = round(pts * pos["units"], 2)
+                pos["buyer_strength"] = self.buyer_strength
+                pos["seller_strength"] = self.seller_strength
+
+                # Check Stop Loss / Target for Long (BULLISH)
+                if trend in ("BULLISH", "LONG", "CALL"):
+                    if ltp <= pos["sl"]:
+                        self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
+                        return
+                    if ltp >= pos["target"]:
+                        self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
+                        return
+                else:  # Short (BEARISH)
+                    if ltp >= pos["sl"]:
+                        self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
+                        return
+                    if ltp <= pos["target"]:
+                        self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
+                        return
+
+                # Commodity Auto Square-Off at 23:25 IST
+                if now.hour == 23 and now.minute >= 25:
+                    self._close_active_trade(reason="23:25 EOD Square-Off", exit_price=ltp, exit_time=now)
+            return
 
         # Option LTP update:
         # 1. Exact match if direct contract tick arrives from broker WebSocket
@@ -519,11 +591,28 @@ class PaperTradeDaemon:
             self.bar_history[symbol].pop(0)
 
         # Log candle close for operational visibility
-        if symbol in ("NIFTY", "NIFTY 50"):
+        if symbol in ("NIFTY", "NIFTY 50", "CRUDEOIL", "NATURALGAS"):
             logger.info(f"📊 [1-MIN BAR CLOSED] {symbol} @ {now.strftime('%H:%M:%S')} | O:{bar['open']} H:{bar['high']} L:{bar['low']} C:{bar['close']} | History: {len(self.bar_history[symbol])} bars")
 
         # Only evaluate entries if no active position
         if self.active_trade is not None:
+            return
+
+        # Handle Commodity Entry Evaluation
+        if symbol in ("CRUDEOIL", "NATURALGAS"):
+            # Commodity Market Hours Gating: 09:00 to 23:15 IST
+            if now.hour > 23 or (now.hour == 23 and now.minute >= 15):
+                return
+            if now.hour < 9:
+                return
+
+            # Max Trades Per Day Gating
+            today_str = now.strftime("%Y-%m-%d")
+            today_trades = [t for t in self.trade_history if t.get("date") == today_str]
+            if self.max_trades_per_day > 0 and len(today_trades) >= self.max_trades_per_day:
+                return
+
+            self._evaluate_commodity_strategy_signal(symbol, now)
             return
 
         # Only evaluate strategy entries on primary benchmark candle close (avoids duplicate signals on futures candle close)
@@ -626,6 +715,144 @@ class PaperTradeDaemon:
                 now=now
             )
 
+    def _evaluate_commodity_strategy_signal(self, symbol: str, now: datetime):
+        """Evaluates BSS Pro Breakout and Momentum setups for MCX Commodities."""
+        bars = self.bar_history.get(symbol) or []
+        if len(bars) < 6:
+            return
+
+        df = pd.DataFrame(bars)
+        closes = df["close"]
+        highs = df["high"]
+        lows = df["low"]
+        opens = df["open"]
+
+        last_c = closes.iloc[-1]
+        last_o = opens.iloc[-1]
+        prev_c = closes.iloc[-2]
+        rolling_low = lows.iloc[-6:-1].min()
+        rolling_high = highs.iloc[-6:-1].max()
+        sma = closes.rolling(min(len(closes), 10)).mean().iloc[-1]
+
+        signal_dir = None
+        setup_name = None
+
+        # Setup 1: Bullish Momentum Breakout
+        if last_c > sma and last_c > rolling_high and last_c > last_o:
+            signal_dir = "CALL"
+            setup_name = f"MCX {symbol} Momentum Breakout (LONG)"
+        # Setup 2: Bearish Momentum Breakdown
+        elif last_c < sma and last_c < rolling_low and last_c < last_o:
+            signal_dir = "PUT"
+            setup_name = f"MCX {symbol} Momentum Breakdown (SHORT)"
+        # Setup 3: Mean Reversion / Trap
+        elif (lows.iloc[-1] < rolling_low) and (last_c > last_o) and (last_c > prev_c):
+            signal_dir = "CALL"
+            setup_name = f"MCX {symbol} Reversal (LONG)"
+        elif (highs.iloc[-1] > rolling_high) and (last_c < last_o) and (last_c < prev_c):
+            signal_dir = "PUT"
+            setup_name = f"MCX {symbol} Reversal (SHORT)"
+
+        if signal_dir:
+            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Price: {last_c:.2f}")
+            self._execute_commodity_paper_entry(
+                symbol=symbol,
+                direction=signal_dir,
+                strategy_name=setup_name,
+                probability="72%",
+                current_price=last_c,
+                now=now
+            )
+
+    def _execute_commodity_paper_entry(
+        self,
+        symbol: str,
+        direction: str,
+        strategy_name: str,
+        probability: str,
+        current_price: float,
+        now: datetime
+    ):
+        """Constructs near-month MCX commodity future paper trade with margin reservation."""
+        lot_size = 100 if symbol == "CRUDEOIL" else (1250 if symbol == "NATURALGAS" else 100)
+        lots = 1
+        units = lots * lot_size
+
+        required_margin = min(self.available_capital, 15000.0) if symbol == "CRUDEOIL" else min(self.available_capital, 10000.0)
+        if required_margin > self.available_capital:
+            logger.warning(
+                f"❌ [COMMODITY PAPER TRADE ABORTED] Insufficient capital. "
+                f"Required: ₹{required_margin:,.2f}, Available: ₹{self.available_capital:,.2f}"
+            )
+            return
+
+        self.blocked_capital = required_margin
+        self.available_capital = round(self.capital - self.blocked_capital, 2)
+
+        if symbol == "CRUDEOIL":
+            sl_pts = 20.0
+            tgt_pts = 40.0
+        elif symbol == "NATURALGAS":
+            sl_pts = 2.50
+            tgt_pts = 5.00
+        else:
+            sl_pts = round(current_price * 0.005, 2)
+            tgt_pts = round(current_price * 0.010, 2)
+
+        if direction == "CALL":
+            target_px = round(current_price + tgt_pts, 2)
+            sl_px = round(current_price - sl_pts, 2)
+            trend_str = "BULLISH"
+        else:
+            target_px = round(current_price - tgt_pts, 2)
+            sl_px = round(current_price + sl_pts, 2)
+            trend_str = "BEARISH"
+
+        contract_sym = f"{symbol} Near Fut"
+        trade_id = f"PTR_MCX_{now.strftime('%Y%m%d_%H%M%S')}"
+
+        self.active_trade = {
+            "id": trade_id,
+            "trade_id": trade_id,
+            "entry_time": now.strftime("%H:%M:%S"),
+            "entry_datetime": now.isoformat(),
+            "date": now.strftime("%Y-%m-%d"),
+            "day": now.strftime("%A"),
+            "symbol": symbol,
+            "contract": contract_sym,
+            "strike": int(round(current_price)),
+            "option_type": "FUT",
+            "trend": trend_str,
+            "entry_price": current_price,
+            "entry_rate": current_price,
+            "current_price": current_price,
+            "spot_at_entry": current_price,
+            "benchmark_symbol": symbol,
+            "lots": lots,
+            "units": units,
+            "quantity": units,
+            "blocked_margin": required_margin,
+            "target": target_px,
+            "sl": sl_px,
+            "stop_loss": sl_px,
+            "strategy": strategy_name,
+            "indicator": strategy_name,
+            "probability": probability,
+            "unrealized_pnl": 0.0,
+            "points_gained": 0.0,
+            "points": 0.0,
+            "buyer_strength": self.buyer_strength,
+            "seller_strength": self.seller_strength,
+            "segment": "MCX Commodity"
+        }
+
+        logger.info(
+            f"⚡ [COMMODITY PAPER TRADE OPENED] {contract_sym} ({trend_str}) @ ₹{current_price:.2f} | "
+            f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_margin:,.2f} | "
+            f"Free Capital: ₹{self.available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+        )
+        self.save_state()
+
     def _open_paper_trade(
         self,
         direction: str,
@@ -718,7 +945,10 @@ class PaperTradeDaemon:
             return
 
         pos = self.active_trade
-        pts = round(exit_price - pos["entry_price"], 2)
+        if pos.get("trend") in ("BEARISH", "SHORT", "PUT") and pos.get("segment") == "MCX Commodity":
+            pts = round(pos["entry_price"] - exit_price, 2)
+        else:
+            pts = round(exit_price - pos["entry_price"], 2)
         gross = round(pts * pos["units"], 2)
 
         # Statutory charges (brokerage + STT + turnover + GST)

@@ -355,6 +355,38 @@ class BreezeBrokerAdapter:
                 logger.info(f"BreezeBrokerAdapter: Subscribed NIFTY-I near-month future {fut_name} (token={quotes_tok})")
                 return True
 
+        if symbol in ("CRUDEOIL", "CRUDE", "MCX:CRUDEOIL"):
+            quotes_tok = "6.1!573422"
+            depth_tok = "6.2!573422"
+            self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+            self._token_to_symbol[quotes_tok] = "CRUDEOIL"
+            self._token_to_symbol[depth_tok] = "CRUDEOIL"
+            self._token_to_symbol["573422"] = "CRUDEOIL"
+            self._token_to_symbol["6.1!573422"] = "CRUDEOIL"
+            self._token_to_symbol["6.2!573422"] = "CRUDEOIL"
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+                breeze.sio_rate_refresh_handler.watch(depth_tok)
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed CRUDEOIL near future feed (token={quotes_tok})")
+            return True
+
+        if symbol in ("NATURALGAS", "NATGAS", "MCX:NATURALGAS"):
+            quotes_tok = "6.1!574319"
+            depth_tok = "6.2!574319"
+            self._symbol_to_tokens[symbol] = (quotes_tok, depth_tok)
+            self._token_to_symbol[quotes_tok] = "NATURALGAS"
+            self._token_to_symbol[depth_tok] = "NATURALGAS"
+            self._token_to_symbol["574319"] = "NATURALGAS"
+            self._token_to_symbol["6.1!574319"] = "NATURALGAS"
+            self._token_to_symbol["6.2!574319"] = "NATURALGAS"
+            if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
+                breeze.sio_rate_refresh_handler.watch(quotes_tok)
+                breeze.sio_rate_refresh_handler.watch(depth_tok)
+            self._subscribed_symbols.add(symbol)
+            logger.info(f"BreezeBrokerAdapter: Subscribed NATURALGAS near future feed (token={quotes_tok})")
+            return True
+
         params = to_breeze_params(symbol)
         if not params:
             logger.warning(f"BreezeBrokerAdapter: Could not parse symbol {symbol} for subscription.")
@@ -477,6 +509,18 @@ class BreezeBrokerAdapter:
                 canonical_symbol = "NIFTY"
             elif sym_token in ("NIFTY BANK", "BANKNIFTY", "4.1!NIFTY BANK"):
                 canonical_symbol = "BANKNIFTY"
+            elif sym_token.startswith("6.") or data.get("exchange") == "Commodity":
+                stk_name = str(data.get("stock_name") or data.get("stock_code") or "").lower()
+                if "crude" in stk_name or "573422" in sym_token:
+                    canonical_symbol = "CRUDEOIL"
+                elif "natgas" in stk_name or "natural" in stk_name or "574319" in sym_token:
+                    canonical_symbol = "NATURALGAS"
+                elif "gold" in stk_name:
+                    canonical_symbol = "GOLDM"
+                elif "silver" in stk_name:
+                    canonical_symbol = "SILVERM"
+                else:
+                    canonical_symbol = stk_name.upper() if stk_name else "COMMODITY"
             else:
                 stk_name = data.get("stock_name") or data.get("stock_code")
                 prod = str(data.get("product_type") or "").lower()
@@ -496,21 +540,66 @@ class BreezeBrokerAdapter:
             return
 
         # 2. Extract price & depth
-        ltp = float(data.get("last") or data.get("last_trade_price") or data.get("close") or 0.0)
+        is_commodity = (data.get("exchange") == "Commodity" or sym_token.startswith("6.") or canonical_symbol in ("CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM"))
+        raw_last = data.get("last")
+        raw_change = data.get("change")
+
+        if is_commodity:
+            # In Breeze MCX Commodity socket, price is in change or bPrice in paise
+            if raw_change and str(raw_change) not in ("0", "\x00", "None"):
+                ltp = float(raw_change) / 100.0
+            elif raw_last and str(raw_last) not in ("0", "\x00", "None"):
+                ltp = float(raw_last)
+                if ltp > 50000:
+                    ltp = ltp / 100.0
+            else:
+                ltp = float(data.get("bPrice") or data.get("sPrice") or 0.0)
+                if ltp > 50000:
+                    ltp = ltp / 100.0
+        else:
+            ltp = float(raw_last or data.get("last_trade_price") or data.get("close") or 0.0)
+
         if ltp <= 0:
             return
 
         vol = int(data.get("ttq") or data.get("total_traded_volume") or data.get("volume") or 0)
         oi = int(data.get("OI") or data.get("open_interest_value") or data.get("open_interest") or 0)
+        
         high = float(data.get("high") or ltp)
+        if is_commodity and high > 50000:
+            high = high / 100.0
+        if is_commodity and high < ltp:
+            high = ltp
+
         low = float(data.get("low") or ltp)
+        if is_commodity and low > 50000:
+            low = low / 100.0
+        if is_commodity and (low <= 0 or low > ltp):
+            low = ltp
+
         open_px = float(data.get("open") or ltp)
+        if is_commodity and open_px > 50000:
+            open_px = open_px / 100.0
+        if is_commodity and open_px <= 0:
+            open_px = ltp
+
         close_px = float(data.get("close") or ltp)
+        if is_commodity and close_px > 50000:
+            close_px = close_px / 100.0
+        if is_commodity and close_px <= 0:
+            close_px = ltp
+
         ltt = data.get("ltt") or data.get("last_traded_time") or datetime.now().isoformat()
         buy_qty = int(data.get("totalBuyQt") or data.get("bQty") or 0)
         sell_qty = int(data.get("totalSellQ") or data.get("sQty") or 0)
+        
         bid_price = float(data.get("bPrice") or ltp)
+        if is_commodity and bid_price > 50000:
+            bid_price = bid_price / 100.0
+
         ask_price = float(data.get("sPrice") or ltp)
+        if is_commodity and ask_price > 50000:
+            ask_price = ask_price / 100.0
 
         tick_packet = {
             "symbol": canonical_symbol,

@@ -3432,6 +3432,11 @@
       color: #38bdf8;
       border: 1px solid rgba(56, 189, 248, 0.3);
     }
+    .paper-index-badge.comm, .live-index-badge.comm {
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
     .paper-index-main, .live-index-main {
       display: flex;
       justify-content: space-between;
@@ -7996,7 +8001,7 @@
               <div class="paper-index-name">
                 <span>${idx.name || idx.symbol}</span>
               </div>
-              <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
+              <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : (idx.badge === 'COMMODITY' ? 'comm' : 'live')}">${idx.badge || 'SPOT'}</span>
             </div>
             <div class="paper-index-main">
               <div class="paper-index-price-wrap">
