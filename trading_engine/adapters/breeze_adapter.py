@@ -20,6 +20,24 @@ logger = logging.getLogger("breeze_adapter")
 _breeze_client = None
 
 
+def _safe_float(val, fallback: float = 0.0) -> float:
+    if val is None or val in ("", "\x00", "None"):
+        return fallback
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return fallback
+
+
+def _safe_int(val, fallback: int = 0) -> int:
+    if val is None or val in ("", "\x00", "None"):
+        return fallback
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return fallback
+
+
 class BreezeBrokerAdapter:
     """
     Adapter encapsulating ICICI Direct BreezeConnect SDK.
@@ -259,6 +277,29 @@ class BreezeBrokerAdapter:
             breeze.interval = ""
             breeze.on_ticks = self._handle_incoming_breeze_tick
 
+            # Resilient parse_data wrapper to catch SDK internal timestamp/float errors on commodities
+            orig_parse = breeze.parse_data
+            def resilient_parse(raw):
+                try:
+                    return orig_parse(raw)
+                except Exception:
+                    if isinstance(raw, list) and len(raw) > 5:
+                        sym = str(raw[0])
+                        return {
+                            "symbol": sym,
+                            "last": raw[5] if len(raw) > 5 else 0,
+                            "change": raw[5] if len(raw) > 5 else 0,
+                            "open": raw[13] if len(raw) > 13 else 0,
+                            "high": raw[14] if len(raw) > 14 else 0,
+                            "low": raw[15] if len(raw) > 15 else 0,
+                            "close": raw[12] if len(raw) > 12 else 0,
+                            "volume": raw[4] if len(raw) > 4 else 0,
+                            "exchange": "Commodity" if sym.startswith("6.") else "NSE",
+                            "quotes": "Quotes Data"
+                        }
+                    return {}
+            breeze.parse_data = resilient_parse
+
             if not self.ws_connected:
                 logger.info("BreezeBrokerAdapter: Initializing ws_connect() streaming socket...")
                 breeze.ws_connect()
@@ -366,7 +407,6 @@ class BreezeBrokerAdapter:
             self._token_to_symbol["6.2!573422"] = "CRUDEOIL"
             if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
                 breeze.sio_rate_refresh_handler.watch(quotes_tok)
-                breeze.sio_rate_refresh_handler.watch(depth_tok)
             self._subscribed_symbols.add(symbol)
             logger.info(f"BreezeBrokerAdapter: Subscribed CRUDEOIL near future feed (token={quotes_tok})")
             return True
@@ -382,7 +422,6 @@ class BreezeBrokerAdapter:
             self._token_to_symbol["6.2!574319"] = "NATURALGAS"
             if hasattr(breeze, "sio_rate_refresh_handler") and breeze.sio_rate_refresh_handler:
                 breeze.sio_rate_refresh_handler.watch(quotes_tok)
-                breeze.sio_rate_refresh_handler.watch(depth_tok)
             self._subscribed_symbols.add(symbol)
             logger.info(f"BreezeBrokerAdapter: Subscribed NATURALGAS near future feed (token={quotes_tok})")
             return True
@@ -547,57 +586,57 @@ class BreezeBrokerAdapter:
         if is_commodity:
             # In Breeze MCX Commodity socket, price is in change or bPrice in paise
             if raw_change and str(raw_change) not in ("0", "\x00", "None"):
-                ltp = float(raw_change) / 100.0
+                ltp = _safe_float(raw_change) / 100.0
             elif raw_last and str(raw_last) not in ("0", "\x00", "None"):
-                ltp = float(raw_last)
+                ltp = _safe_float(raw_last)
                 if ltp > 50000:
                     ltp = ltp / 100.0
             else:
-                ltp = float(data.get("bPrice") or data.get("sPrice") or 0.0)
+                ltp = _safe_float(data.get("bPrice") or data.get("sPrice"))
                 if ltp > 50000:
                     ltp = ltp / 100.0
         else:
-            ltp = float(raw_last or data.get("last_trade_price") or data.get("close") or 0.0)
+            ltp = _safe_float(raw_last or data.get("last_trade_price") or data.get("close"))
 
         if ltp <= 0:
             return
 
-        vol = int(data.get("ttq") or data.get("total_traded_volume") or data.get("volume") or 0)
-        oi = int(data.get("OI") or data.get("open_interest_value") or data.get("open_interest") or 0)
+        vol = _safe_int(data.get("ttq") or data.get("total_traded_volume") or data.get("volume"))
+        oi = _safe_int(data.get("OI") or data.get("open_interest_value") or data.get("open_interest"))
         
-        high = float(data.get("high") or ltp)
+        high = _safe_float(data.get("high"), ltp)
         if is_commodity and high > 50000:
             high = high / 100.0
         if is_commodity and high < ltp:
             high = ltp
 
-        low = float(data.get("low") or ltp)
+        low = _safe_float(data.get("low"), ltp)
         if is_commodity and low > 50000:
             low = low / 100.0
         if is_commodity and (low <= 0 or low > ltp):
             low = ltp
 
-        open_px = float(data.get("open") or ltp)
+        open_px = _safe_float(data.get("open"), ltp)
         if is_commodity and open_px > 50000:
             open_px = open_px / 100.0
         if is_commodity and open_px <= 0:
             open_px = ltp
 
-        close_px = float(data.get("close") or ltp)
+        close_px = _safe_float(data.get("close"), ltp)
         if is_commodity and close_px > 50000:
             close_px = close_px / 100.0
         if is_commodity and close_px <= 0:
             close_px = ltp
 
         ltt = data.get("ltt") or data.get("last_traded_time") or datetime.now().isoformat()
-        buy_qty = int(data.get("totalBuyQt") or data.get("bQty") or 0)
-        sell_qty = int(data.get("totalSellQ") or data.get("sQty") or 0)
+        buy_qty = _safe_int(data.get("totalBuyQt") or data.get("bQty"))
+        sell_qty = _safe_int(data.get("totalSellQ") or data.get("sQty"))
         
-        bid_price = float(data.get("bPrice") or ltp)
+        bid_price = _safe_float(data.get("bPrice"), ltp)
         if is_commodity and bid_price > 50000:
             bid_price = bid_price / 100.0
 
-        ask_price = float(data.get("sPrice") or ltp)
+        ask_price = _safe_float(data.get("sPrice"), ltp)
         if is_commodity and ask_price > 50000:
             ask_price = ask_price / 100.0
 
