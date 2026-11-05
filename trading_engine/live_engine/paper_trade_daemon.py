@@ -67,6 +67,8 @@ class PaperTradeDaemon:
         self.strategy = "dual_xgboost_macro"
         self.initial_capital = 20000.0
         self.capital = 20000.0
+        self.blocked_capital = 0.0
+        self.available_capital = 20000.0
         self.symbol = "NIFTY"
         self.max_trades_per_day = 4
         self.blocked_time_slots = [["09:15", "10:05"]]
@@ -224,6 +226,8 @@ class PaperTradeDaemon:
                     self.strategy = data.get("strategy", self.strategy)
                     self.capital = float(data.get("capital", self.capital))
                     self.initial_capital = float(data.get("initial_capital", self.initial_capital))
+                    self.blocked_capital = float(data.get("blocked_capital", 0.0))
+                    self.available_capital = float(data.get("available_capital", self.capital - self.blocked_capital))
                     self.max_trades_per_day = int(data.get("max_trades_per_day", self.max_trades_per_day))
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
                     self.active_trade = data.get("active_trade")
@@ -257,12 +261,26 @@ class PaperTradeDaemon:
             except Exception as e:
                 logger.error(f"PaperTradeDaemon: Error loading state: {e}")
 
+    def reset_state(self, capital: float = 20000.0):
+        """Clears paper trading ledger and resets capital."""
+        self.initial_capital = float(capital)
+        self.capital = float(capital)
+        self.blocked_capital = 0.0
+        self.available_capital = float(capital)
+        self.active_trade = None
+        self.trade_history = []
+        self.save_state()
+        logger.info(f"🔄 [PAPER TRADE RESET] Ledger cleared. Capital reset to ₹{capital:,.2f}")
+
     def save_state(self):
         """Persists paper trading state to disk."""
         try:
             payload = {
                 "strategy": self.strategy,
                 "capital": round(self.capital, 2),
+                "total_capital": round(self.capital, 2),
+                "blocked_capital": round(self.blocked_capital, 2),
+                "available_capital": round(self.available_capital, 2),
                 "initial_capital": round(self.initial_capital, 2),
                 "max_trades_per_day": self.max_trades_per_day,
                 "blocked_time_slots": self.blocked_time_slots,
@@ -300,6 +318,9 @@ class PaperTradeDaemon:
         return {
             "strategy": self.strategy,
             "capital": self.capital,
+            "total_capital": self.capital,
+            "blocked_capital": self.blocked_capital,
+            "available_capital": self.available_capital,
             "initial_capital": self.initial_capital,
             "max_trades_per_day": self.max_trades_per_day,
             "blocked_time_slots": self.blocked_time_slots,
@@ -632,6 +653,19 @@ class PaperTradeDaemon:
         lots = max(1, min(100, int((self.capital * self.risk_pct) // risk_per_lot)))
         units = lots * contract.lot_size
 
+        # Institutional Capital Reservation & Margin Blocking
+        required_capital = round(est_prem * units, 2)
+        if required_capital > self.available_capital:
+            logger.warning(
+                f"❌ [PAPER TRADE ABORTED] Insufficient available capital. "
+                f"Required: ₹{required_capital:,.2f}, Available: ₹{self.available_capital:,.2f}"
+            )
+            return
+
+        # Deduct / block margin immediately upon trade decision
+        self.blocked_capital = required_capital
+        self.available_capital = round(self.capital - self.blocked_capital, 2)
+
         target_px = round(est_prem * (1.0 + self.tgt_pct), 2)
         sl_px = round(est_prem * (1.0 - self.sl_pct), 2)
 
@@ -656,6 +690,7 @@ class PaperTradeDaemon:
             "lots": lots,
             "units": units,
             "quantity": units,
+            "blocked_margin": required_capital,
             "target": target_px,
             "sl": sl_px,
             "stop_loss": sl_px,
@@ -670,7 +705,11 @@ class PaperTradeDaemon:
             "segment": "NIFTY"
         }
 
-        logger.info(f"⚡ [PAPER TRADE OPENED] {contract.symbol} ({self.active_trade['trend']}) @ ₹{est_prem:.2f} | Lots: {lots} ({units} units) | TGT: ₹{target_px} | SL: ₹{sl_px}")
+        logger.info(
+            f"⚡ [PAPER TRADE OPENED] {contract.symbol} ({self.active_trade['trend']}) @ ₹{est_prem:.2f} | "
+            f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_capital:,.2f} | "
+            f"Free Capital: ₹{self.available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+        )
         self.save_state()
 
     def _close_active_trade(self, reason: str, exit_price: float, exit_time: datetime):
@@ -722,8 +761,13 @@ class PaperTradeDaemon:
         }
 
         self.trade_history.append(closed_rec)
+
+        # Capital Settlement: Release blocked capital and add Net Realized P&L
+        self.blocked_capital = 0.0
         self.capital = round(self.capital + net, 2)
+        self.available_capital = self.capital
         self.active_trade = None
+
         self.save_state()
         self._record_to_db(closed_rec)
         logger.info(f"✅ [PAPER TRADE CLOSED] {closed_rec['contract']} | Net PnL: {net:+,.2f} ({pts:+.2f} pts) | Reason: {reason} | Capital: ₹{self.capital:,.2f}")
@@ -856,6 +900,9 @@ class PaperTradeDaemon:
             "avg_win": avg_win,
             "avg_loss": avg_loss,
             "capital": round(self.capital, 2),
+            "total_capital": round(self.capital, 2),
+            "blocked_capital": round(self.blocked_capital, 2),
+            "available_capital": round(self.available_capital, 2),
             "initial_capital": round(self.initial_capital, 2),
             "today_net": round(today_net, 2),
             "today_trades_count": len(today_trades),

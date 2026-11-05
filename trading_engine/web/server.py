@@ -107,6 +107,17 @@ try:
 except ImportError:
     from live_engine.paper_trade_daemon import paper_daemon
 
+try:
+    from trading_engine.live_engine.live_trade_daemon import live_trade_daemon
+except ImportError:
+    from live_engine.live_trade_daemon import live_trade_daemon
+
+from trading_engine.core.auth_2fa import (
+    verify_credentials, create_session, validate_session,
+    revoke_session, extract_session_token, get_or_create_totp_secret,
+    get_totp_uri, generate_qr_svg, set_master_pin, SESSION_TTL_SECONDS
+)
+
 app = FastAPI(title="AI Trader Autonomous Engine", version="2.5.0")
 
 app.add_middleware(
@@ -125,6 +136,38 @@ async def add_no_cache_headers(request: Request, call_next):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
     return response
+
+
+@app.middleware("http")
+async def auth_2fa_guard_middleware(request: Request, call_next):
+    """
+    Zero-Trust 2FA Security Guard.
+    Guards all sensitive endpoints (/api/*, /contract, etc.) behind 2FA session verification.
+    """
+    path = request.url.path
+
+    # Whitelisted public assets & auth routes
+    if (
+        path in ("/", "/index.html", "/favicon.ico")
+        or path.startswith("/static/")
+        or path.startswith("/api/auth/")
+        or path.startswith("/extension/")
+        or path == "/api/vault/breeze-callback"
+    ):
+        return await call_next(request)
+
+    # Validate 2FA session for all other routes
+    token = extract_session_token(request)
+    if not validate_session(token):
+        if path.startswith("/api/"):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized. 2FA Authentication Required.", "authenticated": False}
+            )
+        else:
+            return RedirectResponse(url="/", status_code=302)
+
+    return await call_next(request)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 PAPER_STATE_FILE = Path(__file__).resolve().parent / "paper_trades_state.json"
@@ -1446,11 +1489,7 @@ async def update_paper_trading_config(payload: Dict[str, Any] = Body(...)):
 async def reset_paper_trading_account(payload: Dict[str, Any] = Body(default={})):
     """Resets paper account balance to initial capital and clears logs."""
     cap = float(payload.get("capital", 20000.0))
-    paper_daemon.capital = cap
-    paper_daemon.initial_capital = cap
-    paper_daemon.active_trade = None
-    paper_daemon.trade_history = []
-    paper_daemon.save_state()
+    paper_daemon.reset_state(cap)
     try:
         await broadcast_paper_full_state()
     except Exception:
@@ -1495,6 +1534,10 @@ async def broadcast_paper_full_state():
 
 @app.websocket("/ws/paper")
 async def paper_websocket_endpoint(ws: WebSocket):
+    token = ws.cookies.get("quant_session") or ws.query_params.get("token")
+    if not validate_session(token):
+        await ws.close(code=4401, reason="2FA Required")
+        return
     await ws.accept()
     register_paper_client(ws)
     try:
@@ -1505,6 +1548,125 @@ async def paper_websocket_endpoint(ws: WebSocket):
             data = json.loads(msg)
             if data.get("type") == "PING":
                 await ws.send_json({"type": "PONG"})
+    except WebSocketDisconnect:
+        unregister_paper_client(ws)
+    except Exception:
+        unregister_paper_client(ws)
+
+
+# ── Live Trading Autonomous Endpoints ─────────────────────────────────────
+
+@app.get("/api/live/state")
+async def get_live_trading_state():
+    """Returns current active live trade, summary, arming status, and subtabs."""
+    return live_trade_daemon.get_state()
+
+
+@app.post("/api/live/toggle")
+async def toggle_live_trading_armed(payload: Dict[str, Any] = Body(default={})):
+    """Toggles or sets the master live trading safety arming switch."""
+    if "armed" in payload:
+        armed = live_trade_daemon.set_armed(bool(payload["armed"]))
+    else:
+        armed = live_trade_daemon.toggle_armed()
+    try:
+        await broadcast_live_full_state()
+    except Exception:
+        pass
+    return {
+        "status": "ok",
+        "is_armed": armed,
+        "message": "Live Trading is ARMED (Active)" if armed else "Live Trading is DISARMED (Standby)",
+        "state": live_trade_daemon.get_state()
+    }
+
+
+@app.post("/api/live/exit")
+async def exit_live_trading_active_trade():
+    """1-click Market Exit for the active live trade."""
+    res = live_trade_daemon.force_exit_active_trade()
+    try:
+        await broadcast_live_full_state()
+    except Exception:
+        pass
+    return res
+
+
+@app.post("/api/live/reset")
+async def reset_live_trading_account(payload: Dict[str, Any] = Body(default={})):
+    """Resets live account balance to initial capital and clears logs."""
+    cap = float(payload.get("capital", 20000.0))
+    live_trade_daemon.reset_state(cap)
+    try:
+        await broadcast_live_full_state()
+    except Exception:
+        pass
+    return live_trade_daemon.get_state()
+
+
+_live_websockets: List[WebSocket] = []
+
+def register_live_client(ws: WebSocket):
+    if ws not in _live_websockets:
+        _live_websockets.append(ws)
+
+def unregister_live_client(ws: WebSocket):
+    if ws in _live_websockets:
+        try:
+            _live_websockets.remove(ws)
+        except ValueError:
+            pass
+
+async def _broadcast_live_tick(packet: Dict[str, Any]):
+    if not _live_websockets:
+        return
+    dead = []
+    for ws in list(_live_websockets):
+        try:
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.15)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        unregister_live_client(ws)
+
+async def broadcast_live_full_state():
+    """Broadcasts full live trading state packet to all connected /ws/live clients."""
+    if not _live_websockets:
+        return
+    packet = {
+        "type": "LIVE_FULL_STATE",
+        "state": live_trade_daemon.get_state(),
+        "timestamp": datetime.now().isoformat()
+    }
+    dead = []
+    for ws in list(_live_websockets):
+        try:
+            await asyncio.wait_for(ws.send_json(packet), timeout=0.25)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        unregister_live_client(ws)
+
+@app.websocket("/ws/live")
+async def live_websocket_endpoint(ws: WebSocket):
+    token = ws.cookies.get("quant_session") or ws.query_params.get("token")
+    if not validate_session(token):
+        await ws.close(code=4401, reason="2FA Required")
+        return
+    await ws.accept()
+    register_live_client(ws)
+    try:
+        init_state = live_trade_daemon.get_state()
+        await ws.send_json({"type": "LIVE_INIT", "state": init_state})
+        while True:
+            msg = await ws.receive_text()
+            data = json.loads(msg)
+            if data.get("type") == "PING":
+                await ws.send_json({"type": "PONG"})
+    except WebSocketDisconnect:
+        unregister_live_client(ws)
+    except Exception:
+        unregister_live_client(ws)
     except WebSocketDisconnect:
         unregister_paper_client(ws)
     except Exception:
@@ -2405,12 +2567,23 @@ async def on_shutdown():
 
 
 
-# ── Static UI Mounting ────────────────────────────────────────────────────────
+# ── Static UI Mounting & 2FA Gate ──────────────────────────────────────────────
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/")
-async def serve_index():
+@app.get("/index.html")
+async def serve_index(request: Request):
+    token = extract_session_token(request)
+    if not validate_session(token):
+        return FileResponse(
+            STATIC_DIR / "auth_login.html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
     return FileResponse(
         STATIC_DIR / "index.html",
         headers={
@@ -2419,6 +2592,71 @@ async def serve_index():
             "Expires": "0",
         }
     )
+
+
+# ── 2FA Authentication Endpoints ──────────────────────────────────────────
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request, payload: Dict[str, Any] = Body(...)):
+    pin = payload.get("pin", "")
+    code = payload.get("code") or payload.get("totp_code") or ""
+    ok, msg = verify_credentials(pin, code)
+    if not ok:
+        return JSONResponse(status_code=401, content={"status": "error", "error": msg})
+
+    user_agent = request.headers.get("user-agent", "")
+    client_ip = request.client.host if request.client else ""
+    token = create_session(user_agent=user_agent, client_ip=client_ip)
+
+    response = JSONResponse(content={"status": "ok", "token": token, "message": "2FA Authenticated"})
+    response.set_cookie(
+        key="quant_session",
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False
+    )
+    return response
+
+
+@app.get("/api/auth/setup")
+async def api_auth_setup():
+    secret = get_or_create_totp_secret()
+    uri = get_totp_uri(secret)
+    qr_svg = generate_qr_svg(secret)
+    return {
+        "secret": secret,
+        "uri": uri,
+        "qr_svg": qr_svg
+    }
+
+
+@app.get("/api/auth/status")
+async def api_auth_status(request: Request):
+    token = extract_session_token(request)
+    return {"authenticated": validate_session(token)}
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout(request: Request):
+    token = extract_session_token(request)
+    revoke_session(token)
+    response = JSONResponse(content={"status": "ok", "message": "Logged out"})
+    response.delete_cookie(key="quant_session")
+    return response
+
+
+@app.post("/api/auth/change-pin")
+async def api_auth_change_pin(request: Request, payload: Dict[str, Any] = Body(...)):
+    token = extract_session_token(request)
+    if not validate_session(token):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    new_pin = str(payload.get("new_pin", "")).strip()
+    if len(new_pin) < 4:
+        raise HTTPException(status_code=400, detail="New PIN must be at least 4 characters")
+    set_master_pin(new_pin)
+    return {"status": "ok", "message": "Master PIN updated successfully"}
 
 @app.get("/contract")
 @app.get("/contract.html")
@@ -3299,9 +3537,33 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
                     "buyer_strength": round(paper_daemon.buyer_strength, 1),
                     "seller_strength": round(paper_daemon.seller_strength, 1),
                     "capital": round(paper_daemon.capital, 2),
+                    "blocked_capital": round(getattr(paper_daemon, "blocked_capital", 0.0), 2),
+                    "available_capital": round(getattr(paper_daemon, "available_capital", paper_daemon.capital), 2),
                     "timestamp": ts
                 }
                 asyncio.run_coroutine_threadsafe(_broadcast_paper_tick(paper_packet), _server_event_loop)
+        except Exception:
+            pass
+
+        # 2c. Autonomous Background Live Trade Daemon
+        try:
+            live_trade_daemon.on_tick(tick)
+            if _live_websockets and _server_event_loop and not _server_event_loop.is_closed():
+                live_packet = {
+                    "type": "LIVE_TICK",
+                    "symbol": symbol,
+                    "ltp": round(ltp, 2),
+                    "is_armed": live_trade_daemon.is_armed,
+                    "indices": list(live_trade_daemon.indices.values()) if hasattr(live_trade_daemon, "indices") else [],
+                    "active_trade": live_trade_daemon.active_trade,
+                    "buyer_strength": round(live_trade_daemon.buyer_strength, 1),
+                    "seller_strength": round(live_trade_daemon.seller_strength, 1),
+                    "capital": round(live_trade_daemon.capital, 2),
+                    "blocked_capital": round(live_trade_daemon.blocked_capital, 2),
+                    "available_capital": round(live_trade_daemon.available_capital, 2),
+                    "timestamp": ts
+                }
+                asyncio.run_coroutine_threadsafe(_broadcast_live_tick(live_packet), _server_event_loop)
         except Exception:
             pass
 

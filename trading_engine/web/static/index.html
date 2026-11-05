@@ -3255,13 +3255,13 @@
       font-size: 0.85rem;
     }
 
-    /* ── PAPER TRADING STYLES ── */
-    .paper-container {
+    /* ── PAPER & LIVE TRADING SHARED TERMINAL STYLES ── */
+    .paper-container, .live-container {
       display: flex;
       flex-direction: column;
       gap: 16px;
     }
-    .paper-header-bar {
+    .paper-header-bar, .live-header-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -3272,12 +3272,12 @@
       padding: 12px 18px;
       gap: 12px;
     }
-    .paper-title-group {
+    .paper-title-group, .live-title-group {
       display: flex;
       align-items: center;
       gap: 12px;
     }
-    .paper-status-pulse {
+    .paper-status-pulse, .live-status-pulse {
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -3289,7 +3289,17 @@
       padding: 3px 10px;
       border-radius: 20px;
     }
-    .paper-status-pulse .dot {
+    .live-status-pulse.disarmed {
+      color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .live-status-pulse.armed {
+      color: #10b981;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.5);
+    }
+    .paper-status-pulse .dot, .live-status-pulse .dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
@@ -3297,13 +3307,36 @@
       box-shadow: 0 0 8px #00f2a9;
       animation: pulse 1.5s infinite;
     }
-    .paper-meta-pills {
+    .live-status-pulse.disarmed .dot {
+      background: #ef4444;
+      box-shadow: 0 0 8px #ef4444;
+      animation: none;
+    }
+    .live-status-pulse.armed .dot {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulse 1s infinite;
+    }
+    .live-safety-banner {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .paper-meta-pills, .live-meta-pills {
       display: flex;
       align-items: center;
       gap: 8px;
       flex-wrap: wrap;
     }
-    .paper-pill {
+    .paper-pill, .live-pill {
       font-size: 0.72rem;
       font-weight: 600;
       padding: 3px 9px;
@@ -3312,20 +3345,30 @@
       border: 1px solid rgba(255, 255, 255, 0.08);
       color: #cbd5e1;
     }
-    .paper-pill.accent {
+    .paper-pill.accent, .live-pill.accent {
       color: #00f0ff;
       border-color: rgba(0, 240, 255, 0.3);
       background: rgba(0, 240, 255, 0.08);
     }
+    .paper-pill.pos, .live-pill.pos {
+      color: #10b981;
+      border-color: rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.1);
+    }
+    .paper-pill.neg, .live-pill.neg {
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.3);
+      background: rgba(239, 68, 68, 0.1);
+    }
 
-    /* Live Indices Statistics Cards */
-    .paper-indices-grid {
+    /* Live & Paper Indices Statistics Cards */
+    .paper-indices-grid, .live-indices-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 12px;
       margin-bottom: 2px;
     }
-    .paper-index-card {
+    .paper-index-card, .live-index-card {
       background: linear-gradient(135deg, rgba(15, 23, 42, 0.85), rgba(30, 41, 59, 0.65));
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 10px;
@@ -3335,11 +3378,11 @@
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
       transition: all 0.2s ease;
     }
-    .paper-index-card:hover {
+    .paper-index-card:hover, .live-index-card:hover {
       border-color: rgba(56, 189, 248, 0.3);
       transform: translateY(-2px);
     }
-    .paper-index-card::before {
+    .paper-index-card::before, .live-index-card::before {
       content: '';
       position: absolute;
       top: 0;
@@ -3348,19 +3391,19 @@
       height: 3px;
       background: #64748b;
     }
-    .paper-index-card.trend-up::before {
+    .paper-index-card.trend-up::before, .live-index-card.trend-up::before {
       background: linear-gradient(90deg, #10b981, #059669);
     }
-    .paper-index-card.trend-down::before {
+    .paper-index-card.trend-down::before, .live-index-card.trend-down::before {
       background: linear-gradient(90deg, #ef4444, #dc2626);
     }
-    .paper-index-head {
+    .paper-index-head, .live-index-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 8px;
     }
-    .paper-index-name {
+    .paper-index-name, .live-index-name {
       font-size: 0.82rem;
       font-weight: 700;
       color: #cbd5e1;
@@ -3369,7 +3412,7 @@
       align-items: center;
       gap: 6px;
     }
-    .paper-index-badge {
+    .paper-index-badge, .live-index-badge {
       font-size: 0.62rem;
       font-weight: 700;
       padding: 2px 7px;
@@ -3379,27 +3422,27 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    .paper-index-badge.live {
+    .paper-index-badge.live, .live-index-badge.live {
       background: rgba(16, 185, 129, 0.15);
       color: #10b981;
       border: 1px solid rgba(16, 185, 129, 0.3);
     }
-    .paper-index-badge.fut {
+    .paper-index-badge.fut, .live-index-badge.fut {
       background: rgba(56, 189, 248, 0.15);
       color: #38bdf8;
       border: 1px solid rgba(56, 189, 248, 0.3);
     }
-    .paper-index-main {
+    .paper-index-main, .live-index-main {
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
       margin-bottom: 6px;
     }
-    .paper-index-price-wrap {
+    .paper-index-price-wrap, .live-index-price-wrap {
       display: flex;
       flex-direction: column;
     }
-    .paper-index-price-lbl {
+    .paper-index-price-lbl, .live-index-price-lbl {
       font-size: 0.65rem;
       color: #64748b;
       font-weight: 600;
@@ -3407,7 +3450,7 @@
       letter-spacing: 0.5px;
       margin-bottom: 2px;
     }
-    .paper-index-ltp {
+    .paper-index-ltp, .live-index-ltp {
       font-family: 'JetBrains Mono', monospace;
       font-size: 1.25rem;
       font-weight: 800;
@@ -3415,23 +3458,23 @@
       letter-spacing: -0.3px;
       line-height: 1.1;
     }
-    .paper-index-strike-sub {
+    .paper-index-strike-sub, .live-index-strike-sub {
       font-size: 0.72rem;
       color: #94a3b8;
       font-family: 'JetBrains Mono', monospace;
       margin-top: 3px;
     }
-    .paper-index-strike-sub strong {
+    .paper-index-strike-sub strong, .live-index-strike-sub strong {
       color: #38bdf8;
       font-weight: 700;
     }
-    .paper-index-change-wrap {
+    .paper-index-change-wrap, .live-index-change-wrap {
       text-align: right;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
     }
-    .paper-index-pills {
+    .paper-index-pills, .live-index-pills {
       display: inline-flex;
       align-items: center;
       gap: 5px;
@@ -3441,17 +3484,17 @@
       font-size: 0.82rem;
       font-weight: 700;
     }
-    .paper-index-pills.pos {
+    .paper-index-pills.pos, .live-index-pills.pos {
       background: rgba(16, 185, 129, 0.14);
       color: #10b981;
       border: 1px solid rgba(16, 185, 129, 0.3);
     }
-    .paper-index-pills.neg {
+    .paper-index-pills.neg, .live-index-pills.neg {
       background: rgba(239, 68, 68, 0.14);
       color: #ef4444;
       border: 1px solid rgba(239, 68, 68, 0.3);
     }
-    .paper-index-footer {
+    .paper-index-footer, .live-index-footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -3461,7 +3504,7 @@
       color: #64748b;
       font-family: 'JetBrains Mono', monospace;
     }
-    .paper-active-card {
+    .paper-active-card, .live-active-card {
       background: #111726;
       border: 1px solid rgba(0, 240, 255, 0.25);
       border-radius: 12px;
@@ -3472,7 +3515,10 @@
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
       position: relative;
     }
-    .paper-active-header {
+    .live-active-card {
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+    .paper-active-header, .live-active-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -3481,7 +3527,7 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       padding-bottom: 12px;
     }
-    .paper-contract-title {
+    .paper-contract-title, .live-contract-title {
       font-family: 'Outfit', sans-serif;
       font-size: 1.15rem;
       font-weight: 700;
@@ -3490,60 +3536,60 @@
       align-items: center;
       gap: 10px;
     }
-    .paper-trend-pill {
+    .paper-trend-pill, .live-trend-pill {
       font-size: 0.72rem;
       font-weight: 800;
       padding: 2px 8px;
       border-radius: 4px;
       text-transform: uppercase;
     }
-    .paper-trend-pill.bullish {
+    .paper-trend-pill.bullish, .live-trend-pill.bullish {
       color: #00f2a9;
       background: rgba(0, 242, 169, 0.15);
       border: 1px solid rgba(0, 242, 169, 0.3);
     }
-    .paper-trend-pill.bearish {
+    .paper-trend-pill.bearish, .live-trend-pill.bearish {
       color: #ff3860;
       background: rgba(255, 56, 96, 0.15);
       border: 1px solid rgba(255, 56, 96, 0.3);
     }
-    .paper-active-grid {
+    .paper-active-grid, .live-active-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 14px;
     }
-    .paper-metric-item {
+    .paper-metric-item, .live-metric-item {
       display: flex;
       flex-direction: column;
       gap: 3px;
     }
-    .paper-metric-lbl {
+    .paper-metric-lbl, .live-metric-lbl {
       font-size: 0.68rem;
       color: #94a3b8;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       font-weight: 600;
     }
-    .paper-metric-val {
+    .paper-metric-val, .live-metric-val {
       font-family: 'JetBrains Mono', monospace;
       font-size: 1rem;
       font-weight: 700;
       color: #f1f5f9;
     }
-    .paper-pnl-live {
+    .paper-pnl-live, .live-pnl-live {
       font-family: 'JetBrains Mono', monospace;
       font-size: 1.35rem;
       font-weight: 800;
     }
-    .paper-pnl-live.pos {
+    .paper-pnl-live.pos, .live-pnl-live.pos {
       color: #00f2a9;
       text-shadow: 0 0 10px rgba(0, 242, 169, 0.3);
     }
-    .paper-pnl-live.neg {
+    .paper-pnl-live.neg, .live-pnl-live.neg {
       color: #ff3860;
       text-shadow: 0 0 10px rgba(255, 56, 96, 0.3);
     }
-    .paper-strength-wrap {
+    .paper-strength-wrap, .live-strength-wrap {
       display: flex;
       flex-direction: column;
       gap: 4px;
@@ -3552,13 +3598,13 @@
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.05);
     }
-    .paper-strength-labels {
+    .paper-strength-labels, .live-strength-labels {
       display: flex;
       justify-content: space-between;
       font-size: 0.72rem;
       font-weight: 700;
     }
-    .paper-strength-bar {
+    .paper-strength-bar, .live-strength-bar {
       height: 7px;
       width: 100%;
       background: #ff3860;
@@ -3566,12 +3612,12 @@
       overflow: hidden;
       display: flex;
     }
-    .paper-strength-buyer {
+    .paper-strength-buyer, .live-strength-buyer {
       height: 100%;
       background: #00f2a9;
       transition: width 0.3s ease;
     }
-    .paper-btn-force-exit {
+    .paper-btn-force-exit, .btn-paper-force-exit, .btn-live-force-exit {
       background: rgba(239, 68, 68, 0.18);
       border: 1px solid #ef4444;
       color: #fca5a5;
@@ -3586,12 +3632,12 @@
       gap: 6px;
       transition: all 0.15s ease;
     }
-    .paper-btn-force-exit:hover {
+    .paper-btn-force-exit:hover, .btn-paper-force-exit:hover, .btn-live-force-exit:hover {
       background: #ef4444;
       color: #ffffff;
       box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
     }
-    .paper-idle-card {
+    .paper-idle-card, .live-idle-card, .paper-no-active-card, .live-no-active-card {
       background: #0d121f;
       border: 1px dashed rgba(255, 255, 255, 0.12);
       border-radius: 12px;
@@ -3602,7 +3648,7 @@
       align-items: center;
       gap: 8px;
     }
-    .paper-idle-title {
+    .paper-idle-title, .live-idle-title, .paper-no-active-title, .live-no-active-title {
       font-family: 'Outfit', sans-serif;
       font-size: 1.05rem;
       font-weight: 600;
@@ -3611,13 +3657,16 @@
       align-items: center;
       gap: 8px;
     }
-    .paper-idle-sub {
+    .live-no-active-title {
+      color: #94a3b8;
+    }
+    .paper-idle-sub, .live-idle-sub, .paper-no-active-sub, .live-no-active-sub {
       color: #94a3b8;
       font-size: 0.78rem;
       max-width: 500px;
       line-height: 1.4;
     }
-    .paper-subtabs-row {
+    .paper-subtabs-row, .live-subtabs-row {
       display: flex;
       align-items: center;
       gap: 4px;
@@ -3627,7 +3676,7 @@
       padding: 4px;
       width: fit-content;
     }
-    .paper-subtab-btn {
+    .paper-subtab-btn, .live-subtab-btn {
       background: transparent;
       border: none;
       color: #94a3b8;
@@ -3639,27 +3688,27 @@
       cursor: pointer;
       transition: all 0.15s ease;
     }
-    .paper-subtab-btn:hover {
+    .paper-subtab-btn:hover, .live-subtab-btn:hover {
       color: #ffffff;
     }
-    .paper-subtab-btn.active {
+    .paper-subtab-btn.active, .live-subtab-btn.active {
       color: #00f0ff;
       background: rgba(0, 240, 255, 0.12);
       border: 1px solid rgba(0, 240, 255, 0.3);
     }
-    .paper-table-wrap {
+    .paper-table-wrap, .live-table-wrap {
       overflow-x: auto;
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 8px;
       background: #0c101c;
     }
-    .paper-table {
+    .paper-table, .live-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 0.78rem;
       text-align: left;
     }
-    .paper-table th {
+    .paper-table th, .live-table th {
       background: #111726;
       padding: 10px 12px;
       color: #94a3b8;
@@ -3667,14 +3716,113 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       white-space: nowrap;
     }
-    .paper-table td {
+    .paper-table td, .live-table td {
       padding: 10px 12px;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       color: #cbd5e1;
       white-space: nowrap;
     }
-    .paper-table tr:hover {
+    .paper-table tr:hover, .live-table tr:hover {
       background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Live Master Arming Toggle Button */
+    .live-master-toggle-wrap {
+      display: flex;
+      align-items: center;
+    }
+    .btn-live-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      border-radius: 8px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-live-toggle.disarmed {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      color: #ef4444;
+    }
+    .btn-live-toggle.disarmed:hover {
+      background: rgba(239, 68, 68, 0.28);
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.35);
+    }
+    .btn-live-toggle.armed {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.6);
+      color: #10b981;
+      animation: armedGlow 2s infinite ease-in-out;
+    }
+    @keyframes armedGlow {
+      0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
+      50% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.6); }
+    }
+
+    .btn-paper-reset {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #94a3b8;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-paper-reset:hover {
+      color: #f59e0b;
+      border-color: rgba(245, 158, 11, 0.4);
+      background: rgba(245, 158, 11, 0.1);
+    }
+
+    /* 2FA Status Pill & Logout Button */
+    .auth-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.25);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.70rem;
+      font-weight: 700;
+      color: #00f0ff;
+      letter-spacing: 0.05em;
+    }
+    .auth-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00f0ff;
+      box-shadow: 0 0 6px #00f0ff;
+    }
+    .btn-auth-logout {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #94a3b8;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.74rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-auth-logout:hover {
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.4);
+      background: rgba(239, 68, 68, 0.1);
     }
 
   </style>
@@ -3712,8 +3860,15 @@
       </button>
     </nav>
 
-    <!-- Global Application Configuration Cogwheel (Top Right Corner) -->
+    <!-- Global Application Configuration Cogwheel & 2FA Controls (Top Right Corner) -->
     <div class="header-right-actions">
+      <div class="auth-status-pill" id="auth-status-pill" title="Protected by Institutional Two-Factor Authentication">
+        <span class="auth-dot"></span>
+        <span class="auth-lbl">2FA SECURED</span>
+      </div>
+      <button type="button" class="btn-auth-logout" onclick="logoutApp()" title="Log out of 2FA session">
+        <span>🔒</span> Logout
+      </button>
       <button type="button" class="btn-cogwheel" id="btn-global-config" onclick="openGlobalConfigModal()" title="Application Configuration & Settings" aria-label="Settings">
         <svg class="cogwheel-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -4272,9 +4427,14 @@
           <div class="paper-meta-pills">
             <span class="paper-pill accent" id="paper-pill-segment">🎯 Segment: NIFTY 50 (Dynamic ATM)</span>
             <span class="paper-pill" id="paper-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
-            <span class="paper-pill" id="paper-pill-capital">💼 Capital: ₹20,000</span>
+            <span class="paper-pill" id="paper-pill-capital">💼 Total Cap: ₹20,000</span>
+            <span class="paper-pill" id="paper-pill-available">🔓 Available: ₹20,000</span>
+            <span class="paper-pill" id="paper-pill-blocked">🔒 Margin: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-day-pnl">💰 Day P&L: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-trade-limit">📊 Trades Today: 0 / 4</span>
+            <button type="button" class="btn-paper-reset" onclick="resetPaperLedger()" title="Reset Paper Portfolio to ₹20,000">
+              🔄 Reset Ledger
+            </button>
           </div>
         </div>
 
@@ -4310,9 +4470,14 @@
           <!-- Overall KPI Summary Cards -->
           <div class="bt-summary-grid" style="margin-top: 14px;">
             <div class="bt-stat-card">
-              <div class="bt-stat-label"><span>Running Capital</span><span>💼</span></div>
+              <div class="bt-stat-label"><span>Total Capital</span><span>💼</span></div>
               <div class="bt-stat-value positive" id="paper-sum-capital">₹20,000</div>
               <div class="bt-stat-sub" id="paper-sum-cap-sub">Initial: ₹20,000</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Available Capital</span><span>🔓</span></div>
+              <div class="bt-stat-value positive" id="paper-sum-avail-capital">₹20,000</div>
+              <div class="bt-stat-sub" id="paper-sum-blocked-sub">Blocked Margin: ₹0.00</div>
             </div>
             <div class="bt-stat-card">
               <div class="bt-stat-label"><span>Total Net P&L</span><span>💰</span></div>
@@ -4426,11 +4591,192 @@
       </div>
     </section>
 
-    <!-- 5. LIVE TRADING VIEW (Reserved for live operations) -->
+    <!-- 5. LIVE TRADING VIEW (Autonomous Live Trading Operations) -->
     <section id="view-live" class="app-tab-view">
-      <div class="view-placeholder-card">
-        <h2>🔴 Live Trading Operations</h2>
-        <p>Live execution and operational controls will be configured here.</p>
+      <div class="live-container">
+
+        <!-- Top Header & Live Engine Status Bar with Master Safety Arming Toggle -->
+        <div class="live-header-bar">
+          <div class="live-title-group">
+            <span class="live-status-pulse disarmed" id="live-engine-status-pulse">
+              <span class="dot" id="live-engine-status-dot"></span>
+              <span id="live-engine-status-text">LIVE ENGINE DISARMED</span>
+            </span>
+            <span style="font-family: 'Outfit', sans-serif; font-size: 0.95rem; font-weight: 700; color: #f1f5f9;">
+              Autonomous Live Trading Terminal
+            </span>
+            <span class="live-safety-banner" id="live-safety-banner" title="Order execution is currently in dry-run mode (broker order API mocked)">
+              🛡️ DRY RUN (SAFEGUARDED)
+            </span>
+          </div>
+
+          <div class="live-meta-pills">
+            <button type="button" class="btn-live-toggle disarmed" id="btn-live-arm-toggle" onclick="toggleLiveArmingState()" title="Master Hardware Safety Switch: Arm or Disarm Live Trading">
+              <span id="live-arm-icon">🔒</span> <span id="live-arm-text">ARM LIVE TRADING</span>
+            </button>
+            <span class="live-pill accent" id="live-pill-segment">🎯 Segment: NIFTY 50 (Dynamic ATM)</span>
+            <span class="live-pill" id="live-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
+            <span class="live-pill" id="live-pill-capital">💼 Total Cap: ₹20,000</span>
+            <span class="live-pill" id="live-pill-available">🔓 Available: ₹20,000</span>
+            <span class="live-pill" id="live-pill-blocked">🔒 Margin: ₹0.00</span>
+            <span class="live-pill" id="live-pill-day-pnl">💰 Day P&L: ₹0.00</span>
+            <span class="live-pill" id="live-pill-trade-limit">📊 Trades Today: 0 / 4</span>
+            <button type="button" class="btn-paper-reset" onclick="resetLiveLedger()" title="Reset Live Trading Ledger to ₹20,000">
+              🔄 Reset Ledger
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Indices Statistics Ticker Cards -->
+        <div id="live-indices-grid" class="live-indices-grid"></div>
+
+        <!-- Section 1: Active Trade Card -->
+        <div id="live-active-trade-container">
+          <!-- Populated dynamically via JS: either active card or idle card -->
+        </div>
+
+        <!-- Section 2: Summary of Trade So Far (3 Subtabs) -->
+        <div class="bt-summary-panel">
+          <div class="bt-summary-header">
+            <div class="bt-summary-title">
+              <span>📈 Live Performance Summary & Trade Details</span>
+            </div>
+
+            <!-- 3 Subtabs Header -->
+            <div class="live-subtabs-row">
+              <button type="button" class="live-subtab-btn active" id="live-subtab-btn-total" onclick="switchLiveSubtab('total')">
+                <span>📋</span> Total Trade Detail (Sub Tab A)
+              </button>
+              <button type="button" class="live-subtab-btn" id="live-subtab-btn-monthly" onclick="switchLiveSubtab('monthly')">
+                <span>📅</span> Monthly Trade Details (Sub Tab B)
+              </button>
+              <button type="button" class="live-subtab-btn" id="live-subtab-btn-today" onclick="switchLiveSubtab('today')">
+                <span>⚡</span> Today's Trade Details (Sub Tab C)
+              </button>
+            </div>
+          </div>
+
+          <!-- Overall KPI Summary Cards -->
+          <div class="bt-summary-grid" style="margin-top: 14px;">
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Total Capital</span><span>💼</span></div>
+              <div class="bt-stat-value positive" id="live-sum-capital">₹20,000</div>
+              <div class="bt-stat-sub" id="live-sum-cap-sub">Initial: ₹20,000</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Available Capital</span><span>🔓</span></div>
+              <div class="bt-stat-value positive" id="live-sum-avail-capital">₹20,000</div>
+              <div class="bt-stat-sub" id="live-sum-blocked-sub">Blocked Margin: ₹0.00</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Total Net P&L</span><span>💰</span></div>
+              <div class="bt-stat-value positive" id="live-sum-net-pnl">+₹0.00</div>
+              <div class="bt-stat-sub" id="live-sum-roi-sub">+0.0% Return</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Win Rate</span><span>🎯</span></div>
+              <div class="bt-stat-value positive" id="live-sum-winrate">0.0%</div>
+              <div class="bt-stat-sub" id="live-sum-win-loss">0 Wins / 0 Losses</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Profit Factor</span><span>⚖️</span></div>
+              <div class="bt-stat-value positive" id="live-sum-pf">0.00</div>
+              <div class="bt-stat-sub" id="live-sum-gross-sub">Gross: ₹0 / ₹0</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Max Drawdown</span><span>📉</span></div>
+              <div class="bt-stat-value negative" id="live-sum-mdd">₹0.00</div>
+              <div class="bt-stat-sub">Peak to Valley</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Avg Win / Loss</span><span>📊</span></div>
+              <div class="bt-stat-value" id="live-sum-avg">₹0 / ₹0</div>
+              <div class="bt-stat-sub">Realized Trades</div>
+            </div>
+            <div class="bt-stat-card">
+              <div class="bt-stat-label"><span>Charges & Taxes</span><span>🧾</span></div>
+              <div class="bt-stat-value" id="live-sum-charges">₹0.00</div>
+              <div class="bt-stat-sub">Statutory Exchange/STT</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subtab A: Total Trade Details Content -->
+        <div id="live-subtab-content-total" class="live-subtab-pane">
+          <div class="live-table-wrap">
+            <table class="live-table" id="live-table-total">
+              <thead>
+                <tr>
+                  <th># ID</th>
+                  <th>Date & Day</th>
+                  <th>Contract Symbol</th>
+                  <th>Trend</th>
+                  <th>Strategy</th>
+                  <th>Entry Time / Price</th>
+                  <th>Exit Time / Price</th>
+                  <th>Points</th>
+                  <th>Lots / Qty</th>
+                  <th>Gross P&L</th>
+                  <th>Charges</th>
+                  <th>Net P&L</th>
+                  <th>Exit Reason</th>
+                </tr>
+              </thead>
+              <tbody id="live-tbody-total">
+                <tr><td colspan="13" class="db-empty-state">No closed live trades recorded yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Subtab B: Monthly Trade Details Content -->
+        <div id="live-subtab-content-monthly" class="live-subtab-pane" style="display: none;">
+          <div class="live-table-wrap">
+            <table class="live-table" id="live-table-monthly">
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th>Total Trades</th>
+                  <th>Wins / Losses</th>
+                  <th>Win Rate</th>
+                  <th>Gross Profit</th>
+                  <th>Charges & Taxes</th>
+                  <th>Net Realized P&L</th>
+                </tr>
+              </thead>
+              <tbody id="live-tbody-monthly">
+                <tr><td colspan="7" class="db-empty-state">No monthly records available yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Subtab C: Today's Trade Details Content -->
+        <div id="live-subtab-content-today" class="live-subtab-pane" style="display: none;">
+          <div class="live-table-wrap">
+            <table class="live-table" id="live-table-today">
+              <thead>
+                <tr>
+                  <th># ID</th>
+                  <th>Entry Time</th>
+                  <th>Exit Time</th>
+                  <th>Contract Symbol</th>
+                  <th>Trend</th>
+                  <th>Entry Price</th>
+                  <th>Exit Price</th>
+                  <th>Points</th>
+                  <th>Quantity</th>
+                  <th>Net P&L</th>
+                  <th>Exit Reason</th>
+                </tr>
+              </thead>
+              <tbody id="live-tbody-today">
+                <tr><td colspan="11" class="db-empty-state">No trades executed today yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -4982,6 +5328,16 @@
       } else {
         if (typeof stopPaperAutoRefresh === 'function') {
           stopPaperAutoRefresh();
+        }
+      }
+
+      if (tabId === 'live') {
+        if (typeof startLiveAutoRefresh === 'function') {
+          startLiveAutoRefresh();
+        }
+      } else {
+        if (typeof stopLiveAutoRefresh === 'function') {
+          stopLiveAutoRefresh();
         }
       }
     }
@@ -7793,8 +8149,20 @@
 
       const capPill = document.getElementById('paper-pill-capital');
       if (capPill) {
-        const cVal = state.capital !== undefined ? state.capital : (cfg.capital || 20000);
-        capPill.textContent = `💼 Capital: ₹${Math.round(cVal).toLocaleString('en-IN')}`;
+        const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
+        capPill.textContent = `💼 Total Cap: ₹${Math.round(cVal).toLocaleString('en-IN')}`;
+      }
+
+      const availPill = document.getElementById('paper-pill-available');
+      if (availPill) {
+        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : (cfg.capital || 20000));
+        availPill.textContent = `🔓 Available: ₹${Math.round(aVal).toLocaleString('en-IN')}`;
+      }
+
+      const blockedPill = document.getElementById('paper-pill-blocked');
+      if (blockedPill) {
+        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
+        blockedPill.textContent = `🔒 Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
       }
 
       const dayPnlPill = document.getElementById('paper-pill-day-pnl');
@@ -7838,6 +8206,18 @@
       }
       const sumCapSub = document.getElementById('paper-sum-cap-sub');
       if (sumCapSub) sumCapSub.textContent = `Initial: ₹${Math.round(initCap).toLocaleString('en-IN')}`;
+
+      const sumAvailEl = document.getElementById('paper-sum-avail-capital');
+      if (sumAvailEl) {
+        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : runningCap);
+        sumAvailEl.textContent = '₹' + Math.round(aVal).toLocaleString('en-IN');
+        sumAvailEl.className = 'bt-stat-value ' + (aVal >= 0 ? 'positive' : 'negative');
+      }
+      const sumBlockedSub = document.getElementById('paper-sum-blocked-sub');
+      if (sumBlockedSub) {
+        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
+        sumBlockedSub.textContent = `Blocked Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+      }
 
       const sumNetEl = document.getElementById('paper-sum-net-pnl');
       if (sumNetEl) {
@@ -8091,6 +8471,628 @@
       }
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // 2FA & ACCOUNT CONTROLLERS
+    // ══════════════════════════════════════════════════════════════════════════
+    async function logoutApp() {
+      if (!confirm('Log out from 2FA session?')) return;
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      } catch (e) {}
+      window.location.reload();
+    }
+
+    async function resetPaperLedger() {
+      if (!confirm('Reset Paper Trading ledger back to initial capital of ₹20,000.00 and clear all paper trades?')) return;
+      try {
+        const resp = await fetch('/api/paper/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ capital: 20000 })
+        });
+        const res = await resp.json();
+        await fetchPaperTradingState();
+      } catch (err) {
+        alert('Failed to reset paper ledger: ' + err.message);
+      }
+    }
+
+    async function resetLiveLedger() {
+      if (!confirm('Reset Live Trading ledger back to initial capital of ₹20,000.00 and clear all live trades?')) return;
+      try {
+        const resp = await fetch('/api/live/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ capital: 20000 })
+        });
+        const res = await resp.json();
+        await fetchLiveTradingState();
+      } catch (err) {
+        alert('Failed to reset live ledger: ' + err.message);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // LIVE TRADING CONTROLLER (Autonomous Execution Terminal)
+    // ══════════════════════════════════════════════════════════════════════════
+    let currentLiveSubtab = 'total';
+    let liveRefreshTimer = null;
+    let liveWs = null;
+    let liveWsReconnectTimer = null;
+    let lastLiveActiveTradeState = false;
+
+    function switchLiveSubtab(subtabId) {
+      currentLiveSubtab = subtabId;
+      const subtabBtns = document.querySelectorAll('.live-subtab-btn');
+      subtabBtns.forEach(btn => btn.classList.remove('active'));
+      const activeBtn = document.getElementById(`live-subtab-btn-${subtabId}`);
+      if (activeBtn) activeBtn.classList.add('active');
+
+      const panes = document.querySelectorAll('.live-subtab-pane');
+      panes.forEach(p => p.style.display = 'none');
+      const activePane = document.getElementById(`live-subtab-content-${subtabId}`);
+      if (activePane) activePane.style.display = 'block';
+    }
+
+    async function toggleLiveArmingState() {
+      const btn = document.getElementById('btn-live-arm-toggle');
+      const isCurrentlyArmed = btn && btn.classList.contains('armed');
+
+      const confirmMsg = isCurrentlyArmed 
+        ? 'DISARM Live Trading? The autonomous engine will immediately stop opening new live trades.'
+        : '⚠️ ATTENTION: ARM Live Trading Engine?\n\nThe engine will monitor incoming tick stream and autonomously execute signals in accordance with risk limits (currently in SAFEGUARDED DRY-RUN broker simulation mode).\n\nProceed to ARM?';
+
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const resp = await fetch('/api/live/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ armed: !isCurrentlyArmed })
+        });
+        const res = await resp.json();
+        await fetchLiveTradingState();
+      } catch (err) {
+        alert('Failed to toggle live arming switch: ' + err.message);
+      }
+    }
+
+    async function fetchLiveTradingState() {
+      try {
+        const resp = await fetch('/api/live/state');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderLiveTradingUI(data);
+      } catch (err) {
+        console.warn('Live trading state fetch error:', err);
+      }
+    }
+
+    function renderLiveIndices(indices) {
+      const indicesGrid = document.getElementById('live-indices-grid');
+      if (!indicesGrid || !Array.isArray(indices) || indices.length === 0) return;
+
+      indicesGrid.innerHTML = indices.map(idx => {
+        const isUp = (idx.trend || '').toUpperCase() === 'UP' || (Number(idx.change_pts || 0) >= 0);
+        const icon = isUp ? '▲' : '▼';
+        const ptsSign = Number(idx.change_pts || 0) >= 0 ? '+' : '';
+        const ptsText = `${ptsSign}${Number(idx.change_pts || 0).toFixed(2)}`;
+        const pctSign = Number(idx.change_pct || 0) >= 0 ? '+' : '';
+        const pctText = `${pctSign}${Number(idx.change_pct || 0).toFixed(2)}%`;
+        const ltpFormatted = Number(idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const strikeFormatted = Number(idx.atm_strike || 0).toLocaleString('en-IN');
+        const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        return `
+          <div class="live-index-card ${isUp ? 'trend-up' : 'trend-down'}">
+            <div class="live-index-head">
+              <div class="live-index-name">
+                <span>${idx.name || idx.symbol}</span>
+              </div>
+              <span class="live-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
+            </div>
+            <div class="live-index-main">
+              <div class="live-index-price-wrap">
+                <span class="live-index-price-lbl">Current Index LTP</span>
+                <span class="live-index-ltp">₹${ltpFormatted}</span>
+                <span class="live-index-strike-sub">ATM Strike: <strong>${strikeFormatted}</strong></span>
+              </div>
+              <div class="live-index-change-wrap">
+                <span class="live-index-pills ${isUp ? 'pos' : 'neg'}">
+                  <span style="font-size: 0.85rem;">${icon}</span>
+                  <span>${ptsText}</span>
+                  <span style="font-size: 0.72rem; opacity: 0.9;">(${pctText})</span>
+                </span>
+                <span style="font-size: 0.65rem; color: #64748b; margin-top: 4px; text-transform: uppercase;">
+                  Trend: <strong style="color: ${isUp ? '#10b981' : '#ef4444'}">${isUp ? 'BULLISH' : 'BEARISH'}</strong>
+                </span>
+              </div>
+            </div>
+            <div class="live-index-footer">
+              <span>Low: ₹${dayLow}</span>
+              <span>High: ₹${dayHigh}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderLiveActiveTrade(act, meta = {}) {
+      const actContainer = document.getElementById('live-active-trade-container');
+      if (!actContainer) return;
+      const cfg = (meta && meta.config) || {};
+      const isArmed = meta && meta.is_armed;
+
+      if (!act) {
+        actContainer.innerHTML = `
+          <div class="live-no-active-card">
+            <div class="paper-no-active-icon">${isArmed ? '🟢' : '⏸️'}</div>
+            <div class="live-no-active-title" style="color: ${isArmed ? '#10b981' : '#94a3b8'};">
+              ${isArmed ? 'Engine Armed • Monitoring Live Market' : 'Live Engine Standby (Disarmed)'}
+            </div>
+            <div class="live-no-active-sub">
+              ${isArmed 
+                ? `Autonomous live engine is scanning live tick stream for <strong>${cfg.symbol || 'NIFTY'}</strong> Dynamic ATM opportunities.` 
+                : 'Click <strong>ARM LIVE TRADING</strong> above to activate live trade signal execution.'}
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      const isTrendBull = (act.trend || 'BULLISH').toUpperCase() === 'BULLISH';
+      const uPnl = Number(act.unrealized_pnl) || 0;
+      const uPts = Number(act.points) || 0;
+      const isPnlPos = uPnl >= 0;
+      const pnlSign = isPnlPos ? '+₹' : '-₹';
+      const pnlStr = `${pnlSign}${Math.abs(uPnl).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const ptsSign = uPts >= 0 ? '+' : '';
+      const ptsStr = `${ptsSign}${uPts.toFixed(2)} pts`;
+
+      const rawBuyer = act.buyer_strength !== undefined ? act.buyer_strength : (meta.buyer_strength !== undefined ? meta.buyer_strength : 0.5);
+      const buyerPct = Math.min(100, Math.max(0, Math.round(Number(rawBuyer) * 100)));
+      const sellerPct = 100 - buyerPct;
+
+      const actLots = act.lots || 1;
+      const actQty = act.quantity || act.units || (actLots * 65);
+      const entryPx = Number(act.entry_price || act.entry_rate || 0).toFixed(2);
+      const curPx = Number(act.current_price || act.entry_price || act.entry_rate || 0).toFixed(2);
+      const slPx = Number(act.sl || act.stop_loss || 0).toFixed(2);
+      const tgtPx = Number(act.target || 0).toFixed(2);
+
+      actContainer.innerHTML = `
+        <div class="live-active-card">
+          <div class="live-active-header">
+            <div class="paper-active-header-left">
+              <span class="paper-trade-badge active" style="background:rgba(239,68,68,0.2); color:#ef4444; border-color:rgba(239,68,68,0.4);">LIVE EXECUTED POSITION</span>
+              <span class="live-contract-title">${act.contract || act.symbol || 'NIFTY Dynamic ATM'}</span>
+              <span class="live-trend-pill ${isTrendBull ? 'bullish' : 'bearish'}">
+                ${isTrendBull ? '▲ BULLISH (CE)' : '▼ BEARISH (PE)'}
+              </span>
+              <span class="paper-qty-pill">${actLots} Lot${actLots > 1 ? 's' : ''} (${actQty} Qty)</span>
+            </div>
+            <div class="paper-active-header-right">
+              <button type="button" class="btn-live-force-exit" onclick="forceExitLiveTrade('${act.trade_id || ''}')" title="Instantly force market exit for active live position">
+                ⚡ Force Market Exit
+              </button>
+            </div>
+          </div>
+
+          <div class="live-active-grid">
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Entry Time</span>
+              <span class="paper-cell-val mono">${act.entry_time || '--'}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Entry Price</span>
+              <span class="paper-cell-val mono">₹${entryPx}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Current LTP</span>
+              <span class="paper-cell-val mono live">₹${curPx}</span>
+            </div>
+            <div class="paper-active-cell highlight">
+              <span class="paper-cell-label">Unrealized P&L</span>
+              <span class="paper-cell-val mono ${isPnlPos ? 'val-pos' : 'val-neg'}">
+                ${pnlStr} <small style="font-size:0.75rem;">(${ptsStr})</small>
+              </span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Stop Loss (-30%)</span>
+              <span class="paper-cell-val mono val-neg">₹${slPx}</span>
+            </div>
+            <div class="paper-active-cell">
+              <span class="paper-cell-label">Target (+50%)</span>
+              <span class="paper-cell-val mono val-pos">₹${tgtPx}</span>
+            </div>
+          </div>
+
+          <!-- Buyer vs Seller Strength Meter -->
+          <div class="paper-strength-section">
+            <div class="paper-strength-header">
+              <span class="strength-lbl">Order Book Dynamics & Tick Flow</span>
+              <span class="strength-split">Buyers: <strong>${buyerPct}%</strong> • Sellers: <strong>${sellerPct}%</strong></span>
+            </div>
+            <div class="paper-strength-bar-bg">
+              <div class="paper-strength-fill buyer" style="width: ${buyerPct}%;"></div>
+              <div class="paper-strength-fill seller" style="width: ${sellerPct}%;"></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLiveTradingUI(state) {
+      if (!state) return;
+      const isArmed = Boolean(state.is_armed);
+      const cfg = state.config || {};
+      const sum = state.summary || {};
+      const tot = sum.total || sum;
+      const today = sum.today || {};
+      const act = state.active_trade;
+
+      const tradesList = sum.all_trades || state.trades || [];
+      const monthlyList = sum.monthly_breakdown || state.monthly || [];
+      const todayList = sum.today_trades || state.today_trades || [];
+
+      // 0. Master Arming Toggle & Header Status Pulse
+      const armBtn = document.getElementById('btn-live-arm-toggle');
+      const pulseWrap = document.getElementById('live-engine-status-pulse');
+      const pulseText = document.getElementById('live-engine-status-text');
+      const armIcon = document.getElementById('live-arm-icon');
+      const armText = document.getElementById('live-arm-text');
+
+      if (isArmed) {
+        if (armBtn) {
+          armBtn.className = 'btn-live-toggle armed';
+          if (armIcon) armIcon.textContent = '⚡';
+          if (armText) armText.textContent = 'DISARM LIVE TRADING';
+        }
+        if (pulseWrap) pulseWrap.className = 'live-status-pulse armed';
+        if (pulseText) pulseText.textContent = 'LIVE ENGINE ARMED (ACTIVE)';
+      } else {
+        if (armBtn) {
+          armBtn.className = 'btn-live-toggle disarmed';
+          if (armIcon) armIcon.textContent = '🔒';
+          if (armText) armText.textContent = 'ARM LIVE TRADING';
+        }
+        if (pulseWrap) pulseWrap.className = 'live-status-pulse disarmed';
+        if (pulseText) pulseText.textContent = 'LIVE ENGINE DISARMED (STANDBY)';
+      }
+
+      // 1. Live Indices Statistics Cards at the Top
+      if (state.indices && Array.isArray(state.indices)) {
+        renderLiveIndices(state.indices);
+      }
+
+      // 2. Meta Pills
+      const stratPill = document.getElementById('live-pill-strategy');
+      if (stratPill) {
+        const sName = (cfg.strategy === 'dual_xgboost_macro' || cfg.strategy === 'Dual XGBoost + Macro')
+          ? '🤖 Strategy: Dual XGBoost + Macro (AI-Trader 78L)'
+          : `🤖 Strategy: ${cfg.strategy || 'Dual XGBoost + Macro'}`;
+        stratPill.textContent = sName;
+      }
+
+      const capPill = document.getElementById('live-pill-capital');
+      if (capPill) {
+        const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
+        capPill.textContent = `💼 Total Cap: ₹${Math.round(cVal).toLocaleString('en-IN')}`;
+      }
+
+      const availPill = document.getElementById('live-pill-available');
+      if (availPill) {
+        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : (cfg.capital || 20000));
+        availPill.textContent = `🔓 Available: ₹${Math.round(aVal).toLocaleString('en-IN')}`;
+      }
+
+      const blockedPill = document.getElementById('live-pill-blocked');
+      if (blockedPill) {
+        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
+        blockedPill.textContent = `🔒 Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+      }
+
+      const dayPnlPill = document.getElementById('live-pill-day-pnl');
+      if (dayPnlPill) {
+        const dayNet = sum.today_net !== undefined ? sum.today_net : (today.net_pnl || 0);
+        const sign = dayNet >= 0 ? '+₹' : '-₹';
+        dayPnlPill.textContent = `💰 Day P&L: ${sign}${Math.abs(Math.round(dayNet)).toLocaleString('en-IN')}`;
+        dayPnlPill.className = 'live-pill ' + (dayNet >= 0 ? 'pos' : 'neg');
+      }
+
+      const limitPill = document.getElementById('live-pill-trade-limit');
+      if (limitPill) {
+        const maxTr = cfg.max_trades_per_day || 4;
+        const dayCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
+        limitPill.textContent = `📊 Trades Today: ${dayCount} / ${maxTr}`;
+      }
+
+      // 3. Active Trade Card vs Idle Card
+      renderLiveActiveTrade(act, state);
+
+      // 4. Summary KPI Cards
+      const runningCap = sum.capital !== undefined ? sum.capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
+      const initCap = sum.initial_capital || cfg.capital || 20000;
+      const netPnl = sum.net_pnl !== undefined ? sum.net_pnl : (tot.net_pnl || 0);
+      const grossPnl = sum.gross_pnl !== undefined ? sum.gross_pnl : (tot.gross_pnl || 0);
+      const totalTrades = sum.total_trades !== undefined ? sum.total_trades : (tot.count || tradesList.length);
+      const wins = sum.wins !== undefined ? sum.wins : (tot.wins || 0);
+      const losses = sum.losses !== undefined ? sum.losses : (tot.losses || 0);
+      const charges = sum.charges !== undefined ? sum.charges : (tot.charges || 0);
+      const winRate = sum.win_rate !== undefined ? sum.win_rate : (totalTrades > 0 ? (wins / totalTrades) * 100 : 0);
+      const pf = sum.profit_factor !== undefined ? sum.profit_factor : (tot.profit_factor || 0);
+      const mdd = sum.max_drawdown !== undefined ? sum.max_drawdown : (tot.max_drawdown || 0);
+      const avgWin = sum.avg_win !== undefined ? sum.avg_win : (tot.avg_win || 0);
+      const avgLoss = sum.avg_loss !== undefined ? sum.avg_loss : (tot.avg_loss || 0);
+      const roiPct = initCap > 0 ? ((netPnl / initCap) * 100) : 0;
+
+      const sumCapEl = document.getElementById('live-sum-capital');
+      if (sumCapEl) {
+        sumCapEl.textContent = (runningCap >= 0 ? '₹' : '-₹') + Math.abs(Math.round(runningCap)).toLocaleString('en-IN');
+        sumCapEl.className = 'bt-stat-value ' + (runningCap >= initCap ? 'positive' : 'negative');
+      }
+      const sumCapSub = document.getElementById('live-sum-cap-sub');
+      if (sumCapSub) sumCapSub.textContent = `Initial: ₹${Math.round(initCap).toLocaleString('en-IN')}`;
+
+      const sumAvailEl = document.getElementById('live-sum-avail-capital');
+      if (sumAvailEl) {
+        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : runningCap);
+        sumAvailEl.textContent = '₹' + Math.round(aVal).toLocaleString('en-IN');
+        sumAvailEl.className = 'bt-stat-value ' + (aVal >= 0 ? 'positive' : 'negative');
+      }
+      const sumBlockedSub = document.getElementById('live-sum-blocked-sub');
+      if (sumBlockedSub) {
+        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
+        sumBlockedSub.textContent = `Blocked Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+      }
+
+      const sumNetEl = document.getElementById('live-sum-net-pnl');
+      if (sumNetEl) {
+        sumNetEl.textContent = (netPnl >= 0 ? '+₹' : '-₹') + Math.abs(Math.round(netPnl)).toLocaleString('en-IN');
+        sumNetEl.className = 'bt-stat-value ' + (netPnl >= 0 ? 'positive' : 'negative');
+      }
+      const sumRoiSub = document.getElementById('live-sum-roi-sub');
+      if (sumRoiSub) sumRoiSub.textContent = `${roiPct >= 0 ? '+' : ''}${roiPct.toFixed(2)}% Return`;
+
+      const sumWrEl = document.getElementById('live-sum-winrate');
+      if (sumWrEl) sumWrEl.textContent = winRate.toFixed(1) + '%';
+      const sumWlSub = document.getElementById('live-sum-win-loss');
+      if (sumWlSub) sumWlSub.textContent = `${wins} Wins / ${losses} Losses (${totalTrades} Trades)`;
+
+      const sumPfEl = document.getElementById('live-sum-pf');
+      if (sumPfEl) sumPfEl.textContent = Number(pf).toFixed(2);
+      const sumGrossSub = document.getElementById('live-sum-gross-sub');
+      if (sumGrossSub) sumGrossSub.textContent = `Gross: ₹${Math.round(grossPnl).toLocaleString('en-IN')}`;
+
+      const sumMddEl = document.getElementById('live-sum-mdd');
+      if (sumMddEl) sumMddEl.textContent = '₹' + Math.abs(Math.round(mdd)).toLocaleString('en-IN');
+
+      const sumAvgEl = document.getElementById('live-sum-avg');
+      if (sumAvgEl) sumAvgEl.textContent = `+₹${Math.round(avgWin).toLocaleString('en-IN')} / -₹${Math.abs(Math.round(avgLoss)).toLocaleString('en-IN')}`;
+
+      const sumChargesEl = document.getElementById('live-sum-charges');
+      if (sumChargesEl) sumChargesEl.textContent = '₹' + Math.round(charges).toLocaleString('en-IN');
+
+      // 5. Subtab A: Total Trades Table
+      const tbodyTotal = document.getElementById('live-tbody-total');
+      if (tbodyTotal) {
+        if (tradesList.length === 0) {
+          tbodyTotal.innerHTML = `<tr><td colspan="13" class="db-empty-state">No closed live trades recorded yet.</td></tr>`;
+        } else {
+          let rowsHtml = '';
+          tradesList.slice().reverse().forEach((t, idx) => {
+            const isPos = (t.net !== undefined ? t.net : (t.net_pnl || 0)) >= 0;
+            const netVal = t.net !== undefined ? t.net : (t.net_pnl || 0);
+            const netStr = (isPos ? '+₹' : '-₹') + Math.abs(netVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const grossVal = t.gross !== undefined ? t.gross : (t.gross_pnl || 0);
+            const grossStr = (grossVal >= 0 ? '+₹' : '-₹') + Math.abs(grossVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const chgVal = t.charges !== undefined ? t.charges : (t.total_charges || 0);
+            const chgStr = '₹' + Number(chgVal).toFixed(2);
+            const ptsVal = t.points || 0;
+            const ptsStr = (ptsVal >= 0 ? '+' : '') + ptsVal.toFixed(2);
+            const isBull = (t.trend || 'BULLISH').toUpperCase() === 'BULLISH';
+
+            const tLots = t.lots || 1;
+            const tQty = t.quantity || t.units || (tLots * 65);
+            const entryVal = Number(t.entry_price !== undefined ? t.entry_price : (t.entry_rate || 0)).toFixed(2);
+            const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
+
+            rowsHtml += `
+              <tr class="bt-trade-row">
+                <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)}</td>
+                <td class="bt-mono">${t.date || (t.entry_time ? t.entry_time.split(' ')[0] : '--')}</td>
+                <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
+                <td class="bt-text-center">
+                  <span class="bt-trend-badge ${isBull ? 'bullish' : 'bearish'}">${isBull ? '▲ CE' : '▼ PE'}</span>
+                </td>
+                <td><span class="bt-indicator-pill">${t.strategy || cfg.strategy || 'Dual XGBoost'}</span></td>
+                <td class="bt-mono">${t.entry_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${entryVal}</span></td>
+                <td class="bt-mono">${t.exit_time || '--'}<br><span style="color:#94a3b8; font-size:0.75rem;">₹${exitVal}</span></td>
+                <td class="bt-mono bt-text-right ${ptsVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${ptsStr}</td>
+                <td class="bt-mono bt-text-center"><span class="bt-lot-pill">${tLots} (${tQty})</span></td>
+                <td class="bt-mono bt-text-right ${grossVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${grossStr}</td>
+                <td class="bt-mono bt-text-right bt-val-muted">${chgStr}</td>
+                <td class="bt-mono bt-text-right ${isPos ? 'bt-val-pos' : 'bt-val-neg'}">${netStr}</td>
+                <td class="bt-text-center"><span class="bt-reason-badge ${(t.reason || t.exit_reason || 'TARGET').toLowerCase()}">${t.reason || t.exit_reason || 'TARGET'}</span></td>
+              </tr>
+            `;
+          });
+          tbodyTotal.innerHTML = rowsHtml;
+        }
+      }
+
+      // 6. Subtab B: Monthly Breakdown Table
+      const tbodyMonthly = document.getElementById('live-tbody-monthly');
+      if (tbodyMonthly) {
+        if (monthlyList.length === 0) {
+          tbodyMonthly.innerHTML = `<tr><td colspan="7" class="db-empty-state">No monthly records available yet.</td></tr>`;
+        } else {
+          let rowsHtml = '';
+          monthlyList.forEach(m => {
+            const mNet = m.net !== undefined ? m.net : (m.net_pnl || 0);
+            const isPos = mNet >= 0;
+            const netStr = (isPos ? '+₹' : '-₹') + Math.abs(mNet).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const mGross = m.gross !== undefined ? m.gross : (m.gross_pnl || 0);
+            const grossStr = (mGross >= 0 ? '+₹' : '-₹') + Math.abs(mGross).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const mCharges = m.charges !== undefined ? m.charges : (m.total_charges || 0);
+            const chgStr = '₹' + Number(mCharges).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const wr = m.winRate || (m.win_rate !== undefined ? m.win_rate.toFixed(1) + '%' : '0.0%');
+            const mTrades = m.trades !== undefined ? m.trades : (m.total_trades || 0);
+
+            rowsHtml += `
+              <tr class="bt-trade-row">
+                <td class="bt-mono" style="font-weight:700;">📅 ${m.month}</td>
+                <td class="bt-mono bt-text-center">${mTrades}</td>
+                <td class="bt-mono bt-text-center">${m.wins}W / ${m.losses}L</td>
+                <td class="bt-mono bt-text-center"><span class="bt-prob-pill">${wr}</span></td>
+                <td class="bt-mono bt-text-right ${mGross >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${grossStr}</td>
+                <td class="bt-mono bt-text-right bt-val-muted">${chgStr}</td>
+                <td class="bt-mono bt-text-right ${isPos ? 'bt-val-pos' : 'bt-val-neg'}" style="font-weight:700;">${netStr}</td>
+              </tr>
+            `;
+          });
+          tbodyMonthly.innerHTML = rowsHtml;
+        }
+      }
+
+      // 7. Subtab C: Today's Trades Table
+      const tbodyToday = document.getElementById('live-tbody-today');
+      if (tbodyToday) {
+        if (todayList.length === 0) {
+          tbodyToday.innerHTML = `<tr><td colspan="11" class="db-empty-state">No trades executed today yet.</td></tr>`;
+        } else {
+          let rowsHtml = '';
+          todayList.slice().reverse().forEach((t, idx) => {
+            const isPos = (t.net !== undefined ? t.net : (t.net_pnl || 0)) >= 0;
+            const netVal = t.net !== undefined ? t.net : (t.net_pnl || 0);
+            const netStr = (isPos ? '+₹' : '-₹') + Math.abs(netVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const ptsVal = t.points || 0;
+            const ptsStr = (ptsVal >= 0 ? '+' : '') + ptsVal.toFixed(2);
+            const isBull = (t.trend || 'BULLISH').toUpperCase() === 'BULLISH';
+
+            const tLots = t.lots || 1;
+            const tQty = t.quantity || t.units || (tLots * 65);
+            const entryVal = Number(t.entry_price !== undefined ? t.entry_price : (t.entry_rate || 0)).toFixed(2);
+            const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
+
+            rowsHtml += `
+              <tr class="bt-trade-row">
+                <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)}</td>
+                <td class="bt-mono">${t.entry_time || '--'}</td>
+                <td class="bt-mono">${t.exit_time || '--'}</td>
+                <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
+                <td class="bt-text-center"><span class="bt-trend-badge ${isBull ? 'bullish' : 'bearish'}">${isBull ? '▲ CE' : '▼ PE'}</span></td>
+                <td class="bt-mono">₹${entryVal}</td>
+                <td class="bt-mono">₹${exitVal}</td>
+                <td class="bt-mono bt-text-right ${ptsVal >= 0 ? 'bt-val-pos' : 'bt-val-neg'}">${ptsStr}</td>
+                <td class="bt-mono bt-text-center"><span class="bt-lot-pill">${tLots} (${tQty})</span></td>
+                <td class="bt-mono bt-text-right ${isPos ? 'bt-val-pos' : 'bt-val-neg'}">${netStr}</td>
+                <td class="bt-text-center"><span class="bt-reason-badge ${(t.reason || t.exit_reason || 'TARGET').toLowerCase()}">${t.reason || t.exit_reason || 'TARGET'}</span></td>
+              </tr>
+            `;
+          });
+          tbodyToday.innerHTML = rowsHtml;
+        }
+      }
+    }
+
+    async function forceExitLiveTrade(tradeId) {
+      if (!confirm('Are you sure you want to force market exit this active live trade position?')) {
+        return;
+      }
+      try {
+        const resp = await fetch('/api/live/exit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'FORCE_EXIT_UI', trade_id: tradeId })
+        });
+        const res = await resp.json();
+        await fetchLiveTradingState();
+      } catch (err) {
+        alert('Failed to exit live trade: ' + err.message);
+      }
+    }
+
+    function connectLiveWebSocket() {
+      if (liveWs && (liveWs.readyState === WebSocket.OPEN || liveWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${window.location.host}/ws/live`;
+
+      try {
+        liveWs = new WebSocket(wsUrl);
+
+        liveWs.onopen = () => {
+          console.log('⚡ Live WebSocket connected for real-time sub-second live feed');
+          if (liveWsReconnectTimer) {
+            clearTimeout(liveWsReconnectTimer);
+            liveWsReconnectTimer = null;
+          }
+        };
+
+        liveWs.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'LIVE_INIT' || msg.type === 'LIVE_FULL_STATE') {
+              renderLiveTradingUI(msg.state);
+            } else if (msg.type === 'LIVE_TICK') {
+              if (msg.indices && Array.isArray(msg.indices)) {
+                renderLiveIndices(msg.indices);
+              }
+              if (msg.active_trade !== undefined) {
+                renderLiveActiveTrade(msg.active_trade, msg);
+                const hasTrade = Boolean(msg.active_trade);
+                if (hasTrade !== lastLiveActiveTradeState) {
+                  lastLiveActiveTradeState = hasTrade;
+                  fetchLiveTradingState();
+                }
+              }
+              if (msg.capital !== undefined) {
+                const capPill = document.getElementById('live-pill-capital');
+                if (capPill) capPill.textContent = `💼 Total Cap: ₹${Math.round(msg.capital).toLocaleString('en-IN')}`;
+              }
+            }
+          } catch (e) {
+            console.warn('Error parsing live WS message:', e);
+          }
+        };
+
+        liveWs.onclose = () => {
+          liveWs = null;
+          if (!liveWsReconnectTimer) {
+            liveWsReconnectTimer = setTimeout(connectLiveWebSocket, 2500);
+          }
+        };
+
+        liveWs.onerror = () => {
+          // Handled by onclose reconnect
+        };
+      } catch (err) {
+        console.warn('Live WS init error:', err);
+      }
+    }
+
+    function startLiveAutoRefresh() {
+      connectLiveWebSocket();
+      fetchLiveTradingState();
+      if (!liveRefreshTimer) {
+        liveRefreshTimer = setInterval(fetchLiveTradingState, 6000);
+      }
+    }
+
+    function stopLiveAutoRefresh() {
+      if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+      }
+      if (liveWs) {
+        try { liveWs.close(); } catch (e) {}
+        liveWs = null;
+      }
+    }
+
     // Keyboard Shortcuts for Chart Navigation
     document.addEventListener('keydown', (e) => {
       const modal = document.getElementById('bt-trade-chart-modal');
@@ -8134,10 +9136,13 @@
         }
       } else if (urlParams.get('tab') === 'paper') {
         switchMainTab('paper');
+      } else if (urlParams.get('tab') === 'live') {
+        switchMainTab('live');
       }
 
-      // Auto-fetch initial paper trading state in background
+      // Auto-fetch initial paper and live trading state in background
       fetchPaperTradingState();
+      fetchLiveTradingState();
     });
   </script>
 

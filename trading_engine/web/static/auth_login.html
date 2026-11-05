@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Quant Trade Engine · Two-Factor Authentication</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: #060911;
+      background-image: 
+        radial-gradient(circle at 50% 10%, rgba(0, 240, 255, 0.08) 0%, transparent 50%),
+        radial-gradient(circle at 80% 90%, rgba(0, 242, 169, 0.05) 0%, transparent 40%),
+        linear-gradient(180deg, #060911 0%, #03060a 100%);
+      color: #f1f5f9;
+      font-family: 'Inter', -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 440px;
+      background: #0b111e;
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 18px;
+      padding: 34px 30px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 240, 255, 0.05);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .auth-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, #00f0ff, #00f2a9, #00f0ff);
+      background-size: 200% 100%;
+      animation: gradientSlide 4s linear infinite;
+    }
+
+    @keyframes gradientSlide {
+      0% { background-position: 0% 0%; }
+      100% { background-position: 200% 0%; }
+    }
+
+    .auth-header {
+      text-align: center;
+      margin-bottom: 26px;
+    }
+
+    .auth-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 240, 255, 0.08);
+      border: 1px solid rgba(0, 240, 255, 0.3);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #00f0ff;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .auth-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+      margin-bottom: 6px;
+    }
+
+    .auth-subtitle {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    .auth-form {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .field-label {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #cbd5e1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .input-wrapper {
+      position: relative;
+    }
+
+    .auth-input {
+      width: 100%;
+      background: #080d17;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      color: #ffffff;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .auth-input:focus {
+      border-color: #00f0ff;
+      box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.15);
+    }
+
+    .auth-input.code-input {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 0.35em;
+      text-align: center;
+      padding: 12px 10px;
+    }
+
+    .btn-submit {
+      background: linear-gradient(135deg, #00f0ff 0%, #00f2a9 100%);
+      color: #03060a;
+      border: none;
+      border-radius: 10px;
+      padding: 13px 18px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      margin-top: 4px;
+    }
+
+    .btn-submit:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(0, 240, 255, 0.35);
+    }
+
+    .btn-submit:active {
+      transform: translateY(0);
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .alert-box {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      display: none;
+      animation: shake 0.35s ease;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+
+    /* Setup / QR code Drawer */
+    .setup-drawer {
+      margin-top: 24px;
+      border-top: 1px solid #1e293b;
+      padding-top: 18px;
+    }
+
+    .setup-toggle-btn {
+      background: none;
+      border: none;
+      color: #00f0ff;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      text-align: center;
+      transition: color 0.15s ease;
+    }
+
+    .setup-toggle-btn:hover {
+      color: #38bdf8;
+      text-decoration: underline;
+    }
+
+    .setup-panel {
+      display: none;
+      margin-top: 16px;
+      background: #080d17;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+    }
+
+    .qr-container {
+      background: #ffffff;
+      padding: 12px;
+      border-radius: 10px;
+      width: 180px;
+      height: 180px;
+      margin: 12px auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .qr-container svg {
+      width: 100%;
+      height: 100%;
+    }
+
+    .secret-box {
+      background: #040711;
+      border: 1px dashed #334155;
+      border-radius: 8px;
+      padding: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: #38bdf8;
+      word-break: break-all;
+      margin: 10px 0;
+      user-select: all;
+    }
+
+    .btn-copy {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .btn-copy:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+    }
+
+    .footer-note {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.7rem;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="auth-card">
+    <div class="auth-header">
+      <div class="auth-badge">
+        <span>🛡️</span> Zero-Trust Gate
+      </div>
+      <h1 class="auth-title">Quant Trade Engine</h1>
+      <p class="auth-subtitle">Institutional 2-Factor Authentication Required</p>
+    </div>
+
+    <div class="alert-box" id="auth-alert"></div>
+
+    <form class="auth-form" id="auth-form" onsubmit="handleAuthSubmit(event)">
+      <div class="field-group">
+        <label class="field-label" for="auth-pin">
+          <span>Master PIN / Password</span>
+          <span style="font-size: 0.7rem; color: #64748b;">Default: quant2026</span>
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="password" 
+            id="auth-pin" 
+            class="auth-input" 
+            placeholder="Enter security PIN" 
+            autocomplete="current-password" 
+            required 
+            autofocus 
+          />
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label" for="auth-code">
+          <span>Google Authenticator Code</span>
+          <span style="font-size: 0.7rem; color: #64748b;">6-Digit OTP</span>
+        </label>
+        <div class="input-wrapper">
+          <input 
+            type="text" 
+            id="auth-code" 
+            class="auth-input code-input" 
+            placeholder="••••••" 
+            maxlength="6" 
+            pattern="[0-9]*" 
+            inputmode="numeric" 
+            autocomplete="one-time-code" 
+            required 
+          />
+        </div>
+      </div>
+
+      <button type="submit" class="btn-submit" id="btn-login">
+        <span>🔓</span> Unlock Trading Console
+      </button>
+    </form>
+
+    <!-- Collapsible 2FA Setup Drawer -->
+    <div class="setup-drawer">
+      <button type="button" class="setup-toggle-btn" onclick="toggleSetupPanel()">
+        <span>🔑</span> <span id="setup-toggle-text">First Time? Set Up Authenticator App</span>
+      </button>
+
+      <div class="setup-panel" id="setup-panel">
+        <p style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 6px;">
+          Scan with Google Authenticator, Microsoft Authenticator, or Authy:
+        </p>
+
+        <div class="qr-container" id="qr-container">
+          <span style="color:#64748b; font-size:0.75rem;">Loading QR Code...</span>
+        </div>
+
+        <p style="font-size: 0.72rem; color: #64748b; margin-top: 8px;">Or enter code manually:</p>
+        <div class="secret-box" id="secret-display">--</div>
+        <button type="button" class="btn-copy" onclick="copySecretKey()">📋 Copy Secret Key</button>
+      </div>
+    </div>
+
+    <div class="footer-note">
+      Quant Trade Copilot · Autonomous Derivatives Engine · Active Protection
+    </div>
+  </div>
+
+  <script>
+    let setupLoaded = false;
+
+    async function toggleSetupPanel() {
+      const panel = document.getElementById('setup-panel');
+      const isHidden = panel.style.display === 'none' || !panel.style.display;
+      panel.style.display = isHidden ? 'block' : 'none';
+      document.getElementById('setup-toggle-text').textContent = isHidden 
+        ? 'Hide Authenticator Setup' 
+        : 'First Time? Set Up Authenticator App';
+
+      if (isHidden && !setupLoaded) {
+        await loadSetupData();
+      }
+    }
+
+    async function loadSetupData() {
+      try {
+        const resp = await fetch('/api/auth/setup');
+        if (!resp.ok) throw new Error('Failed to load 2FA setup');
+        const data = await resp.json();
+        
+        document.getElementById('secret-display').textContent = data.secret;
+        const qrContainer = document.getElementById('qr-container');
+        if (data.qr_svg) {
+          qrContainer.innerHTML = data.qr_svg;
+        }
+        setupLoaded = true;
+      } catch (err) {
+        console.error('Error loading 2FA setup:', err);
+      }
+    }
+
+    function copySecretKey() {
+      const sec = document.getElementById('secret-display').textContent;
+      if (sec && sec !== '--') {
+        navigator.clipboard.writeText(sec).then(() => {
+          alert('Secret Key copied to clipboard! Paste it into Google Authenticator.');
+        });
+      }
+    }
+
+    async function handleAuthSubmit(event) {
+      event.preventDefault();
+      const pin = document.getElementById('auth-pin').value;
+      const code = document.getElementById('auth-code').value;
+      const alertBox = document.getElementById('auth-alert');
+      const submitBtn = document.getElementById('btn-login');
+
+      alertBox.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span>⏳</span> Verifying Credentials...';
+
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin, code })
+        });
+
+        const res = await resp.json();
+        if (resp.ok && res.status === 'ok') {
+          // Success! Redirect preserving tab param
+          const urlParams = new URLSearchParams(window.location.search);
+          const tab = urlParams.get('tab') || 'paper';
+          submitBtn.innerHTML = '<span>✅</span> Access Granted! Entering...';
+          window.location.href = `/?tab=${encodeURIComponent(tab)}`;
+        } else {
+          alertBox.textContent = res.error || 'Authentication failed. Please verify PIN and 2FA code.';
+          alertBox.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<span>🔓</span> Unlock Trading Console';
+          document.getElementById('auth-code').value = '';
+          document.getElementById('auth-code').focus();
+        }
+      } catch (err) {
+        alertBox.textContent = 'Connection error. Could not contact authentication server.';
+        alertBox.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>🔓</span> Unlock Trading Console';
+      }
+    }
+  </script>
+</body>
+</html>
