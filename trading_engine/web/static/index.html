@@ -3395,11 +3395,11 @@
       align-items: flex-end;
       margin-bottom: 6px;
     }
-    .paper-index-strike-wrap {
+    .paper-index-price-wrap {
       display: flex;
       flex-direction: column;
     }
-    .paper-index-strike-lbl {
+    .paper-index-price-lbl {
       font-size: 0.65rem;
       color: #64748b;
       font-weight: 600;
@@ -3407,7 +3407,7 @@
       letter-spacing: 0.5px;
       margin-bottom: 2px;
     }
-    .paper-index-strike {
+    .paper-index-ltp {
       font-family: 'JetBrains Mono', monospace;
       font-size: 1.25rem;
       font-weight: 800;
@@ -3415,11 +3415,15 @@
       letter-spacing: -0.3px;
       line-height: 1.1;
     }
-    .paper-index-ltp-sub {
+    .paper-index-strike-sub {
       font-size: 0.72rem;
       color: #94a3b8;
       font-family: 'JetBrains Mono', monospace;
       margin-top: 3px;
+    }
+    .paper-index-strike-sub strong {
+      color: #38bdf8;
+      font-weight: 700;
     }
     .paper-index-change-wrap {
       text-align: right;
@@ -7636,10 +7640,10 @@
               <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
             </div>
             <div class="paper-index-main">
-              <div class="paper-index-strike-wrap">
-                <span class="paper-index-strike-lbl">Current Strike (ATM)</span>
-                <span class="paper-index-strike">${strikeFormatted}</span>
-                <span class="paper-index-ltp-sub">LTP: ₹${ltpFormatted}</span>
+              <div class="paper-index-price-wrap">
+                <span class="paper-index-price-lbl">Current Index LTP</span>
+                <span class="paper-index-ltp">₹${ltpFormatted}</span>
+                <span class="paper-index-strike-sub">ATM Strike: <strong>${strikeFormatted}</strong></span>
               </div>
               <div class="paper-index-change-wrap">
                 <span class="paper-index-pills ${isUp ? 'pos' : 'neg'}">
