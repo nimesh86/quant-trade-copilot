@@ -4436,7 +4436,7 @@
             <span class="paper-pill" id="paper-pill-available">🔓 Available: ₹20,000</span>
             <span class="paper-pill" id="paper-pill-blocked">🔒 Margin: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-day-pnl">💰 Day P&L: ₹0.00</span>
-            <span class="paper-pill" id="paper-pill-trade-limit">📊 Trades Today: 0 / 4</span>
+            <span class="paper-pill" id="paper-pill-trade-limit">📊 Trades Today: 0 / 8 (Idx: 0/4 | Comm: 0/4)</span>
             <button type="button" class="btn-paper-reset" onclick="resetPaperLedger()" title="Reset Paper Portfolio to ₹20,000">
               🔄 Reset Ledger
             </button>
@@ -4999,18 +4999,32 @@
                 <span class="cfg-hint">Filters morning noise (Default: 09:15 to 10:05 IST)</span>
               </div>
 
-              <!-- 4. Trades/Day -->
-              <div class="cfg-field">
-                <label class="cfg-label" for="cfg-paper-trades-day">Max Trades Per Day</label>
-                <select id="cfg-paper-trades-day" class="cfg-select">
-                  <option value="4" selected>4 Trades / Day (Recommended)</option>
-                  <option value="2">2 Trades / Day</option>
-                  <option value="3">3 Trades / Day</option>
-                  <option value="5">5 Trades / Day</option>
-                  <option value="0">Uncapped</option>
-                </select>
-                <span class="cfg-hint">Maximum trade entries allowed per calendar day</span>
+              <!-- 4. Segment Daily Trade Limits -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="cfg-field">
+                  <label class="cfg-label" for="cfg-paper-trades-index">Index Trades/Day</label>
+                  <select id="cfg-paper-trades-index" class="cfg-select">
+                    <option value="4" selected>4 Trades (Default)</option>
+                    <option value="2">2 Trades</option>
+                    <option value="3">3 Trades</option>
+                    <option value="5">5 Trades</option>
+                    <option value="0">Uncapped</option>
+                  </select>
+                  <span class="cfg-hint">NIFTY Options Limit</span>
+                </div>
+                <div class="cfg-field">
+                  <label class="cfg-label" for="cfg-paper-trades-comm">Commodity Trades/Day</label>
+                  <select id="cfg-paper-trades-comm" class="cfg-select">
+                    <option value="4" selected>4 Trades (Default)</option>
+                    <option value="2">2 Trades</option>
+                    <option value="3">3 Trades</option>
+                    <option value="5">5 Trades</option>
+                    <option value="0">Uncapped</option>
+                  </select>
+                  <span class="cfg-hint">MCX (Crude/Gas) Limit</span>
+                </div>
               </div>
+              <input type="hidden" id="cfg-paper-trades-day" value="8" />
 
               <!-- Automatic Segment & Contract Notice -->
               <div class="cfg-info-callout" style="margin-top: 10px;">
@@ -5789,7 +5803,9 @@
         const paperCap = parseFloat(document.getElementById('cfg-paper-capital')?.value) || 20000;
         const bFrom = document.getElementById('cfg-paper-block-from')?.value || '09:15';
         const bTo = document.getElementById('cfg-paper-block-to')?.value || '10:05';
-        const maxTr = parseInt(document.getElementById('cfg-paper-trades-day')?.value) || 4;
+        const maxIdx = parseInt(document.getElementById('cfg-paper-trades-index')?.value) || 4;
+        const maxComm = parseInt(document.getElementById('cfg-paper-trades-comm')?.value) || 4;
+        const maxTr = maxIdx + maxComm;
 
         await fetch('/api/paper/config', {
           method: 'POST',
@@ -5798,6 +5814,8 @@
             strategy: paperStrat,
             capital: paperCap,
             blocked_slots: `${bFrom}-${bTo}`,
+            max_trades_index: maxIdx,
+            max_trades_commodity: maxComm,
             max_trades_per_day: maxTr
           })
         });
@@ -5935,6 +5953,12 @@
             if (parts[1] && document.getElementById('cfg-paper-block-to')) {
               document.getElementById('cfg-paper-block-to').value = parts[1].trim();
             }
+          }
+          if (pCfg.max_trades_index !== undefined && document.getElementById('cfg-paper-trades-index')) {
+            document.getElementById('cfg-paper-trades-index').value = String(pCfg.max_trades_index);
+          }
+          if (pCfg.max_trades_commodity !== undefined && document.getElementById('cfg-paper-trades-comm')) {
+            document.getElementById('cfg-paper-trades-comm').value = String(pCfg.max_trades_commodity);
           }
           if (pCfg.max_trades_per_day !== undefined && document.getElementById('cfg-paper-trades-day')) {
             document.getElementById('cfg-paper-trades-day').value = String(pCfg.max_trades_per_day);
@@ -8183,9 +8207,13 @@
 
       const limitPill = document.getElementById('paper-pill-trade-limit');
       if (limitPill) {
-        const maxTr = cfg.max_trades_per_day || 4;
-        const dayCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
-        limitPill.textContent = `📊 Trades Today: ${dayCount} / ${maxTr}`;
+        const maxTot = cfg.max_trades_per_day || sum.max_trades_total || 8;
+        const maxIdx = cfg.max_trades_index || sum.max_trades_index || 4;
+        const maxComm = cfg.max_trades_commodity || sum.max_trades_commodity || 4;
+        const totCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
+        const idxCount = sum.today_trades_index !== undefined ? sum.today_trades_index : 0;
+        const commCount = sum.today_trades_commodity !== undefined ? sum.today_trades_commodity : 0;
+        limitPill.textContent = `📊 Trades Today: ${totCount} / ${maxTot} (Idx: ${idxCount}/${maxIdx} | Comm: ${commCount}/${maxComm})`;
       }
 
       // 2. Active Trade Card vs Idle Card

@@ -70,7 +70,9 @@ class PaperTradeDaemon:
         self.blocked_capital = 0.0
         self.available_capital = 20000.0
         self.symbol = "NIFTY"
-        self.max_trades_per_day = 4
+        self.max_trades_per_day = 8
+        self.max_trades_index = 4
+        self.max_trades_commodity = 4
         self.blocked_time_slots = [["09:15", "10:05"]]
         self.risk_pct = 0.07  # 7% compounding risk per trade
         self.sl_pct = 0.30    # 30% Stop Loss
@@ -204,6 +206,25 @@ class PaperTradeDaemon:
         self.load_state()
         self.bootstrap_bars_from_db()
 
+    def get_today_trade_counts(self, today_str: Optional[str] = None) -> Tuple[int, int, int]:
+        """
+        Returns (index_trades_count, commodity_trades_count, total_trades_count) for today.
+        - Index Trades: NIFTY, BANKNIFTY, SENSEX Options and Equities.
+        - Commodity Trades: CRUDEOIL, NATURALGAS, GOLD, SILVER Futures and Options.
+        """
+        if not today_str:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+        today_trades = [t for t in self.trade_history if t.get("date") == today_str]
+        comm_symbols = ("CRUDEOIL", "NATURALGAS", "GOLD", "GOLDM", "SILVER", "SILVERM")
+        comm_count = sum(
+            1 for t in today_trades
+            if t.get("segment") == "MCX Commodity"
+            or t.get("symbol") in comm_symbols
+            or any(s in str(t.get("contract", "")).upper() for s in ("CRUDE", "NATURALGAS", "GOLD", "SILVER"))
+        )
+        index_count = len(today_trades) - comm_count
+        return index_count, comm_count, len(today_trades)
+
     def bootstrap_bars_from_db(self):
         """Loads today's completed 1-minute candles from TimescaleDB on engine startup."""
         try:
@@ -262,7 +283,12 @@ class PaperTradeDaemon:
                     self.initial_capital = float(data.get("initial_capital", self.initial_capital))
                     self.blocked_capital = float(data.get("blocked_capital", 0.0))
                     self.available_capital = float(data.get("available_capital", self.capital - self.blocked_capital))
-                    self.max_trades_per_day = int(data.get("max_trades_per_day", self.max_trades_per_day))
+                    self.max_trades_index = int(data.get("max_trades_index", 4))
+                    self.max_trades_commodity = int(data.get("max_trades_commodity", 4))
+                    saved_total = int(data.get("max_trades_per_day", 8))
+                    if saved_total <= 4:
+                        saved_total = self.max_trades_index + self.max_trades_commodity
+                    self.max_trades_per_day = saved_total
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
                     self.active_trade = data.get("active_trade")
                     self.trade_history = data.get("trade_history", [])
@@ -317,6 +343,9 @@ class PaperTradeDaemon:
                 "available_capital": round(self.available_capital, 2),
                 "initial_capital": round(self.initial_capital, 2),
                 "max_trades_per_day": self.max_trades_per_day,
+                "max_trades_total": self.max_trades_per_day,
+                "max_trades_index": self.max_trades_index,
+                "max_trades_commodity": self.max_trades_commodity,
                 "blocked_time_slots": self.blocked_time_slots,
                 "active_trade": self.active_trade,
                 "trade_history": self.trade_history,
@@ -337,10 +366,16 @@ class PaperTradeDaemon:
             if not self.trade_history and not self.active_trade:
                 self.capital = new_cap
                 self.initial_capital = new_cap
+        if "max_trades_index" in params:
+            self.max_trades_index = int(params["max_trades_index"])
+        if "max_trades_commodity" in params:
+            self.max_trades_commodity = int(params["max_trades_commodity"])
         if "max_trades_per_day" in params:
             self.max_trades_per_day = int(params["max_trades_per_day"])
         elif "maxTradesPerDay" in params:
             self.max_trades_per_day = int(params["maxTradesPerDay"])
+        elif "max_trades_index" in params or "max_trades_commodity" in params:
+            self.max_trades_per_day = self.max_trades_index + self.max_trades_commodity
         if "blocked_time_slots" in params:
             self.blocked_time_slots = params["blocked_time_slots"]
         elif "blockedTimeSlots" in params:
@@ -357,6 +392,9 @@ class PaperTradeDaemon:
             "available_capital": self.available_capital,
             "initial_capital": self.initial_capital,
             "max_trades_per_day": self.max_trades_per_day,
+            "max_trades_total": self.max_trades_per_day,
+            "max_trades_index": self.max_trades_index,
+            "max_trades_commodity": self.max_trades_commodity,
             "blocked_time_slots": self.blocked_time_slots,
             "symbol": self.symbol,
             "segment": "NIFTY (Auto - Segment Detector Ready)",
@@ -606,10 +644,12 @@ class PaperTradeDaemon:
             if now.hour < 9:
                 return
 
-            # Max Trades Per Day Gating
+            # Max Trades Per Day Gating (Commodity-specific limit + total cap)
             today_str = now.strftime("%Y-%m-%d")
-            today_trades = [t for t in self.trade_history if t.get("date") == today_str]
-            if self.max_trades_per_day > 0 and len(today_trades) >= self.max_trades_per_day:
+            idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+            if self.max_trades_commodity > 0 and comm_cnt >= self.max_trades_commodity:
+                return
+            if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
                 return
 
             self._evaluate_commodity_strategy_signal(symbol, now)
@@ -633,10 +673,12 @@ class PaperTradeDaemon:
         if now.hour > 15 or (now.hour == 15 and now.minute >= 10):
             return
 
-        # Gating 3: Max Trades Per Day Gating
+        # Gating 3: Max Trades Per Day Gating (Index-specific limit + total cap)
         today_str = now.strftime("%Y-%m-%d")
-        today_trades = [t for t in self.trade_history if t.get("date") == today_str]
-        if self.max_trades_per_day > 0 and len(today_trades) >= self.max_trades_per_day:
+        idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+        if self.max_trades_index > 0 and idx_cnt >= self.max_trades_index:
+            return
+        if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
             return
 
         # Evaluate Strategy Setup
@@ -1116,6 +1158,7 @@ class PaperTradeDaemon:
         today_str = date.today().isoformat()
         today_trades = [t for t in trades if t.get("date") == today_str]
         today_net = sum(t["net"] for t in today_trades)
+        idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
 
         return {
             "total_trades": total_trades,
@@ -1135,7 +1178,12 @@ class PaperTradeDaemon:
             "available_capital": round(self.available_capital, 2),
             "initial_capital": round(self.initial_capital, 2),
             "today_net": round(today_net, 2),
-            "today_trades_count": len(today_trades),
+            "today_trades_count": tot_cnt,
+            "today_trades_index": idx_cnt,
+            "today_trades_commodity": comm_cnt,
+            "max_trades_total": self.max_trades_per_day,
+            "max_trades_index": self.max_trades_index,
+            "max_trades_commodity": self.max_trades_commodity,
             "monthly_breakdown": monthly_list,
             "today_trades": today_trades,
             "all_trades": list(reversed(trades))
