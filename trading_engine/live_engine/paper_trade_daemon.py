@@ -202,9 +202,27 @@ class PaperTradeDaemon:
         self.buyer_strength: float = 52.0
         self.seller_strength: float = 48.0
 
+        # Crude ML Model (Trained XGBoost)
+        self.crude_model = None
+        self.crude_feature_cols = []
+        self._load_crude_model()
+
         # Load saved state from disk & bootstrap today's candle history
         self.load_state()
         self.bootstrap_bars_from_db()
+
+    def _load_crude_model(self):
+        """Loads the specialized Crude Oil XGBoost macro model if present."""
+        try:
+            import joblib
+            model_p = ROOT_DIR / "models" / "saved" / "crude_macro_model.pkl"
+            if model_p.exists():
+                pkg = joblib.load(model_p)
+                self.crude_model = pkg.get("model")
+                self.crude_feature_cols = pkg.get("feature_cols", [])
+                logger.info("PaperTradeDaemon: Loaded specialized Crude Oil XGBoost Macro Model.")
+        except Exception as e:
+            logger.debug(f"PaperTradeDaemon: Crude model load skipped: {e}")
 
     def get_today_trade_counts(self, today_str: Optional[str] = None) -> Tuple[int, int, int]:
         """
@@ -795,13 +813,39 @@ class PaperTradeDaemon:
             signal_dir = "PUT"
             setup_name = f"MCX {symbol} Reversal (SHORT)"
 
+        prob_str = "72%"
+        if signal_dir and symbol == "CRUDEOIL" and self.crude_model and len(bars) >= 20:
+            try:
+                from trading_engine.models.crude_features import compute_crude_features
+                df_feat = compute_crude_features(df)
+                if self.crude_feature_cols:
+                    X_last = df_feat[self.crude_feature_cols].iloc[[-1]]
+                    probas = self.crude_model.predict_proba(X_last)[0]
+                    p_bull = float(probas[1])
+                    p_bear = float(probas[2])
+
+                    if signal_dir == "CALL":
+                        prob_str = f"{int(p_bull * 100)}%"
+                        if p_bull < 0.40:
+                            logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < 0.40 threshold.")
+                            return
+                        setup_name = f"MCX CRUDE Dual XGBoost (LONG, {prob_str})"
+                    elif signal_dir == "PUT":
+                        prob_str = f"{int(p_bear * 100)}%"
+                        if p_bear < 0.40:
+                            logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < 0.40 threshold.")
+                            return
+                        setup_name = f"MCX CRUDE Dual XGBoost (SHORT, {prob_str})"
+            except Exception as e:
+                logger.debug(f"Crude ML probability evaluation skipped: {e}")
+
         if signal_dir:
-            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Price: {last_c:.2f}")
+            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Price: {last_c:.2f} | ML Prob: {prob_str}")
             self._execute_commodity_paper_entry(
                 symbol=symbol,
                 direction=signal_dir,
                 strategy_name=setup_name,
-                probability="72%",
+                probability=prob_str,
                 current_price=last_c,
                 now=now
             )
