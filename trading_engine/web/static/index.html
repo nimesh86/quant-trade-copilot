@@ -4430,14 +4430,16 @@
           </div>
 
           <div class="paper-meta-pills">
-            <span class="paper-pill accent" id="paper-pill-segment">🎯 Segment: NIFTY 50 (Dynamic ATM)</span>
+            <span class="paper-pill accent" id="paper-pill-segment">🎯 Segment: NIFTY & CRUDE (Separate Funds)</span>
             <span class="paper-pill" id="paper-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
-            <span class="paper-pill" id="paper-pill-capital">💼 Total Cap: ₹20,000</span>
-            <span class="paper-pill" id="paper-pill-available">🔓 Available: ₹20,000</span>
+            <span class="paper-pill" id="paper-pill-capital">💼 Total Cap: ₹70,000</span>
+            <span class="paper-pill" id="paper-pill-stock-cap" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">📈 Stock: ₹20,000</span>
+            <span class="paper-pill" id="paper-pill-crude-cap" style="border-color: rgba(251, 146, 60, 0.4); color: #fb923c;">🛢️ Crude: ₹50,000</span>
+            <span class="paper-pill" id="paper-pill-available">🔓 Available: ₹70,000</span>
             <span class="paper-pill" id="paper-pill-blocked">🔒 Margin: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-day-pnl">💰 Day P&L: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-trade-limit">📊 Trades Today: 0 / 8 (Idx: 0/4 | Comm: 0/4)</span>
-            <button type="button" class="btn-paper-reset" onclick="resetPaperLedger()" title="Reset Paper Portfolio to ₹20,000">
+            <button type="button" class="btn-paper-reset" onclick="resetPaperLedger()" title="Reset Paper Portfolio (Stock ₹20k | Crude ₹50k)">
               🔄 Reset Ledger
             </button>
           </div>
@@ -8181,13 +8183,25 @@
 
       const capPill = document.getElementById('paper-pill-capital');
       if (capPill) {
-        const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
+        const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 70000));
         capPill.textContent = `💼 Total Cap: ₹${Math.round(cVal).toLocaleString('en-IN')}`;
+      }
+
+      const stockPill = document.getElementById('paper-pill-stock-cap');
+      if (stockPill) {
+        const sVal = state.equity_capital !== undefined ? state.equity_capital : (sum.equity_capital !== undefined ? sum.equity_capital : 20000);
+        stockPill.textContent = `📈 Stock: ₹${Math.round(sVal).toLocaleString('en-IN')}`;
+      }
+
+      const crudePill = document.getElementById('paper-pill-crude-cap');
+      if (crudePill) {
+        const crVal = state.commodity_capital !== undefined ? state.commodity_capital : (sum.commodity_capital !== undefined ? sum.commodity_capital : 50000);
+        crudePill.textContent = `🛢️ Crude: ₹${Math.round(crVal).toLocaleString('en-IN')}`;
       }
 
       const availPill = document.getElementById('paper-pill-available');
       if (availPill) {
-        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : (cfg.capital || 20000));
+        const aVal = state.available_capital !== undefined ? state.available_capital : (sum.available_capital !== undefined ? sum.available_capital : (cfg.capital || 70000));
         availPill.textContent = `🔓 Available: ₹${Math.round(aVal).toLocaleString('en-IN')}`;
       }
 
@@ -8220,8 +8234,8 @@
       renderPaperActiveTrade(act, state);
 
       // 3. Summary KPI Cards
-      const runningCap = sum.capital !== undefined ? sum.capital : (state.capital !== undefined ? state.capital : (cfg.capital || 20000));
-      const initCap = sum.initial_capital || cfg.capital || 20000;
+      const runningCap = sum.capital !== undefined ? sum.capital : (state.capital !== undefined ? state.capital : (cfg.capital || 70000));
+      const initCap = sum.initial_capital || cfg.capital || 70000;
       const netPnl = sum.net_pnl !== undefined ? sum.net_pnl : (tot.net_pnl || 0);
       const grossPnl = sum.gross_pnl !== undefined ? sum.gross_pnl : (tot.gross_pnl || 0);
       const totalTrades = sum.total_trades !== undefined ? sum.total_trades : (tot.count || tradesList.length);
@@ -8241,7 +8255,11 @@
         sumCapEl.className = 'bt-stat-value ' + (runningCap >= initCap ? 'positive' : 'negative');
       }
       const sumCapSub = document.getElementById('paper-sum-cap-sub');
-      if (sumCapSub) sumCapSub.textContent = `Initial: ₹${Math.round(initCap).toLocaleString('en-IN')}`;
+      if (sumCapSub) {
+        const sCap = state.equity_capital !== undefined ? state.equity_capital : (sum.equity_capital || 20000);
+        const cCap = state.commodity_capital !== undefined ? state.commodity_capital : (sum.commodity_capital || 50000);
+        sumCapSub.textContent = `Stock: ₹${Math.round(sCap).toLocaleString('en-IN')} | Crude: ₹${Math.round(cCap).toLocaleString('en-IN')}`;
+      }
 
       const sumAvailEl = document.getElementById('paper-sum-avail-capital');
       if (sumAvailEl) {
@@ -8251,8 +8269,9 @@
       }
       const sumBlockedSub = document.getElementById('paper-sum-blocked-sub');
       if (sumBlockedSub) {
-        const bVal = state.blocked_capital !== undefined ? state.blocked_capital : (sum.blocked_capital || 0);
-        sumBlockedSub.textContent = `Blocked Margin: ₹${Math.round(bVal).toLocaleString('en-IN')}`;
+        const sAvail = state.equity_available_capital !== undefined ? state.equity_available_capital : (sum.equity_available_capital || 20000);
+        const cAvail = state.commodity_available_capital !== undefined ? state.commodity_available_capital : (sum.commodity_available_capital || 50000);
+        sumBlockedSub.textContent = `Avail: Stock ₹${Math.round(sAvail).toLocaleString('en-IN')} | Crude ₹${Math.round(cAvail).toLocaleString('en-IN')}`;
       }
 
       const sumNetEl = document.getElementById('paper-sum-net-pnl');
@@ -8261,7 +8280,11 @@
         sumNetEl.className = 'bt-stat-value ' + (netPnl >= 0 ? 'positive' : 'negative');
       }
       const sumRoiSub = document.getElementById('paper-sum-roi-sub');
-      if (sumRoiSub) sumRoiSub.textContent = `${roiPct >= 0 ? '+' : ''}${roiPct.toFixed(2)}% Return`;
+      if (sumRoiSub) {
+        const eqPnl = sum.equity_net_pnl !== undefined ? sum.equity_net_pnl : 0;
+        const commPnl = sum.commodity_net_pnl !== undefined ? sum.commodity_net_pnl : 0;
+        sumRoiSub.textContent = `Stock: ${eqPnl >= 0 ? '+' : ''}₹${Math.round(eqPnl).toLocaleString('en-IN')} | Crude: ${commPnl >= 0 ? '+' : ''}₹${Math.round(commPnl).toLocaleString('en-IN')}`;
+      }
 
       const sumWrEl = document.getElementById('paper-sum-winrate');
       if (sumWrEl) sumWrEl.textContent = winRate.toFixed(1) + '%';
@@ -8519,12 +8542,12 @@
     }
 
     async function resetPaperLedger() {
-      if (!confirm('Reset Paper Trading ledger back to initial capital of ₹20,000.00 and clear all paper trades?')) return;
+      if (!confirm('Reset Paper Trading ledger back to separate ICICI initial capitals: Stock: ₹20,000 | Crude: ₹50,000 (Total: ₹70,000) and clear all paper trades?')) return;
       try {
         const resp = await fetch('/api/paper/reset', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ capital: 20000 })
+          body: JSON.stringify({ equity_capital: 20000, commodity_capital: 50000 })
         });
         const res = await resp.json();
         await fetchPaperTradingState();

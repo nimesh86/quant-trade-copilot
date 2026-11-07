@@ -65,10 +65,22 @@ class PaperTradeDaemon:
 
         # Configuration (synchronized with Config Cogwheel modal)
         self.strategy = "dual_xgboost_macro"
-        self.initial_capital = 20000.0
-        self.capital = 20000.0
-        self.blocked_capital = 0.0
-        self.available_capital = 20000.0
+
+        # Dual-Fund Segregated Capital Architecture (ICICI Direct style separate accounts)
+        self.equity_initial_capital = 20000.0
+        self.equity_capital = 20000.0
+        self.equity_blocked_capital = 0.0
+        self.equity_available_capital = 20000.0
+
+        self.commodity_initial_capital = 50000.0
+        self.commodity_capital = 50000.0
+        self.commodity_blocked_capital = 0.0
+        self.commodity_available_capital = 50000.0
+
+        # Cooldown trackers (15-min cooldown between exits and entries)
+        self.last_crude_exit_time: Optional[datetime] = None
+        self.last_equity_exit_time: Optional[datetime] = None
+
         self.symbol = "NIFTY"
         self.max_trades_per_day = 8
         self.max_trades_index = 4
@@ -211,6 +223,49 @@ class PaperTradeDaemon:
         self.load_state()
         self.bootstrap_bars_from_db()
 
+    @property
+    def capital(self) -> float:
+        return round(self.equity_capital + self.commodity_capital, 2)
+
+    @capital.setter
+    def capital(self, val: float):
+        pass
+
+    @property
+    def initial_capital(self) -> float:
+        return round(self.equity_initial_capital + self.commodity_initial_capital, 2)
+
+    @initial_capital.setter
+    def initial_capital(self, val: float):
+        pass
+
+    @property
+    def blocked_capital(self) -> float:
+        return round(self.equity_blocked_capital + self.commodity_blocked_capital, 2)
+
+    @blocked_capital.setter
+    def blocked_capital(self, val: float):
+        pass
+
+    @property
+    def available_capital(self) -> float:
+        return round(self.equity_available_capital + self.commodity_available_capital, 2)
+
+    @available_capital.setter
+    def available_capital(self, val: float):
+        pass
+
+    def _is_commodity_trade(self, t: Optional[Dict[str, Any]]) -> bool:
+        """Determines if a trade belongs to the MCX Commodity fund ledger."""
+        if not t:
+            return False
+        comm_symbols = ("CRUDEOIL", "NATURALGAS", "GOLD", "GOLDM", "SILVER", "SILVERM")
+        return (
+            t.get("segment") == "MCX Commodity"
+            or t.get("symbol") in comm_symbols
+            or any(s in str(t.get("contract", "")).upper() for s in ("CRUDE", "NATURALGAS", "GOLD", "SILVER"))
+        )
+
     def _load_crude_model(self):
         """Loads the specialized Crude Oil XGBoost macro model if present."""
         try:
@@ -290,17 +345,33 @@ class PaperTradeDaemon:
         except Exception as e:
             logger.debug(f"PaperTradeDaemon: DB bar bootstrap skipped: {e}")
 
+        # Bootstrap recent CRUDEOIL 1-minute bars from historical archive for immediate 1H-trend & 30-bar indicators
+        try:
+            crude_csv = DATA_DIR / "historical" / "CRUDEOIL_1min_3years.csv"
+            if crude_csv.exists() and "CRUDEOIL" not in self.bar_history:
+                df_c = pd.read_csv(crude_csv).tail(500)
+                self.bar_history["CRUDEOIL"] = []
+                for _, row in df_c.iterrows():
+                    self.bar_history["CRUDEOIL"].append({
+                        "timestamp": str(row["datetime"]),
+                        "open": float(row["open"]),
+                        "high": float(row["high"]),
+                        "low": float(row["low"]),
+                        "close": float(row["close"]),
+                        "volume": int(row.get("volume", 0) or 0),
+                        "symbol": "CRUDEOIL"
+                    })
+                logger.info(f"PaperTradeDaemon: Bootstrapped {len(self.bar_history['CRUDEOIL'])} 1-min CRUDEOIL bars from archive.")
+        except Exception as e:
+            logger.debug(f"PaperTradeDaemon: CRUDE bar bootstrap skipped: {e}")
+
     def load_state(self):
-        """Restores persistent paper trading portfolio from disk."""
+        """Restores persistent paper trading portfolio from disk with dual-account segregation."""
         if STATE_FILE.exists():
             try:
                 with open(STATE_FILE, "r") as f:
                     data = json.load(f)
                     self.strategy = data.get("strategy", self.strategy)
-                    self.capital = float(data.get("capital", self.capital))
-                    self.initial_capital = float(data.get("initial_capital", self.initial_capital))
-                    self.blocked_capital = float(data.get("blocked_capital", 0.0))
-                    self.available_capital = float(data.get("available_capital", self.capital - self.blocked_capital))
                     self.max_trades_index = int(data.get("max_trades_index", 4))
                     self.max_trades_commodity = int(data.get("max_trades_commodity", 4))
                     saved_total = int(data.get("max_trades_per_day", 8))
@@ -310,6 +381,31 @@ class PaperTradeDaemon:
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
                     self.active_trade = data.get("active_trade")
                     self.trade_history = data.get("trade_history", [])
+
+                    # Dual-Account Segregation (ICICI Direct style separate ledgers)
+                    if "equity_capital" in data and "commodity_capital" in data:
+                        self.equity_initial_capital = float(data.get("equity_initial_capital", 20000.0))
+                        self.equity_capital = float(data.get("equity_capital", 20000.0))
+                        self.equity_blocked_capital = float(data.get("equity_blocked_capital", 0.0))
+                        self.equity_available_capital = float(data.get("equity_available_capital", self.equity_capital - self.equity_blocked_capital))
+
+                        self.commodity_initial_capital = float(data.get("commodity_initial_capital", 50000.0))
+                        self.commodity_capital = float(data.get("commodity_capital", 50000.0))
+                        self.commodity_blocked_capital = float(data.get("commodity_blocked_capital", 0.0))
+                        self.commodity_available_capital = float(data.get("commodity_available_capital", self.commodity_capital - self.commodity_blocked_capital))
+                    else:
+                        # Legacy state file migration: separate into 20k Stock fund and 50k Crude fund
+                        self.equity_initial_capital = 20000.0
+                        self.commodity_initial_capital = 50000.0
+                        eq_pnl = sum(t.get("net", 0.0) for t in self.trade_history if not self._is_commodity_trade(t))
+                        comm_pnl = sum(t.get("net", 0.0) for t in self.trade_history if self._is_commodity_trade(t))
+                        self.equity_capital = round(self.equity_initial_capital + eq_pnl, 2)
+                        self.equity_blocked_capital = 0.0
+                        self.equity_available_capital = self.equity_capital
+                        self.commodity_capital = round(self.commodity_initial_capital + comm_pnl, 2)
+                        self.commodity_blocked_capital = 0.0
+                        self.commodity_available_capital = self.commodity_capital
+
                     # Auto-normalize legacy trade records for backwards compatibility
                     for t in self.trade_history:
                         if "entry_price" not in t and "entry_rate" in t:
@@ -335,31 +431,58 @@ class PaperTradeDaemon:
                             self.active_trade["quantity"] = self.active_trade["units"]
                         if "units" not in self.active_trade and "quantity" in self.active_trade:
                             self.active_trade["units"] = self.active_trade["quantity"]
-                    logger.info(f"PaperTradeDaemon: Restored {len(self.trade_history)} trades. Capital: ₹{self.capital:,.2f}")
+
+                    logger.info(
+                        f"PaperTradeDaemon: Restored {len(self.trade_history)} trades. "
+                        f"Stock Bal: ₹{self.equity_capital:,.2f} | Crude Bal: ₹{self.commodity_capital:,.2f} | "
+                        f"Total Capital: ₹{self.capital:,.2f}"
+                    )
             except Exception as e:
                 logger.error(f"PaperTradeDaemon: Error loading state: {e}")
 
-    def reset_state(self, capital: float = 20000.0):
-        """Clears paper trading ledger and resets capital."""
-        self.initial_capital = float(capital)
-        self.capital = float(capital)
-        self.blocked_capital = 0.0
-        self.available_capital = float(capital)
+    def reset_state(self, equity_capital: float = 20000.0, commodity_capital: float = 50000.0):
+        """Clears paper trading ledger and resets segregated ICICI account balances."""
+        self.equity_initial_capital = float(equity_capital)
+        self.equity_capital = float(equity_capital)
+        self.equity_blocked_capital = 0.0
+        self.equity_available_capital = float(equity_capital)
+
+        self.commodity_initial_capital = float(commodity_capital)
+        self.commodity_capital = float(commodity_capital)
+        self.commodity_blocked_capital = 0.0
+        self.commodity_available_capital = float(commodity_capital)
+
         self.active_trade = None
         self.trade_history = []
+        self.last_crude_exit_time = None
+        self.last_equity_exit_time = None
         self.save_state()
-        logger.info(f"🔄 [PAPER TRADE RESET] Ledger cleared. Capital reset to ₹{capital:,.2f}")
+        logger.info(
+            f"🔄 [PAPER TRADE RESET] Ledger cleared. Capital reset to Stock: ₹{equity_capital:,.2f} | "
+            f"Crude: ₹{commodity_capital:,.2f} (Total: ₹{self.capital:,.2f})"
+        )
 
     def save_state(self):
-        """Persists paper trading state to disk."""
+        """Persists paper trading state to disk with segregated fund accounting."""
         try:
             payload = {
                 "strategy": self.strategy,
+                # Aggregated Balances
                 "capital": round(self.capital, 2),
                 "total_capital": round(self.capital, 2),
                 "blocked_capital": round(self.blocked_capital, 2),
                 "available_capital": round(self.available_capital, 2),
                 "initial_capital": round(self.initial_capital, 2),
+                # Segregated ICICI Accounts
+                "equity_capital": round(self.equity_capital, 2),
+                "equity_initial_capital": round(self.equity_initial_capital, 2),
+                "equity_blocked_capital": round(self.equity_blocked_capital, 2),
+                "equity_available_capital": round(self.equity_available_capital, 2),
+                "commodity_capital": round(self.commodity_capital, 2),
+                "commodity_initial_capital": round(self.commodity_initial_capital, 2),
+                "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
+                "commodity_available_capital": round(self.commodity_available_capital, 2),
+                # Limits & Controls
                 "max_trades_per_day": self.max_trades_per_day,
                 "max_trades_total": self.max_trades_per_day,
                 "max_trades_index": self.max_trades_index,
@@ -378,12 +501,16 @@ class PaperTradeDaemon:
         """Updates trading parameters from config modal."""
         if "strategy" in params and params["strategy"]:
             self.strategy = str(params["strategy"])
-        if "capital" in params and float(params["capital"]) > 0:
-            new_cap = float(params["capital"])
-            # If resetting or fresh run
+        if "equity_capital" in params and float(params["equity_capital"]) > 0:
+            new_eq = float(params["equity_capital"])
             if not self.trade_history and not self.active_trade:
-                self.capital = new_cap
-                self.initial_capital = new_cap
+                self.equity_capital = new_eq
+                self.equity_initial_capital = new_eq
+        if "commodity_capital" in params and float(params["commodity_capital"]) > 0:
+            new_comm = float(params["commodity_capital"])
+            if not self.trade_history and not self.active_trade:
+                self.commodity_capital = new_comm
+                self.commodity_initial_capital = new_comm
         if "max_trades_index" in params:
             self.max_trades_index = int(params["max_trades_index"])
         if "max_trades_commodity" in params:
@@ -409,13 +536,21 @@ class PaperTradeDaemon:
             "blocked_capital": self.blocked_capital,
             "available_capital": self.available_capital,
             "initial_capital": self.initial_capital,
+            "equity_capital": round(self.equity_capital, 2),
+            "equity_available_capital": round(self.equity_available_capital, 2),
+            "equity_blocked_capital": round(self.equity_blocked_capital, 2),
+            "equity_initial_capital": round(self.equity_initial_capital, 2),
+            "commodity_capital": round(self.commodity_capital, 2),
+            "commodity_available_capital": round(self.commodity_available_capital, 2),
+            "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
+            "commodity_initial_capital": round(self.commodity_initial_capital, 2),
             "max_trades_per_day": self.max_trades_per_day,
             "max_trades_total": self.max_trades_per_day,
             "max_trades_index": self.max_trades_index,
             "max_trades_commodity": self.max_trades_commodity,
             "blocked_time_slots": self.blocked_time_slots,
             "symbol": self.symbol,
-            "segment": "NIFTY (Auto - Segment Detector Ready)",
+            "segment": "NIFTY & CRUDEOIL (Separate ICICI Ledgers)",
             "contract": "Dynamic ATM (CE & PE)"
         }
 
@@ -544,49 +679,87 @@ class PaperTradeDaemon:
         # MCX Commodity Position Evaluation
         if pos.get("segment") == "MCX Commodity" or pos_sym in ("CRUDEOIL", "NATURALGAS"):
             if symbol == contract_sym or symbol == pos_sym:
+                underlying_px = ltp
+                pos["current_underlying"] = underlying_px
                 trend = pos.get("trend", "BULLISH")
-                pts = (ltp - pos["entry_price"]) if trend in ("BULLISH", "LONG", "CALL") else (pos["entry_price"] - ltp)
-                pos["current_price"] = round(ltp, 2)
-                pos["points_gained"] = round(pts, 2)
-                pos["points"] = round(pts, 2)
-                pos["unrealized_pnl"] = round(pts * pos["units"], 2)
-                pos["buyer_strength"] = self.buyer_strength
-                pos["seller_strength"] = self.seller_strength
+                u_entry = pos.get("entry_underlying", pos["entry_price"])
 
-                # Trailing Stop Loss for CRUDEOIL (+25 pts gain moves SL to entry + 5 pts)
-                if pos_sym == "CRUDEOIL":
-                    trail_trigger = 25.0
-                    trail_lock = 5.0
-                    if not pos.get("trail_active"):
-                        if pts >= trail_trigger:
-                            pos["trail_active"] = True
-                            if trend in ("BULLISH", "LONG", "CALL"):
-                                pos["sl"] = round(pos["entry_price"] + trail_lock, 2)
-                            else:
-                                pos["sl"] = round(pos["entry_price"] - trail_lock, 2)
-                            logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Gain +{pts:.1f} pts >= {trail_trigger} pts. SL secured at ₹{pos['sl']:.2f}")
-
-                # Check Stop Loss / Target for Long (BULLISH)
                 if trend in ("BULLISH", "LONG", "CALL"):
-                    if ltp <= pos["sl"]:
-                        reason = "Trailing SL Hit" if pos.get("trail_active") else "Stop Loss Hit"
-                        self._close_active_trade(reason=reason, exit_price=pos["sl"], exit_time=now)
+                    gain_u = round(underlying_px - u_entry, 2)
+                    pts_opt = round(gain_u * 0.55, 2)
+
+                    # Trailing Trigger (+22 pts underlying move locks +3 pts option profit)
+                    if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
+                        pos["trail_active"] = True
+                        pos["sl_underlying"] = round(u_entry + pos.get("trail_lock_u", 5.5), 2)
+                        pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
+                        logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+
+                    # Target Hit (+45 pts underlying move -> +25 pts option gain)
+                    if underlying_px >= pos.get("target_underlying", u_entry + 45.0):
+                        self._close_active_trade(
+                            reason="Target Hit (+25 pts Option)",
+                            exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
+                            exit_time=now,
+                            opt_pts=pos.get("opt_tgt_pts", 25.0)
+                        )
                         return
-                    if ltp >= pos["target"]:
-                        self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
+                    # Stop Loss / Trailed SL Hit
+                    elif underlying_px <= pos.get("sl_underlying", u_entry - 22.0):
+                        opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
+                        reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
+                        self._close_active_trade(
+                            reason=reason,
+                            exit_price=pos["entry_price"] + opt_exit_pts,
+                            exit_time=now,
+                            opt_pts=opt_exit_pts
+                        )
                         return
-                else:  # Short (BEARISH)
-                    if ltp >= pos["sl"]:
-                        reason = "Trailing SL Hit" if pos.get("trail_active") else "Stop Loss Hit"
-                        self._close_active_trade(reason=reason, exit_price=pos["sl"], exit_time=now)
+                else:  # Short (BEARISH / PUT)
+                    gain_u = round(u_entry - underlying_px, 2)
+                    pts_opt = round(gain_u * 0.55, 2)
+
+                    if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
+                        pos["trail_active"] = True
+                        pos["sl_underlying"] = round(u_entry - pos.get("trail_lock_u", 5.5), 2)
+                        pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
+                        logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+
+                    if underlying_px <= pos.get("target_underlying", u_entry - 45.0):
+                        self._close_active_trade(
+                            reason="Target Hit (+25 pts Option)",
+                            exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
+                            exit_time=now,
+                            opt_pts=pos.get("opt_tgt_pts", 25.0)
+                        )
                         return
-                    if ltp <= pos["target"]:
-                        self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
+                    elif underlying_px >= pos.get("sl_underlying", u_entry + 22.0):
+                        opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
+                        reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
+                        self._close_active_trade(
+                            reason=reason,
+                            exit_price=pos["entry_price"] + opt_exit_pts,
+                            exit_time=now,
+                            opt_pts=opt_exit_pts
+                        )
                         return
 
                 # Commodity Auto Square-Off at 23:25 IST
                 if now.hour == 23 and now.minute >= 25:
-                    self._close_active_trade(reason="23:25 EOD Square-Off", exit_price=ltp, exit_time=now)
+                    self._close_active_trade(
+                        reason="23:25 EOD Square-Off",
+                        exit_price=pos["entry_price"] + pts_opt,
+                        exit_time=now,
+                        opt_pts=pts_opt
+                    )
+                    return
+
+                pos["current_price"] = round(pos["entry_price"] + pts_opt, 2)
+                pos["points_gained"] = pts_opt
+                pos["points"] = pts_opt
+                pos["unrealized_pnl"] = round(pts_opt * pos["units"], 2)
+                pos["buyer_strength"] = self.buyer_strength
+                pos["seller_strength"] = self.seller_strength
             return
 
         # Option LTP update:
@@ -658,7 +831,7 @@ class PaperTradeDaemon:
         if symbol not in self.bar_history:
             self.bar_history[symbol] = []
         self.bar_history[symbol].append(bar)
-        if len(self.bar_history[symbol]) > 300:
+        if len(self.bar_history[symbol]) > 1000:
             self.bar_history[symbol].pop(0)
 
         # Log candle close for operational visibility
@@ -671,11 +844,17 @@ class PaperTradeDaemon:
 
         # Handle Commodity Entry Evaluation
         if symbol in ("CRUDEOIL", "NATURALGAS"):
-            # Commodity Market Hours Gating: 09:00 to 23:15 IST
+            # Commodity Market Hours Gating: 13:00 to 23:15 IST (Institutional US overlap as backtested)
             if now.hour > 23 or (now.hour == 23 and now.minute >= 15):
                 return
-            if now.hour < 9:
+            if now.hour < 13:
                 return
+
+            # Cooldown Gating: at least 15 minutes since last crude exit
+            if self.last_crude_exit_time:
+                mins_since = (now - self.last_crude_exit_time).total_seconds() / 60.0
+                if mins_since < 15.0:
+                    return
 
             # Max Trades Per Day Gating (Commodity-specific limit + total cap)
             today_str = now.strftime("%Y-%m-%d")
@@ -706,7 +885,13 @@ class PaperTradeDaemon:
         if now.hour > 15 or (now.hour == 15 and now.minute >= 10):
             return
 
-        # Gating 3: Max Trades Per Day Gating (Index-specific limit + total cap)
+        # Gating 3: Cooldown Gating (at least 15 minutes since last equity exit)
+        if self.last_equity_exit_time:
+            mins_since = (now - self.last_equity_exit_time).total_seconds() / 60.0
+            if mins_since < 15.0:
+                return
+
+        # Gating 4: Max Trades Per Day Gating (Index-specific limit + total cap)
         today_str = now.strftime("%Y-%m-%d")
         idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
         if self.max_trades_index > 0 and idx_cnt >= self.max_trades_index:
@@ -791,9 +976,9 @@ class PaperTradeDaemon:
             )
 
     def _evaluate_commodity_strategy_signal(self, symbol: str, now: datetime):
-        """Evaluates BSS Pro Breakout and Momentum setups for MCX Commodities."""
+        """Evaluates 1-Hour Trend & 30-Bar Sweep/Retest setups for MCX Commodities."""
         bars = self.bar_history.get(symbol) or []
-        if len(bars) < 6:
+        if len(bars) < 31:
             return
 
         df = pd.DataFrame(bars)
@@ -804,43 +989,57 @@ class PaperTradeDaemon:
 
         last_c = closes.iloc[-1]
         last_o = opens.iloc[-1]
-        prev_c = closes.iloc[-2]
-        rolling_low = lows.iloc[-6:-1].min()
-        rolling_high = highs.iloc[-6:-1].max()
-        sma = closes.rolling(min(len(closes), 10)).mean().iloc[-1]
+        last_h = highs.iloc[-1]
+        last_l = lows.iloc[-1]
+
+        # 1-Hour Trend Alignment (EMA20 on resampled 1-Hour candles or rolling 60-bar EMA)
+        trend_1h = 0
+        if "timestamp" in df.columns:
+            try:
+                df_dt = df.copy()
+                df_dt["dt"] = pd.to_datetime(df_dt["timestamp"])
+                df_1h = df_dt.set_index("dt").resample("1h").agg({
+                    "open": "first", "high": "max", "low": "min", "close": "last"
+                }).dropna()
+                if len(df_1h) >= 3:
+                    ema20_1h = df_1h["close"].ewm(span=min(len(df_1h), 20), adjust=False).mean().iloc[-1]
+                    trend_1h = 1 if df_1h["close"].iloc[-1] > ema20_1h else -1
+            except Exception:
+                pass
+
+        if trend_1h == 0:
+            ema_60 = closes.ewm(span=min(len(closes), 60), adjust=False).mean().iloc[-1]
+            trend_1h = 1 if last_c > ema_60 else -1
+
+        # 30-candle Rolling Extremes
+        h30 = highs.iloc[-31:-1].max()
+        l30 = lows.iloc[-31:-1].min()
 
         signal_dir = None
         setup_name = None
+        prob_str = "75%"
 
-        # Setup 1: Bullish Momentum Breakout
-        if last_c > sma and last_c > rolling_high and last_c > last_o:
+        # Setup A: 1H Trend Bullish + 30-Bar Low Sweep Retest (LONG / CALL)
+        if (trend_1h == 1) and (last_l < l30) and (last_c > last_o) and (last_c > l30):
+            signal_dir = "CALL"
+            setup_name = f"MCX {symbol} 1H-Trend Sweep (LONG)"
+            prob_str = "76%"
+        # Setup B: 1H Trend Bearish + 30-Bar High Sweep Retest (SHORT / PUT)
+        elif (trend_1h == -1) and (last_h > h30) and (last_c < last_o) and (last_c < h30):
+            signal_dir = "PUT"
+            setup_name = f"MCX {symbol} 1H-Trend Sweep (SHORT)"
+            prob_str = "76%"
+        # Setup C: Momentum Trend Follower
+        elif (trend_1h == 1) and (last_c > h30) and (last_c > last_o):
             signal_dir = "CALL"
             setup_name = f"MCX {symbol} Momentum Breakout (LONG)"
-        # Setup 2: Bearish Momentum Breakdown
-        elif last_c < sma and last_c < rolling_low and last_c < last_o:
+            prob_str = "71%"
+        elif (trend_1h == -1) and (last_c < l30) and (last_c < last_o):
             signal_dir = "PUT"
             setup_name = f"MCX {symbol} Momentum Breakdown (SHORT)"
-        # Setup 3: Mean Reversion / Trap
-        elif (lows.iloc[-1] < rolling_low) and (last_c > last_o) and (last_c > prev_c):
-            signal_dir = "CALL"
-            setup_name = f"MCX {symbol} Reversal (LONG)"
-        elif (highs.iloc[-1] > rolling_high) and (last_c < last_o) and (last_c < prev_c):
-            signal_dir = "PUT"
-            setup_name = f"MCX {symbol} Reversal (SHORT)"
-        # Setup 4: Trend Pullback / EMA Retest
-        elif len(closes) >= 20:
-            ema_9 = closes.ewm(span=9, adjust=False).mean().iloc[-1]
-            ema_20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
-            ema_50 = closes.ewm(span=min(len(closes), 50), adjust=False).mean().iloc[-1]
-            close_vs_ema20 = (last_c - ema_20) / (ema_20 + 1e-8)
-            if (ema_9 > ema_20 > ema_50) and abs(close_vs_ema20) <= 0.0015 and last_c > last_o:
-                signal_dir = "CALL"
-                setup_name = f"MCX {symbol} Pullback Retest (LONG)"
-            elif (ema_9 < ema_20 < ema_50) and abs(close_vs_ema20) <= 0.0015 and last_c < last_o:
-                signal_dir = "PUT"
-                setup_name = f"MCX {symbol} Pullback Retest (SHORT)"
+            prob_str = "71%"
 
-        prob_str = "72%"
+        # Machine Learning Calibration Filter
         if signal_dir and symbol == "CRUDEOIL" and self.crude_model and len(bars) >= 20:
             try:
                 from trading_engine.models.crude_features import compute_crude_features
@@ -851,24 +1050,24 @@ class PaperTradeDaemon:
                     p_bull = float(probas[1])
                     p_bear = float(probas[2])
 
-                    thresh = 0.37 if "Pullback" in setup_name else 0.40
+                    thresh = 0.35
                     if signal_dir == "CALL":
                         prob_str = f"{int(p_bull * 100)}%"
                         if p_bull < thresh:
                             logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < {thresh:.2f} threshold.")
                             return
-                        setup_name = f"MCX CRUDE Dual XGBoost ({setup_name.split('MCX CRUDE ')[-1]}, {prob_str})"
+                        setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
                     elif signal_dir == "PUT":
                         prob_str = f"{int(p_bear * 100)}%"
                         if p_bear < thresh:
                             logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < {thresh:.2f} threshold.")
                             return
-                        setup_name = f"MCX CRUDE Dual XGBoost ({setup_name.split('MCX CRUDE ')[-1]}, {prob_str})"
+                        setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
             except Exception as e:
                 logger.debug(f"Crude ML probability evaluation skipped: {e}")
 
         if signal_dir:
-            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Price: {last_c:.2f} | ML Prob: {prob_str}")
+            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Spot: {last_c:.2f} | Prob: {prob_str}")
             self._execute_commodity_paper_entry(
                 symbol=symbol,
                 direction=signal_dir,
@@ -887,41 +1086,136 @@ class PaperTradeDaemon:
         current_price: float,
         now: datetime
     ):
-        """Constructs near-month MCX commodity future paper trade with margin reservation."""
+        """Constructs Dynamic CRUDE Option contract with 7% compounding and margin reservation."""
         lot_size = 100 if symbol == "CRUDEOIL" else (1250 if symbol == "NATURALGAS" else 100)
+
+        if symbol == "CRUDEOIL":
+            # Target / SL based on backtested 1-Hour Trend model
+            # Underlying Target: +45 pts (Option Target: +25 pts = +₹2,500/lot)
+            # Underlying SL: -22 pts (Option SL: -12 pts = -₹1,200/lot)
+            tgt_u = 45.0
+            sl_u = 22.0
+            opt_tgt_pts = 25.0
+            opt_sl_pts = 12.0
+            opt_trail_pts = 3.0
+
+            # Dynamic ATM Strike Resolution
+            step = 50.0
+            atm_strike = int(round(current_price / step) * step)
+            opt_type = "CE" if direction == "CALL" else "PE"
+            contract_sym = f"CRUDEOIL {atm_strike} {opt_type}"
+
+            # Estimated ATM Option Premium (~100 to 120 pts)
+            est_prem = max(80.0, round(110.0 + (current_price % 50), 2))
+
+            # Dynamic 7% Compounding Sizing on Commodity Account
+            risk_amt = self.commodity_capital * self.risk_pct  # 7%
+            risk_per_lot = (opt_sl_pts * lot_size) + 90.0      # ₹1,290 risk per lot
+            max_lots_cap = 50
+            calc_lots = int(risk_amt // risk_per_lot)
+            lots = max(1, min(max_lots_cap, calc_lots))
+            units = lots * lot_size
+
+            # Margin reservation (Option Premium = lots * 100 * est_prem)
+            required_margin = round(lots * lot_size * est_prem, 2)
+            if required_margin > self.commodity_available_capital:
+                lots = max(1, int(self.commodity_available_capital // (lot_size * est_prem)))
+                units = lots * lot_size
+                required_margin = round(lots * lot_size * est_prem, 2)
+
+            if required_margin > self.commodity_available_capital:
+                logger.warning(
+                    f"❌ [COMMODITY PAPER TRADE ABORTED] Insufficient commodity capital. "
+                    f"Required: ₹{required_margin:,.2f}, Available: ₹{self.commodity_available_capital:,.2f}"
+                )
+                return
+
+            self.commodity_blocked_capital = required_margin
+            self.commodity_available_capital = round(self.commodity_capital - self.commodity_blocked_capital, 2)
+
+            if direction == "CALL":
+                target_px = round(current_price + tgt_u, 2)
+                sl_px = round(current_price - sl_u, 2)
+                trend_str = "BULLISH"
+            else:
+                target_px = round(current_price - tgt_u, 2)
+                sl_px = round(current_price + sl_u, 2)
+                trend_str = "BEARISH"
+
+            trade_id = f"PTR_MCX_{now.strftime('%Y%m%d_%H%M%S')}"
+            self.active_trade = {
+                "id": trade_id,
+                "trade_id": trade_id,
+                "entry_time": now.strftime("%H:%M:%S"),
+                "entry_datetime": now.isoformat(),
+                "date": now.strftime("%Y-%m-%d"),
+                "day": now.strftime("%A"),
+                "symbol": symbol,
+                "contract": contract_sym,
+                "strike": atm_strike,
+                "option_type": opt_type,
+                "trend": trend_str,
+                "entry_price": est_prem,
+                "entry_underlying": current_price,
+                "entry_rate": est_prem,
+                "current_price": est_prem,
+                "current_underlying": current_price,
+                "spot_at_entry": current_price,
+                "benchmark_symbol": symbol,
+                "lots": lots,
+                "units": units,
+                "quantity": units,
+                "blocked_margin": required_margin,
+                "target": round(est_prem + opt_tgt_pts, 2),
+                "sl": round(est_prem - opt_sl_pts, 2),
+                "target_underlying": target_px,
+                "sl_underlying": sl_px,
+                "tgt_u": tgt_u,
+                "sl_u": sl_u,
+                "trail_trig_u": 22.0,
+                "trail_lock_u": 5.5,
+                "trail_active": False,
+                "opt_tgt_pts": opt_tgt_pts,
+                "opt_sl_pts": opt_sl_pts,
+                "opt_trail_pts": opt_trail_pts,
+                "strategy": strategy_name,
+                "indicator": strategy_name,
+                "probability": probability,
+                "unrealized_pnl": 0.0,
+                "points_gained": 0.0,
+                "points": 0.0,
+                "buyer_strength": self.buyer_strength,
+                "seller_strength": self.seller_strength,
+                "segment": "MCX Commodity"
+            }
+
+            logger.info(
+                f"⚡ [COMMODITY PAPER TRADE OPENED] {contract_sym} ({trend_str}) @ ₹{est_prem:.2f} (Underlying ₹{current_price:.2f}) | "
+                f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_margin:,.2f} | "
+                f"Crude Free Capital: ₹{self.commodity_available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+            )
+            self.save_state()
+            return
+
+        # Fallback for other commodities (e.g. NATURALGAS)
         lots = 1
         units = lots * lot_size
-
-        required_margin = min(self.available_capital, 15000.0) if symbol == "CRUDEOIL" else min(self.available_capital, 10000.0)
-        if required_margin > self.available_capital:
+        required_margin = min(self.commodity_available_capital, 10000.0)
+        if required_margin > self.commodity_available_capital:
             logger.warning(
                 f"❌ [COMMODITY PAPER TRADE ABORTED] Insufficient capital. "
-                f"Required: ₹{required_margin:,.2f}, Available: ₹{self.available_capital:,.2f}"
+                f"Required: ₹{required_margin:,.2f}, Available: ₹{self.commodity_available_capital:,.2f}"
             )
             return
 
-        self.blocked_capital = required_margin
-        self.available_capital = round(self.capital - self.blocked_capital, 2)
+        self.commodity_blocked_capital = required_margin
+        self.commodity_available_capital = round(self.commodity_capital - self.commodity_blocked_capital, 2)
 
-        if symbol == "CRUDEOIL":
-            sl_pts = 20.0
-            tgt_pts = 40.0
-        elif symbol == "NATURALGAS":
-            sl_pts = 2.50
-            tgt_pts = 5.00
-        else:
-            sl_pts = round(current_price * 0.005, 2)
-            tgt_pts = round(current_price * 0.010, 2)
-
-        if direction == "CALL":
-            target_px = round(current_price + tgt_pts, 2)
-            sl_px = round(current_price - sl_pts, 2)
-            trend_str = "BULLISH"
-        else:
-            target_px = round(current_price - tgt_pts, 2)
-            sl_px = round(current_price + sl_pts, 2)
-            trend_str = "BEARISH"
-
+        sl_pts = 2.50
+        tgt_pts = 5.00
+        target_px = round(current_price + tgt_pts, 2) if direction == "CALL" else round(current_price - tgt_pts, 2)
+        sl_px = round(current_price - sl_pts, 2) if direction == "CALL" else round(current_price + sl_pts, 2)
+        trend_str = "BULLISH" if direction == "CALL" else "BEARISH"
         contract_sym = f"{symbol} Near Fut"
         trade_id = f"PTR_MCX_{now.strftime('%Y%m%d_%H%M%S')}"
 
@@ -963,7 +1257,7 @@ class PaperTradeDaemon:
         logger.info(
             f"⚡ [COMMODITY PAPER TRADE OPENED] {contract_sym} ({trend_str}) @ ₹{current_price:.2f} | "
             f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_margin:,.2f} | "
-            f"Free Capital: ₹{self.available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+            f"Free Capital: ₹{self.commodity_available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
         )
         self.save_state()
 
@@ -975,7 +1269,7 @@ class PaperTradeDaemon:
         spot_price: float,
         now: datetime
     ):
-        """Constructs Dynamic ATM Option contract and opens a paper trade."""
+        """Constructs Dynamic ATM Option contract and opens a paper trade from Equity Account."""
         opt_type = "CE" if direction == "CALL" else "PE"
         contract = OptionResolver.resolve_contract(
             spot_price=spot_price,
@@ -990,22 +1284,27 @@ class PaperTradeDaemon:
         risk_pt = max(15.0, round(est_prem * self.sl_pct, 2))
         risk_per_lot = risk_pt * contract.lot_size
 
-        # Institutional 7% compounding sizing
-        lots = max(1, min(100, int((self.capital * self.risk_pct) // risk_per_lot)))
+        # Institutional 7% compounding sizing on Equity Capital
+        lots = max(1, min(100, int((self.equity_capital * self.risk_pct) // risk_per_lot)))
         units = lots * contract.lot_size
 
-        # Institutional Capital Reservation & Margin Blocking
+        # Institutional Capital Reservation & Margin Blocking in Equity Fund
         required_capital = round(est_prem * units, 2)
-        if required_capital > self.available_capital:
+        if required_capital > self.equity_available_capital:
+            lots = max(1, int(self.equity_available_capital // (est_prem * contract.lot_size)))
+            units = lots * contract.lot_size
+            required_capital = round(est_prem * units, 2)
+
+        if required_capital > self.equity_available_capital:
             logger.warning(
-                f"❌ [PAPER TRADE ABORTED] Insufficient available capital. "
-                f"Required: ₹{required_capital:,.2f}, Available: ₹{self.available_capital:,.2f}"
+                f"❌ [PAPER TRADE ABORTED] Insufficient available equity capital. "
+                f"Required: ₹{required_capital:,.2f}, Available: ₹{self.equity_available_capital:,.2f}"
             )
             return
 
-        # Deduct / block margin immediately upon trade decision
-        self.blocked_capital = required_capital
-        self.available_capital = round(self.capital - self.blocked_capital, 2)
+        # Deduct / block margin immediately from Equity Account
+        self.equity_blocked_capital = required_capital
+        self.equity_available_capital = round(self.equity_capital - self.equity_blocked_capital, 2)
 
         target_px = round(est_prem * (1.0 + self.tgt_pct), 2)
         sl_px = round(est_prem * (1.0 - self.sl_pct), 2)
@@ -1049,27 +1348,38 @@ class PaperTradeDaemon:
         logger.info(
             f"⚡ [PAPER TRADE OPENED] {contract.symbol} ({self.active_trade['trend']}) @ ₹{est_prem:.2f} | "
             f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_capital:,.2f} | "
-            f"Free Capital: ₹{self.available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+            f"Stock Free Capital: ₹{self.equity_available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
         )
         self.save_state()
 
-    def _close_active_trade(self, reason: str, exit_price: float, exit_time: datetime):
-        """Finalizes active trade and adds to persistent ledger."""
+    def _close_active_trade(self, reason: str, exit_price: float, exit_time: datetime, opt_pts: Optional[float] = None):
+        """Finalizes active trade and adds to persistent ledger with separated fund settlement."""
         if not self.active_trade:
             return
 
         pos = self.active_trade
-        if pos.get("trend") in ("BEARISH", "SHORT", "PUT") and pos.get("segment") == "MCX Commodity":
+        is_comm = self._is_commodity_trade(pos)
+
+        if opt_pts is not None:
+            pts = round(opt_pts, 2)
+        elif pos.get("trend") in ("BEARISH", "SHORT", "PUT") and pos.get("segment") == "MCX Commodity":
             pts = round(pos["entry_price"] - exit_price, 2)
         else:
             pts = round(exit_price - pos["entry_price"], 2)
+
         gross = round(pts * pos["units"], 2)
 
-        # Statutory charges (brokerage + STT + turnover + GST)
-        n_legs = max(1, int(np.ceil(pos["lots"] / 30)))
-        charges = round(n_legs * 40.0 + (0.50 * pos["units"]), 2)
+        # Statutory charges + slippage friction
+        if is_comm:
+            # ₹90 per lot friction (brokerage ₹40 + turnover/slippage ₹50)
+            charges = round(pos["lots"] * 90.0, 2)
+        else:
+            n_legs = max(1, int(np.ceil(pos["lots"] / 30)))
+            charges = round(n_legs * 40.0 + (0.50 * pos["units"]), 2)
+
         net = round(gross - charges, 2)
-        roi = round((net / (pos["entry_price"] * pos["units"])) * 100.0, 2) if (pos["entry_price"] * pos["units"]) > 0 else 0.0
+        invested = pos["entry_price"] * pos["units"]
+        roi = round((net / invested) * 100.0, 2) if invested > 0 else 0.0
 
         closed_rec = {
             "id": pos["id"],
@@ -1106,15 +1416,29 @@ class PaperTradeDaemon:
 
         self.trade_history.append(closed_rec)
 
-        # Capital Settlement: Release blocked capital and add Net Realized P&L
-        self.blocked_capital = 0.0
-        self.capital = round(self.capital + net, 2)
-        self.available_capital = self.capital
-        self.active_trade = None
+        # Capital Settlement: Release blocked margin and credit/debit to separate ICICI account
+        if is_comm:
+            self.commodity_blocked_capital = 0.0
+            self.commodity_capital = round(self.commodity_capital + net, 2)
+            self.commodity_available_capital = self.commodity_capital
+            self.last_crude_exit_time = exit_time
+            acc_name = "Crude Fund"
+            acc_cap = self.commodity_capital
+        else:
+            self.equity_blocked_capital = 0.0
+            self.equity_capital = round(self.equity_capital + net, 2)
+            self.equity_available_capital = self.equity_capital
+            self.last_equity_exit_time = exit_time
+            acc_name = "Stock Fund"
+            acc_cap = self.equity_capital
 
+        self.active_trade = None
         self.save_state()
         self._record_to_db(closed_rec)
-        logger.info(f"✅ [PAPER TRADE CLOSED] {closed_rec['contract']} | Net PnL: {net:+,.2f} ({pts:+.2f} pts) | Reason: {reason} | Capital: ₹{self.capital:,.2f}")
+        logger.info(
+            f"✅ [PAPER TRADE CLOSED] {closed_rec['contract']} | Net PnL: {net:+,.2f} ({pts:+.2f} pts) | "
+            f"Reason: {reason} | {acc_name}: ₹{acc_cap:,.2f} | Total Capital: ₹{self.capital:,.2f}"
+        )
 
     def _record_to_db(self, rec: Dict[str, Any]):
         """Persists closed trade into TimescaleDB trade_log table."""
@@ -1166,6 +1490,12 @@ class PaperTradeDaemon:
         gross_pnl = sum(t["gross"] for t in trades)
         total_charges = sum(t["charges"] for t in trades)
         net_pnl = sum(t["net"] for t in trades)
+
+        # Segregated Fund P&L Breakdown (ICICI Direct style)
+        equity_trades = [t for t in trades if not self._is_commodity_trade(t)]
+        commodity_trades = [t for t in trades if self._is_commodity_trade(t)]
+        equity_net_pnl = sum(t["net"] for t in equity_trades)
+        commodity_net_pnl = sum(t["net"] for t in commodity_trades)
 
         gross_wins = sum(t["gross"] for t in wins)
         gross_losses = abs(sum(t["gross"] for t in losses))
@@ -1244,11 +1574,23 @@ class PaperTradeDaemon:
             "max_drawdown": round(max_dd, 2),
             "avg_win": avg_win,
             "avg_loss": avg_loss,
+            # Total Capital Aggregation
             "capital": round(self.capital, 2),
             "total_capital": round(self.capital, 2),
             "blocked_capital": round(self.blocked_capital, 2),
             "available_capital": round(self.available_capital, 2),
             "initial_capital": round(self.initial_capital, 2),
+            # Segregated ICICI Accounts
+            "equity_capital": round(self.equity_capital, 2),
+            "equity_initial_capital": round(self.equity_initial_capital, 2),
+            "equity_blocked_capital": round(self.equity_blocked_capital, 2),
+            "equity_available_capital": round(self.equity_available_capital, 2),
+            "equity_net_pnl": round(equity_net_pnl, 2),
+            "commodity_capital": round(self.commodity_capital, 2),
+            "commodity_initial_capital": round(self.commodity_initial_capital, 2),
+            "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
+            "commodity_available_capital": round(self.commodity_available_capital, 2),
+            "commodity_net_pnl": round(commodity_net_pnl, 2),
             "today_net": round(today_net, 2),
             "today_trades_count": tot_cnt,
             "today_trades_index": idx_cnt,

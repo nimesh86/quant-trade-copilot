@@ -1487,9 +1487,10 @@ async def update_paper_trading_config(payload: Dict[str, Any] = Body(...)):
 
 @app.post("/api/paper/reset")
 async def reset_paper_trading_account(payload: Dict[str, Any] = Body(default={})):
-    """Resets paper account balance to initial capital and clears logs."""
-    cap = float(payload.get("capital", 20000.0))
-    paper_daemon.reset_state(cap)
+    """Resets paper account balance to initial capital and clears logs with segregated funds."""
+    eq_cap = float(payload.get("equity_capital", payload.get("stock_capital", payload.get("capital", 20000.0))))
+    comm_cap = float(payload.get("commodity_capital", payload.get("crude_capital", 50000.0)))
+    paper_daemon.reset_state(equity_capital=eq_cap, commodity_capital=comm_cap)
     try:
         await broadcast_paper_full_state()
     except Exception:
@@ -3552,6 +3553,11 @@ def on_broker_websocket_tick(tick: Dict[str, Any]):
                     "buyer_strength": round(paper_daemon.buyer_strength, 1),
                     "seller_strength": round(paper_daemon.seller_strength, 1),
                     "capital": round(paper_daemon.capital, 2),
+                    "total_capital": round(paper_daemon.capital, 2),
+                    "equity_capital": round(getattr(paper_daemon, "equity_capital", 20000.0), 2),
+                    "commodity_capital": round(getattr(paper_daemon, "commodity_capital", 50000.0), 2),
+                    "equity_available_capital": round(getattr(paper_daemon, "equity_available_capital", 20000.0), 2),
+                    "commodity_available_capital": round(getattr(paper_daemon, "commodity_available_capital", 50000.0), 2),
                     "blocked_capital": round(getattr(paper_daemon, "blocked_capital", 0.0), 2),
                     "available_capital": round(getattr(paper_daemon, "available_capital", paper_daemon.capital), 2),
                     "timestamp": ts

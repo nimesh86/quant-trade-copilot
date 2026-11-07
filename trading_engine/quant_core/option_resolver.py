@@ -29,7 +29,9 @@ class OptionResolver:
         "BANKNIFTY": 100.0,
         "SENSEX": 100.0,
         "FINNIFTY": 50.0,
-        "MIDCPNIFTY": 25.0
+        "MIDCPNIFTY": 25.0,
+        "CRUDEOIL": 50.0,
+        "CRUDE": 50.0
     }
 
     # Lot sizes
@@ -39,7 +41,9 @@ class OptionResolver:
         "BANKNIFTY": 15,
         "SENSEX": 10,
         "FINNIFTY": 25,
-        "MIDCPNIFTY": 50
+        "MIDCPNIFTY": 50,
+        "CRUDEOIL": 100,
+        "CRUDE": 100
     }
 
     # Freeze limits in lots
@@ -49,7 +53,9 @@ class OptionResolver:
         "BANKNIFTY": 30,    # 450 units / 15 = 30
         "SENSEX": 30,
         "FINNIFTY": 36,
-        "MIDCPNIFTY": 50
+        "MIDCPNIFTY": 50,
+        "CRUDEOIL": 50,
+        "CRUDE": 50
     }
 
     @classmethod
