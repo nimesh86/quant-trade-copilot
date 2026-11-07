@@ -553,17 +553,32 @@ class PaperTradeDaemon:
                 pos["buyer_strength"] = self.buyer_strength
                 pos["seller_strength"] = self.seller_strength
 
+                # Trailing Stop Loss for CRUDEOIL (+25 pts gain moves SL to entry + 5 pts)
+                if pos_sym == "CRUDEOIL":
+                    trail_trigger = 25.0
+                    trail_lock = 5.0
+                    if not pos.get("trail_active"):
+                        if pts >= trail_trigger:
+                            pos["trail_active"] = True
+                            if trend in ("BULLISH", "LONG", "CALL"):
+                                pos["sl"] = round(pos["entry_price"] + trail_lock, 2)
+                            else:
+                                pos["sl"] = round(pos["entry_price"] - trail_lock, 2)
+                            logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Gain +{pts:.1f} pts >= {trail_trigger} pts. SL secured at ₹{pos['sl']:.2f}")
+
                 # Check Stop Loss / Target for Long (BULLISH)
                 if trend in ("BULLISH", "LONG", "CALL"):
                     if ltp <= pos["sl"]:
-                        self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
+                        reason = "Trailing SL Hit" if pos.get("trail_active") else "Stop Loss Hit"
+                        self._close_active_trade(reason=reason, exit_price=pos["sl"], exit_time=now)
                         return
                     if ltp >= pos["target"]:
                         self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
                         return
                 else:  # Short (BEARISH)
                     if ltp >= pos["sl"]:
-                        self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
+                        reason = "Trailing SL Hit" if pos.get("trail_active") else "Stop Loss Hit"
+                        self._close_active_trade(reason=reason, exit_price=pos["sl"], exit_time=now)
                         return
                     if ltp <= pos["target"]:
                         self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
@@ -812,6 +827,18 @@ class PaperTradeDaemon:
         elif (highs.iloc[-1] > rolling_high) and (last_c < last_o) and (last_c < prev_c):
             signal_dir = "PUT"
             setup_name = f"MCX {symbol} Reversal (SHORT)"
+        # Setup 4: Trend Pullback / EMA Retest
+        elif len(closes) >= 20:
+            ema_9 = closes.ewm(span=9, adjust=False).mean().iloc[-1]
+            ema_20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+            ema_50 = closes.ewm(span=min(len(closes), 50), adjust=False).mean().iloc[-1]
+            close_vs_ema20 = (last_c - ema_20) / (ema_20 + 1e-8)
+            if (ema_9 > ema_20 > ema_50) and abs(close_vs_ema20) <= 0.0015 and last_c > last_o:
+                signal_dir = "CALL"
+                setup_name = f"MCX {symbol} Pullback Retest (LONG)"
+            elif (ema_9 < ema_20 < ema_50) and abs(close_vs_ema20) <= 0.0015 and last_c < last_o:
+                signal_dir = "PUT"
+                setup_name = f"MCX {symbol} Pullback Retest (SHORT)"
 
         prob_str = "72%"
         if signal_dir and symbol == "CRUDEOIL" and self.crude_model and len(bars) >= 20:
@@ -824,18 +851,19 @@ class PaperTradeDaemon:
                     p_bull = float(probas[1])
                     p_bear = float(probas[2])
 
+                    thresh = 0.37 if "Pullback" in setup_name else 0.40
                     if signal_dir == "CALL":
                         prob_str = f"{int(p_bull * 100)}%"
-                        if p_bull < 0.40:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < 0.40 threshold.")
+                        if p_bull < thresh:
+                            logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < {thresh:.2f} threshold.")
                             return
-                        setup_name = f"MCX CRUDE Dual XGBoost (LONG, {prob_str})"
+                        setup_name = f"MCX CRUDE Dual XGBoost ({setup_name.split('MCX CRUDE ')[-1]}, {prob_str})"
                     elif signal_dir == "PUT":
                         prob_str = f"{int(p_bear * 100)}%"
-                        if p_bear < 0.40:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < 0.40 threshold.")
+                        if p_bear < thresh:
+                            logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < {thresh:.2f} threshold.")
                             return
-                        setup_name = f"MCX CRUDE Dual XGBoost (SHORT, {prob_str})"
+                        setup_name = f"MCX CRUDE Dual XGBoost ({setup_name.split('MCX CRUDE ')[-1]}, {prob_str})"
             except Exception as e:
                 logger.debug(f"Crude ML probability evaluation skipped: {e}")
 

@@ -59,7 +59,10 @@ class CrudeBacktestEngine:
         trail_trigger_pts: float = 25.0,# Trigger trailing SL once +25 pts reached
         trail_lock_pts: float = 5.0,    # Move SL to +5 pts (breakeven profit)
         max_trades_per_day: int = 4,    # Commodity trade cap
-        score_threshold: float = 0.45   # ML probability hurdle
+        score_threshold: float = 0.40,  # Calibrated ML probability hurdle
+        vol_ratio_min: float = 1.00,    # Volume ratio threshold
+        enable_pullback_setup: bool = True,
+        enable_reversal_setup: bool = True
     ):
         self.model_path = model_path
         self.initial_capital = capital
@@ -70,6 +73,9 @@ class CrudeBacktestEngine:
         self.trail_lock_pts = trail_lock_pts
         self.max_trades_per_day = max_trades_per_day
         self.score_threshold = score_threshold
+        self.vol_ratio_min = vol_ratio_min
+        self.enable_pullback_setup = enable_pullback_setup
+        self.enable_reversal_setup = enable_reversal_setup
 
         self.model = None
         self.feature_cols: List[str] = []
@@ -238,6 +244,7 @@ class CrudeBacktestEngine:
                         "exit_time": dt.strftime("%H:%M:%S"),
                         "direction": direction,
                         "symbol": "CRUDEOIL Near Fut",
+                        "setup": pos.get("setup", "Breakout"),
                         "entry_price": entry_px,
                         "exit_price": exit_px,
                         "points": pts,
@@ -268,33 +275,82 @@ class CrudeBacktestEngine:
             rsi = float(row["rsi"])
             ema9 = float(row["ema9"])
             ema20 = float(row["ema20"])
+            ema50 = float(row.get("ema50", row["ema20"]))
             macd_hist = float(row["macd_hist"])
             vol_ratio = float(row["volume_ratio"])
+            close_vs_ema20 = float(row.get("close_vs_ema20_pct", 0.0))
+            rsi_slope_3 = float(row.get("rsi_slope_3", 0.0))
+            b_pct = float(row.get("bollinger_pct", 0.5))
 
-            # Setup 1: Bullish Momentum Breakout (LONG)
-            long_cond = (
+            # Setup 1: Momentum Breakout
+            long_breakout = (
                 p_bull >= self.score_threshold
                 and ema9 > ema20
                 and ltp > ema20
-                and rsi > 52.0
-                and macd_hist > 0
-                and vol_ratio >= 1.05
+                and rsi > 51.0
+                and macd_hist > -1.0
+                and vol_ratio >= self.vol_ratio_min
             )
-
-            # Setup 2: Bearish Momentum Breakdown (SHORT)
-            short_cond = (
+            short_breakout = (
                 p_bear >= self.score_threshold
                 and ema9 < ema20
                 and ltp < ema20
-                and rsi < 48.0
-                and macd_hist < 0
-                and vol_ratio >= 1.05
+                and rsi < 49.0
+                and macd_hist < 1.0
+                and vol_ratio >= self.vol_ratio_min
             )
 
-            if long_cond:
+            # Setup 2: Trend Pullback / EMA Retest
+            long_pullback = False
+            short_pullback = False
+            if self.enable_pullback_setup:
+                long_pullback = (
+                    p_bull >= (self.score_threshold - 0.03)
+                    and ema9 > ema20 > ema50
+                    and abs(close_vs_ema20) <= 0.0015
+                    and rsi > 45.0
+                    and rsi_slope_3 > 0
+                )
+                short_pullback = (
+                    p_bear >= (self.score_threshold - 0.03)
+                    and ema9 < ema20 < ema50
+                    and abs(close_vs_ema20) <= 0.0015
+                    and rsi < 55.0
+                    and rsi_slope_3 < 0
+                )
+
+            # Setup 3: Mean Reversion / Trap
+            long_reversal = False
+            short_reversal = False
+            if self.enable_reversal_setup:
+                long_reversal = (
+                    p_bull >= self.score_threshold
+                    and rsi < 32.0
+                    and rsi_slope_3 > 0.8
+                    and b_pct < 0.10
+                )
+                short_reversal = (
+                    p_bear >= self.score_threshold
+                    and rsi > 68.0
+                    and rsi_slope_3 < -0.8
+                    and b_pct > 0.90
+                )
+
+            is_long = long_breakout or long_pullback or long_reversal
+            is_short = short_breakout or short_pullback or short_reversal
+
+            if is_long:
+                if long_breakout:
+                    setup_desc = "Breakout"
+                elif long_pullback:
+                    setup_desc = "Pullback Retest"
+                else:
+                    setup_desc = "Mean Reversion"
+
                 entry_px = ltp
                 active_position = {
                     "direction": "LONG",
+                    "setup": setup_desc,
                     "entry_price": entry_px,
                     "entry_time": dt.strftime("%H:%M:%S"),
                     "target": round(entry_px + self.target_pts, 2),
@@ -304,10 +360,18 @@ class CrudeBacktestEngine:
                 }
                 trades_today += 1
 
-            elif short_cond:
+            elif is_short:
+                if short_breakout:
+                    setup_desc = "Breakdown"
+                elif short_pullback:
+                    setup_desc = "Pullback Retest"
+                else:
+                    setup_desc = "Mean Reversion"
+
                 entry_px = ltp
                 active_position = {
                     "direction": "SHORT",
+                    "setup": setup_desc,
                     "entry_price": entry_px,
                     "entry_time": dt.strftime("%H:%M:%S"),
                     "target": round(entry_px - self.target_pts, 2),
@@ -333,6 +397,9 @@ class CrudeBacktestEngine:
         gross_losses = abs(sum(t["gross"] for t in losses))
         profit_factor = round(gross_wins / gross_losses, 2) if gross_losses > 0 else 99.0
 
+        num_days = df_test["date_str"].nunique()
+        trades_per_day = round(total_trades / num_days, 2) if num_days > 0 else 0.0
+
         # Drawdown computation
         running_bal = self.initial_capital
         peak = self.initial_capital
@@ -347,6 +414,22 @@ class CrudeBacktestEngine:
 
         max_dd_pct = round((max_dd / peak) * 100.0, 2) if peak > 0 else 0.0
         roi_pct = round((net_pnl / self.initial_capital) * 100.0, 2)
+
+        # Setup breakdown
+        setup_stats: Dict[str, Dict[str, Any]] = {}
+        for t in trade_log:
+            s_name = t.get("setup", "Unknown")
+            if s_name not in setup_stats:
+                setup_stats[s_name] = {"trades": 0, "wins": 0, "losses": 0, "net": 0.0}
+            setup_stats[s_name]["trades"] += 1
+            if t["net"] > 0:
+                setup_stats[s_name]["wins"] += 1
+            else:
+                setup_stats[s_name]["losses"] += 1
+            setup_stats[s_name]["net"] = round(setup_stats[s_name]["net"] + t["net"], 2)
+
+        for s_name, data in setup_stats.items():
+            data["win_rate"] = f"{round(data['wins'] / data['trades'] * 100.0, 1)}%"
 
         # Monthly breakdown
         monthly_map: Dict[str, Dict[str, Any]] = {}
@@ -371,11 +454,13 @@ class CrudeBacktestEngine:
         scorecard = {
             "symbol": "CRUDEOIL Near Fut",
             "date_range": f"{date_from} to {date_to}",
+            "days_tested": num_days,
             "initial_capital": self.initial_capital,
             "final_balance": round(capital, 2),
             "net_pnl": round(net_pnl, 2),
             "roi_pct": f"{roi_pct:+.2f}%",
             "total_trades": total_trades,
+            "trades_per_day": trades_per_day,
             "wins": n_wins,
             "losses": n_losses,
             "win_rate": f"{win_rate:.1f}%",
@@ -383,6 +468,7 @@ class CrudeBacktestEngine:
             "max_drawdown": round(max_dd, 2),
             "max_drawdown_pct": f"{max_dd_pct:.2f}%",
             "charges_paid": round(charges, 2),
+            "setup_breakdown": setup_stats,
             "monthly_breakdown": monthly_list,
         }
 
@@ -405,3 +491,4 @@ if __name__ == "__main__":
     engine = CrudeBacktestEngine()
     results = engine.run(date_from="2026-05-01", date_to="2026-11-06")
     print(json.dumps(results, indent=2))
+
