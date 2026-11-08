@@ -17,7 +17,7 @@ Features:
 import os
 import json
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time as dt_time, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import numpy as np
@@ -163,6 +163,40 @@ class LiveTradeDaemon:
                 "low": 78520.56,
                 "open": 78910.94,
                 "prev_close": 77301.40,
+                "updated_at": datetime.now().isoformat()
+            },
+            "CRUDEOIL": {
+                "name": "Crude Oil (Near Fut)",
+                "symbol": "CRUDEOIL",
+                "segment": "MCX Commodity",
+                "badge": "COMMODITY",
+                "ltp": 8551.00,
+                "atm_strike": 8550,
+                "strike_step": 50,
+                "change_pts": 187.00,
+                "change_pct": 2.24,
+                "trend": "UP",
+                "high": 8594.00,
+                "low": 8191.00,
+                "open": 8219.00,
+                "prev_close": 8364.00,
+                "updated_at": datetime.now().isoformat()
+            },
+            "NATURALGAS": {
+                "name": "Natural Gas (Near Fut)",
+                "symbol": "NATURALGAS",
+                "segment": "MCX Commodity",
+                "badge": "COMMODITY",
+                "ltp": 282.40,
+                "atm_strike": 280,
+                "strike_step": 5,
+                "change_pts": 2.35,
+                "change_pct": 0.84,
+                "trend": "UP",
+                "high": 289.10,
+                "low": 277.50,
+                "open": 280.05,
+                "prev_close": 280.05,
                 "updated_at": datetime.now().isoformat()
             }
         }
@@ -910,6 +944,45 @@ class LiveTradeDaemon:
             logger.error(f"Error in sync_broker_data: {e}", exc_info=True)
             return {"status": "error", "message": str(e)}
 
+    @staticmethod
+    def is_market_open(segment: str = "NSE Cash") -> bool:
+        """
+        Determines whether the market is RUNNING or CLOSED for the specified segment in IST.
+        - MCX Commodity (CRUDEOIL, NATURALGAS): Mon-Fri 09:00 - 23:30 IST.
+        - NSE Cash / NSE Futures / BSE Cash: Mon-Fri 09:15 - 15:30 IST.
+        - Weekends: Closed (Always gray).
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        except Exception:
+            tz = timezone(timedelta(hours=5, minutes=30))
+            now = datetime.now(tz)
+
+        if now.weekday() >= 5:
+            return False
+
+        t = now.time()
+        s = (segment or "").lower()
+        if "mcx" in s or "commodity" in s or "crude" in s or "natural" in s:
+            return dt_time(9, 0) <= t <= dt_time(23, 30)
+        return dt_time(9, 15) <= t <= dt_time(15, 30)
+
+    def get_indices_list(self) -> List[Dict[str, Any]]:
+        """Returns list of indices enriched with real-time market segment running/closed status."""
+        if not hasattr(self, "indices"):
+            return []
+        enriched = []
+        for key, idx in self.indices.items():
+            item = dict(idx)
+            seg = item.get("segment", "NSE Cash")
+            is_open = self.is_market_open(seg)
+            item["market_status"] = "RUNNING" if is_open else "CLOSED"
+            item["is_open"] = is_open
+            item["status_color"] = "green" if is_open else "gray"
+            enriched.append(item)
+        return enriched
+
     def get_state(self) -> Dict[str, Any]:
         """
         Returns complete real-time live trading state.
@@ -1047,7 +1120,15 @@ class LiveTradeDaemon:
             "seller_strength": self.seller_strength,
             "current_spot": self.current_spot,
             "current_future": self.current_future,
-            "indices": list(self.indices.values()),
+            "indices": self.get_indices_list(),
+            "market_segments": {
+                "NSE Cash": "RUNNING" if self.is_market_open("NSE Cash") else "CLOSED",
+                "NSE Futures": "RUNNING" if self.is_market_open("NSE Futures") else "CLOSED",
+                "BSE Cash": "RUNNING" if self.is_market_open("BSE Cash") else "CLOSED",
+                "MCX Commodity": "RUNNING" if self.is_market_open("MCX Commodity") else "CLOSED",
+                "stock": "RUNNING" if self.is_market_open("NSE Cash") else "CLOSED",
+                "crude": "RUNNING" if self.is_market_open("MCX Commodity") else "CLOSED",
+            },
             "timestamp": datetime.now().isoformat()
         }
 

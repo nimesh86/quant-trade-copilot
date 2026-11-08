@@ -185,12 +185,21 @@ def _get_ist_now() -> datetime:
         return datetime.now(timezone.utc).astimezone()
 
 
-def is_market_open() -> bool:
+def is_market_open(segment: str = "NSE") -> bool:
+    """
+    Checks if the market is open for a given segment in IST (Asia/Kolkata).
+    - MCX Commodity (CRUDEOIL, NATURALGAS): Mon-Fri 09:00 to 23:30 IST.
+    - NSE Cash / NSE Futures / BSE Cash: Mon-Fri 09:15 to 15:30 IST.
+    - Weekends (Sat-Sun): Always closed.
+    """
     now = _get_ist_now()
     if now.weekday() >= 5:
         return False
     t = now.time()
     from datetime import time as dtime
+    seg = (segment or "NSE").lower()
+    if "mcx" in seg or "commodity" in seg or "crude" in seg or "natural" in seg:
+        return dtime(9, 0) <= t <= dtime(23, 30)
     return dtime(9, 15) <= t <= dtime(15, 30)
 
 

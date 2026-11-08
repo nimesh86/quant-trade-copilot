@@ -19,7 +19,7 @@ import json
 import math
 import uuid
 import logging
-from datetime import datetime, date, time as dt_time
+from datetime import datetime, date, time as dt_time, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 import pandas as pd
@@ -1603,6 +1603,45 @@ class PaperTradeDaemon:
             "all_trades": list(reversed(trades))
         }
 
+    @staticmethod
+    def is_market_open(segment: str = "NSE Cash") -> bool:
+        """
+        Determines whether the market is RUNNING or CLOSED for the specified segment in IST.
+        - MCX Commodity (CRUDEOIL, NATURALGAS): Mon-Fri 09:00 - 23:30 IST.
+        - NSE Cash / NSE Futures / BSE Cash: Mon-Fri 09:15 - 15:30 IST.
+        - Weekends: Closed (Always gray).
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        except Exception:
+            tz = timezone(timedelta(hours=5, minutes=30))
+            now = datetime.now(tz)
+
+        if now.weekday() >= 5:
+            return False
+
+        t = now.time()
+        s = (segment or "").lower()
+        if "mcx" in s or "commodity" in s or "crude" in s or "natural" in s:
+            return dt_time(9, 0) <= t <= dt_time(23, 30)
+        return dt_time(9, 15) <= t <= dt_time(15, 30)
+
+    def get_indices_list(self) -> List[Dict[str, Any]]:
+        """Returns list of indices enriched with real-time market segment running/closed status."""
+        if not hasattr(self, "indices"):
+            return []
+        enriched = []
+        for key, idx in self.indices.items():
+            item = dict(idx)
+            seg = item.get("segment", "NSE Cash")
+            is_open = self.is_market_open(seg)
+            item["market_status"] = "RUNNING" if is_open else "CLOSED"
+            item["is_open"] = is_open
+            item["status_color"] = "green" if is_open else "gray"
+            enriched.append(item)
+        return enriched
+
     def get_full_state(self) -> Dict[str, Any]:
         """Complete bundle returned to the Paper Trading tab UI."""
         return {
@@ -1614,7 +1653,15 @@ class PaperTradeDaemon:
             "seller_strength": self.seller_strength,
             "current_spot": self.current_spot,
             "current_future": self.current_future,
-            "indices": list(self.indices.values()) if hasattr(self, "indices") else [],
+            "indices": self.get_indices_list(),
+            "market_segments": {
+                "NSE Cash": "RUNNING" if self.is_market_open("NSE Cash") else "CLOSED",
+                "NSE Futures": "RUNNING" if self.is_market_open("NSE Futures") else "CLOSED",
+                "BSE Cash": "RUNNING" if self.is_market_open("BSE Cash") else "CLOSED",
+                "MCX Commodity": "RUNNING" if self.is_market_open("MCX Commodity") else "CLOSED",
+                "stock": "RUNNING" if self.is_market_open("NSE Cash") else "CLOSED",
+                "crude": "RUNNING" if self.is_market_open("MCX Commodity") else "CLOSED",
+            },
             "timestamp": datetime.now().isoformat()
         }
 

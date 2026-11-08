@@ -3437,6 +3437,109 @@
       color: #f59e0b;
       border: 1px solid rgba(245, 158, 11, 0.3);
     }
+    /* Segment Market Status Badges & Indicators */
+    .paper-index-title-group, .live-index-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .paper-index-segment-label, .live-index-segment-label {
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .paper-index-badges-wrap, .live-index-badges-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .segment-status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.60rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+    }
+    .segment-status-badge.status-closed {
+      background: rgba(148, 163, 184, 0.12);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+    }
+    .segment-status-dot.dot-closed {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #94a3b8;
+      display: inline-block;
+    }
+    .segment-status-badge.status-running {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .segment-status-dot.dot-running {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      display: inline-block;
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+      animation: pulse-market-dot 1.5s infinite;
+    }
+    @keyframes pulse-market-dot {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .paper-index-card.market-closed, .live-index-card.market-closed {
+      border-color: rgba(148, 163, 184, 0.15);
+    }
+    .paper-index-card.market-closed::before, .live-index-card.market-closed::before {
+      background: #64748b !important;
+    }
+    .pill-market-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.60rem;
+      font-weight: 700;
+      margin-left: 6px;
+      letter-spacing: 0.4px;
+    }
+    .pill-market-status.closed {
+      background: rgba(148, 163, 184, 0.15);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+    .pill-market-status.running {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+    .pill-dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .pill-dot.closed {
+      background: #94a3b8;
+    }
+    .pill-dot.running {
+      background: #10b981;
+      box-shadow: 0 0 5px #10b981;
+      animation: pulse-market-dot 1.5s infinite;
+    }
     .paper-index-main, .live-index-main {
       display: flex;
       justify-content: space-between;
@@ -4430,11 +4533,11 @@
           </div>
 
           <div class="paper-meta-pills">
-            <span class="paper-pill accent" id="paper-pill-segment">🎯 Segment: NIFTY & CRUDE (Separate Funds)</span>
+            <span class="paper-pill accent" id="paper-pill-segment">🎯 Segments: Stock [NSE] <span style="color: #94a3b8; font-weight: 700;">CLOSED</span> • Crude [MCX] <span style="color: #94a3b8; font-weight: 700;">CLOSED</span></span>
             <span class="paper-pill" id="paper-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
             <span class="paper-pill" id="paper-pill-capital">💼 Total Cap: ₹70,000</span>
-            <span class="paper-pill" id="paper-pill-stock-cap" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">📈 Stock: ₹20,000</span>
-            <span class="paper-pill" id="paper-pill-crude-cap" style="border-color: rgba(251, 146, 60, 0.4); color: #fb923c;">🛢️ Crude: ₹50,000</span>
+            <span class="paper-pill" id="paper-pill-stock-cap" style="border-color: rgba(148, 163, 184, 0.3); color: #94a3b8;">📈 Stock (NSE): ₹20,000 <span class="pill-market-status closed"><span class="pill-dot closed"></span>CLOSED</span></span>
+            <span class="paper-pill" id="paper-pill-crude-cap" style="border-color: rgba(148, 163, 184, 0.3); color: #94a3b8;">🛢️ Crude (MCX): ₹50,000 <span class="pill-market-status closed"><span class="pill-dot closed"></span>CLOSED</span></span>
             <span class="paper-pill" id="paper-pill-available">🔓 Available: ₹70,000</span>
             <span class="paper-pill" id="paper-pill-blocked">🔒 Margin: ₹0.00</span>
             <span class="paper-pill" id="paper-pill-day-pnl">💰 Day P&L: ₹0.00</span>
@@ -4622,7 +4725,7 @@
               <span id="live-arm-icon">🔒</span> <span id="live-arm-text">ARM LIVE TRADING</span>
             </button>
             <span class="live-pill" id="live-pill-broker" style="border-color: rgba(59, 130, 246, 0.5); background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-weight: 600;">🏦 ICICI Direct (624401093398)</span>
-            <span class="live-pill accent" id="live-pill-segment">🎯 Segment: NIFTY 50 (Dynamic ATM)</span>
+            <span class="live-pill accent" id="live-pill-segment" style="border-color: rgba(148, 163, 184, 0.3); color: #94a3b8;">🎯 Segment: NSE Cash <span class="pill-market-status closed"><span class="pill-dot closed"></span>CLOSED</span></span>
             <span class="live-pill" id="live-pill-strategy">🤖 Strategy: Dual XGBoost + Macro</span>
             <span class="live-pill" id="live-pill-capital">💼 F&O Cap: ₹2,336</span>
             <span class="live-pill" id="live-pill-available">🔓 Available: ₹2,248</span>
@@ -8005,6 +8108,47 @@
       }
     }
 
+    function getMarketSegmentStatus(segment, symbol) {
+      try {
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Kolkata',
+          hour12: false,
+          weekday: 'short',
+          hour: 'numeric',
+          minute: 'numeric',
+          second: 'numeric'
+        });
+        const parts = formatter.formatToParts(now);
+        let weekday = '', hour = 0, minute = 0;
+        for (const p of parts) {
+          if (p.type === 'weekday') weekday = p.value;
+          if (p.type === 'hour') hour = parseInt(p.value, 10);
+          if (p.type === 'minute') minute = parseInt(p.value, 10);
+        }
+
+        // Saturday and Sunday are always closed
+        if (weekday === 'Sat' || weekday === 'Sun') {
+          return { status: 'CLOSED', isOpen: false, color: 'gray' };
+        }
+
+        const timeInMins = hour * 60 + minute;
+        const target = ((segment || '') + ' ' + (symbol || '')).toLowerCase();
+
+        if (target.includes('mcx') || target.includes('commodity') || target.includes('crude') || target.includes('natural')) {
+          // MCX Commodity trading session: 09:00 to 23:30 IST
+          const isOpen = timeInMins >= 540 && timeInMins <= 1410;
+          return { status: isOpen ? 'RUNNING' : 'CLOSED', isOpen, color: isOpen ? 'green' : 'gray' };
+        } else {
+          // NSE Cash / NSE Futures / BSE Cash trading session: 09:15 to 15:30 IST
+          const isOpen = timeInMins >= 555 && timeInMins <= 930;
+          return { status: isOpen ? 'RUNNING' : 'CLOSED', isOpen, color: isOpen ? 'green' : 'gray' };
+        }
+      } catch (e) {
+        return { status: 'CLOSED', isOpen: false, color: 'gray' };
+      }
+    }
+
     function renderPaperIndices(indices) {
       const indicesGrid = document.getElementById('paper-indices-grid');
       if (!indicesGrid || !Array.isArray(indices) || indices.length === 0) return;
@@ -8021,13 +8165,29 @@
         const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+        const segName = idx.segment || (idx.symbol === 'CRUDEOIL' || idx.symbol === 'NATURALGAS' ? 'MCX Commodity' : 'NSE Cash');
+        const mktStatus = (idx.market_status && idx.is_open !== undefined)
+          ? { status: idx.market_status, isOpen: idx.is_open, color: idx.status_color || (idx.is_open ? 'green' : 'gray') }
+          : getMarketSegmentStatus(segName, idx.symbol);
+        const isOpen = mktStatus.isOpen;
+        const statusLabel = mktStatus.status;
+
         return `
-          <div class="paper-index-card ${isUp ? 'trend-up' : 'trend-down'}">
+          <div class="paper-index-card ${isOpen ? 'market-running' : 'market-closed'} ${isUp ? 'trend-up' : 'trend-down'}">
             <div class="paper-index-head">
-              <div class="paper-index-name">
-                <span>${idx.name || idx.symbol}</span>
+              <div class="paper-index-title-group">
+                <div class="paper-index-name">
+                  <span>${idx.name || idx.symbol}</span>
+                </div>
+                <span class="paper-index-segment-label">${segName}</span>
               </div>
-              <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : (idx.badge === 'COMMODITY' ? 'comm' : 'live')}">${idx.badge || 'SPOT'}</span>
+              <div class="paper-index-badges-wrap">
+                <span class="paper-index-badge ${idx.badge === 'FUTURES' ? 'fut' : (idx.badge === 'COMMODITY' ? 'comm' : 'live')}">${idx.badge || 'SPOT'}</span>
+                <span class="segment-status-badge ${isOpen ? 'status-running' : 'status-closed'}" title="${segName}: Market is ${statusLabel}">
+                  <span class="segment-status-dot ${isOpen ? 'dot-running' : 'dot-closed'}"></span>
+                  <span class="segment-status-text">${statusLabel}</span>
+                </span>
+              </div>
             </div>
             <div class="paper-index-main">
               <div class="paper-index-price-wrap">
@@ -8181,6 +8341,13 @@
         stratPill.textContent = sName;
       }
 
+      const segPill = document.getElementById('paper-pill-segment');
+      if (segPill) {
+        const stockStatus = getMarketSegmentStatus('NSE Cash');
+        const crudeStatus = getMarketSegmentStatus('MCX Commodity');
+        segPill.innerHTML = `🎯 Segments: Stock [NSE] <span style="color: ${stockStatus.isOpen ? '#10b981' : '#94a3b8'}; font-weight: 700;">${stockStatus.status}</span> • Crude [MCX] <span style="color: ${crudeStatus.isOpen ? '#10b981' : '#94a3b8'}; font-weight: 700;">${crudeStatus.status}</span>`;
+      }
+
       const capPill = document.getElementById('paper-pill-capital');
       if (capPill) {
         const cVal = state.total_capital !== undefined ? state.total_capital : (state.capital !== undefined ? state.capital : (cfg.capital || 70000));
@@ -8190,13 +8357,31 @@
       const stockPill = document.getElementById('paper-pill-stock-cap');
       if (stockPill) {
         const sVal = state.equity_capital !== undefined ? state.equity_capital : (sum.equity_capital !== undefined ? sum.equity_capital : 20000);
-        stockPill.textContent = `📈 Stock: ₹${Math.round(sVal).toLocaleString('en-IN')}`;
+        const stockStatus = getMarketSegmentStatus('NSE Cash');
+        const isRunning = stockStatus.isOpen;
+        stockPill.innerHTML = `📈 Stock (NSE): ₹${Math.round(sVal).toLocaleString('en-IN')} <span class="pill-market-status ${isRunning ? 'running' : 'closed'}"><span class="pill-dot ${isRunning ? 'running' : 'closed'}"></span>${isRunning ? 'RUNNING' : 'CLOSED'}</span>`;
+        if (isRunning) {
+          stockPill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          stockPill.style.color = '#10b981';
+        } else {
+          stockPill.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+          stockPill.style.color = '#94a3b8';
+        }
       }
 
       const crudePill = document.getElementById('paper-pill-crude-cap');
       if (crudePill) {
         const crVal = state.commodity_capital !== undefined ? state.commodity_capital : (sum.commodity_capital !== undefined ? sum.commodity_capital : 50000);
-        crudePill.textContent = `🛢️ Crude: ₹${Math.round(crVal).toLocaleString('en-IN')}`;
+        const crudeStatus = getMarketSegmentStatus('MCX Commodity');
+        const isRunning = crudeStatus.isOpen;
+        crudePill.innerHTML = `🛢️ Crude (MCX): ₹${Math.round(crVal).toLocaleString('en-IN')} <span class="pill-market-status ${isRunning ? 'running' : 'closed'}"><span class="pill-dot ${isRunning ? 'running' : 'closed'}"></span>${isRunning ? 'RUNNING' : 'CLOSED'}</span>`;
+        if (isRunning) {
+          crudePill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          crudePill.style.color = '#10b981';
+        } else {
+          crudePill.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+          crudePill.style.color = '#94a3b8';
+        }
       }
 
       const availPill = document.getElementById('paper-pill-available');
@@ -8653,13 +8838,29 @@
         const dayHigh = Number(idx.high || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const dayLow = Number(idx.low || idx.ltp || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+        const segName = idx.segment || (idx.symbol === 'CRUDEOIL' || idx.symbol === 'NATURALGAS' ? 'MCX Commodity' : 'NSE Cash');
+        const mktStatus = (idx.market_status && idx.is_open !== undefined)
+          ? { status: idx.market_status, isOpen: idx.is_open, color: idx.status_color || (idx.is_open ? 'green' : 'gray') }
+          : getMarketSegmentStatus(segName, idx.symbol);
+        const isOpen = mktStatus.isOpen;
+        const statusLabel = mktStatus.status;
+
         return `
-          <div class="live-index-card ${isUp ? 'trend-up' : 'trend-down'}">
+          <div class="live-index-card ${isOpen ? 'market-running' : 'market-closed'} ${isUp ? 'trend-up' : 'trend-down'}">
             <div class="live-index-head">
-              <div class="live-index-name">
-                <span>${idx.name || idx.symbol}</span>
+              <div class="live-index-title-group">
+                <div class="live-index-name">
+                  <span>${idx.name || idx.symbol}</span>
+                </div>
+                <span class="live-index-segment-label">${segName}</span>
               </div>
-              <span class="live-index-badge ${idx.badge === 'FUTURES' ? 'fut' : 'live'}">${idx.badge || 'SPOT'}</span>
+              <div class="live-index-badges-wrap">
+                <span class="live-index-badge ${idx.badge === 'FUTURES' ? 'fut' : (idx.badge === 'COMMODITY' ? 'comm' : 'live')}">${idx.badge || 'SPOT'}</span>
+                <span class="segment-status-badge ${isOpen ? 'status-running' : 'status-closed'}" title="${segName}: Market is ${statusLabel}">
+                  <span class="segment-status-dot ${isOpen ? 'dot-running' : 'dot-closed'}"></span>
+                  <span class="segment-status-text">${statusLabel}</span>
+                </span>
+              </div>
             </div>
             <div class="live-index-main">
               <div class="live-index-price-wrap">
@@ -8847,6 +9048,20 @@
       const brokerPill = document.getElementById('live-pill-broker');
       if (brokerPill) {
         brokerPill.textContent = `🏦 ICICI Direct (${brokerAccount})`;
+      }
+
+      const liveSegPill = document.getElementById('live-pill-segment');
+      if (liveSegPill) {
+        const stockStatus = getMarketSegmentStatus('NSE Cash');
+        const isRunning = stockStatus.isOpen;
+        liveSegPill.innerHTML = `🎯 Segment: NSE Cash <span class="pill-market-status ${isRunning ? 'running' : 'closed'}"><span class="pill-dot ${isRunning ? 'running' : 'closed'}"></span>${isRunning ? 'RUNNING' : 'CLOSED'}</span>`;
+        if (isRunning) {
+          liveSegPill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          liveSegPill.style.color = '#10b981';
+        } else {
+          liveSegPill.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+          liveSegPill.style.color = '#94a3b8';
+        }
       }
 
       const stratPill = document.getElementById('live-pill-strategy');
