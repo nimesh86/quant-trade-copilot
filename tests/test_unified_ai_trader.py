@@ -75,6 +75,7 @@ def test_position_sizing_and_charges():
 
 def test_paper_daemon_integration():
     daemon = PaperTradeDaemon.get_instance()
+    daemon.reset_state(20000.0, 50000.0)
     assert daemon.strategy_evaluator is not None
     assert daemon.capital == 70000.0
     assert daemon.equity_capital == 20000.0
