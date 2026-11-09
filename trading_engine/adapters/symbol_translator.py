@@ -23,6 +23,10 @@ STOCK_CODE_MAP = {
     "BSX": "BSESEN",
     "BANKEX": "BKX",
     "BKX": "BKX",
+    "CRUDEOIL": "CRUDEOIL",
+    "CRUDE": "CRUDEOIL",
+    "NATURALGAS": "NATURALGAS",
+    "NATGAS": "NATURALGAS",
 }
 
 # Reverse mapping: Breeze Stock Code -> Canonical Underlying
@@ -34,6 +38,8 @@ REVERSE_STOCK_CODE_MAP = {
     "BSESEN": "SENSEX",
     "BSX": "SENSEX",
     "BKX": "BANKEX",
+    "CRUDEOIL": "CRUDEOIL",
+    "NATURALGAS": "NATURALGAS",
 }
 
 MONTH_MAP = {
@@ -50,8 +56,10 @@ MONTH_NUM_TO_NAME = {v: k for k, v in MONTH_MAP.items()}
 
 
 def _get_exchange_for_underlying(underlying: str, product_type: str = "options") -> str:
-    """Returns correct exchange (BFO/BSE for BSE underlyings, NFO/NSE for NSE underlyings)."""
+    """Returns correct exchange (MCX for commodities, BFO/BSE for BSE underlyings, NFO/NSE for NSE underlyings)."""
     und = underlying.strip().upper()
+    if und in ("CRUDEOIL", "CRUDE", "NATURALGAS", "NATGAS", "GOLD", "SILVER", "COPPER", "ZINC", "LEAD", "ALUMINIUM", "NICKEL"):
+        return "MCX"
     is_bse = und in ("SENSEX", "BSX", "BANKEX", "BKX")
     if product_type == "cash":
         return "BSE" if is_bse else "NSE"
@@ -200,7 +208,7 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "exchange_code": exchange_code
         }
 
-    # Pattern 4b: Human-readable Option with spaces (e.g. "NIFTY 03 NOV 22950 CE" or "NIFTY 29 OCT 22750 PE")
+    # Pattern 4b: Human-readable Option with spaces (e.g. "NIFTY 03 NOV 22950 CE" or "CRUDEOIL 17 NOV 8200 PE")
     m_human = re.match(r"^([A-Z]+)\s+(\d{1,2})\s*([A-Z]{3})\s*(\d+)\s*(CE|PE)$", clean_sym)
     if m_human:
         underlying = m_human.group(1)
@@ -230,27 +238,63 @@ def parse_canonical_symbol(symbol: str) -> Optional[Dict[str, Any]]:
             "exchange_code": exchange_code
         }
 
-    # Pattern 5: Spot Index (e.g. NIFTY 50, NIFTY, BANKNIFTY, SENSEX)
-    for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSESEN", "BSX", "FINNIFTY", "MIDCPNIFTY"):
+    # Pattern 4c: Human-readable Option without explicit date (e.g. "CRUDEOIL 8200 PE" or "NIFTY 24500 CE")
+    m_simple = re.match(r"^([A-Z]+)\s+(\d+)\s*(CE|PE)$", clean_sym)
+    if m_simple:
+        underlying = m_simple.group(1)
+        strike = float(m_simple.group(2))
+        opt_type = m_simple.group(3)
+        right = "Call" if opt_type == "CE" else "Put"
+        breeze_code = STOCK_CODE_MAP.get(underlying, underlying)
+        exchange_code = _get_exchange_for_underlying(underlying, "options")
+        return {
+            "canonical_symbol": clean_sym,
+            "underlying": underlying,
+            "breeze_stock_code": breeze_code,
+            "strike_price": int(strike) if strike.is_integer() else strike,
+            "option_type": opt_type,
+            "right": right,
+            "expiry_date": None,
+            "product_type": "options",
+            "exchange_code": exchange_code
+        }
+
+    # Pattern 5: Spot Index & Commodity Underlying (e.g. NIFTY, BANKNIFTY, SENSEX, CRUDEOIL, NATURALGAS)
+    for spot_name in ("NIFTY 50", "NIFTY", "BANKNIFTY", "NIFTY BANK", "SENSEX", "BSESEN", "BSX", "FINNIFTY", "MIDCPNIFTY", "CRUDEOIL", "CRUDE", "NATURALGAS", "NATGAS"):
         if clean_sym == spot_name or (clean_sym.startswith(spot_name) and not ("CE" in clean_sym or "PE" in clean_sym or "FUT" in clean_sym)):
-            und = "SENSEX" if ("SENSEX" in spot_name or "BSESEN" in spot_name or "BSX" in spot_name) else (
-                "BANKNIFTY" if "BANK" in spot_name else (
-                    "FINNIFTY" if "FIN" in spot_name else (
-                        "MIDCPNIFTY" if "MID" in spot_name else "NIFTY"
-                    )
-                )
-            )
+            if "CRUDE" in spot_name:
+                und = "CRUDEOIL"
+                prod_type = "futures"
+            elif "NAT" in spot_name:
+                und = "NATURALGAS"
+                prod_type = "futures"
+            elif "SENSEX" in spot_name or "BSESEN" in spot_name or "BSX" in spot_name:
+                und = "SENSEX"
+                prod_type = "cash"
+            elif "BANK" in spot_name:
+                und = "BANKNIFTY"
+                prod_type = "cash"
+            elif "FIN" in spot_name:
+                und = "FINNIFTY"
+                prod_type = "cash"
+            elif "MID" in spot_name:
+                und = "MIDCPNIFTY"
+                prod_type = "cash"
+            else:
+                und = "NIFTY"
+                prod_type = "cash"
+
             breeze_code = STOCK_CODE_MAP.get(und, und)
-            exchange_code = _get_exchange_for_underlying(und, "cash")
+            exchange_code = _get_exchange_for_underlying(und, prod_type)
             return {
                 "canonical_symbol": clean_sym,
                 "underlying": und,
                 "breeze_stock_code": breeze_code,
                 "strike_price": 0,
-                "option_type": "SPOT",
+                "option_type": "FUT" if prod_type == "futures" else "SPOT",
                 "right": "Others",
                 "expiry_date": None,
-                "product_type": "cash",
+                "product_type": prod_type,
                 "exchange_code": exchange_code
             }
 

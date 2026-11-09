@@ -267,3 +267,4 @@ def test_daemon_config_update_dynamic_toggle(clean_paper_daemon):
     cfg = daemon.get_config()
     assert cfg["commodity_dynamic_trade_limit"] is True
     assert cfg["commodity_pause_hours"] == 3.0
+

@@ -682,7 +682,7 @@ def test_paper_daemon_commodity_execution_crude_and_natgas(clean_paper_daemon):
     )
     assert "commodity" in daemon.active_trades
     comm_pos = daemon.active_trades["commodity"]
-    assert comm_pos["contract"] == "CRUDEOIL 5800 CE"
+    assert "CRUDEOIL" in comm_pos["contract"] and "5800 CE" in comm_pos["contract"]
     assert comm_pos["trend"] == "BULLISH"
     assert daemon.commodity_blocked_capital > 0.0
 
@@ -698,7 +698,7 @@ def test_paper_daemon_commodity_execution_crude_and_natgas(clean_paper_daemon):
         now=now
     )
     comm_put = daemon.active_trades["commodity"]
-    assert comm_put["contract"] == "CRUDEOIL 5800 PE"
+    assert "CRUDEOIL" in comm_put["contract"] and "5800 PE" in comm_put["contract"]
     assert comm_put["trend"] == "BEARISH"
 
     # 3. CRUDEOIL Insufficient capital abort (lines 1052-1057)

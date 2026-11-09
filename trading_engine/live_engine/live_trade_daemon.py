@@ -776,19 +776,41 @@ class LiveTradeDaemon:
             avoid_otm=True
         )
 
-        est_prem = max(80.0, round(120.0 + (spot_price % 50), 2))
+        from trading_engine.quant_core.option_pricing import (
+            get_canonical_contract_info,
+            estimate_option_premium,
+            calculate_realistic_lots_and_margin
+        )
+
+        opt_dir = "CALL" if direction == "CALL" else "PUT"
+        contract_info = get_canonical_contract_info("NIFTY", spot_price, opt_dir, now)
+
+        # Realistic Option Premium: Broker live quote or Black-Scholes model
+        est_prem, pricing_source = estimate_option_premium(
+            underlying="NIFTY",
+            underlying_price=spot_price,
+            strike=contract.strike,
+            option_type=opt_type,
+            current_dt=now,
+            broker_adapter=getattr(self, "broker_adapter", None)
+        )
+
         risk_pt = max(15.0, round(est_prem * self.sl_pct, 2))
-        risk_per_lot = risk_pt * contract.lot_size
 
-        # Institutional 7% compounding sizing on Equity Capital via Unified Sizer
-        lots = self.strategy_evaluator.calculate_lots(self.equity_capital, self.risk_pct, risk_per_lot, max_lots=100)
-        units = lots * contract.lot_size
+        lots, units, required_capital, allowed, reason = calculate_realistic_lots_and_margin(
+            capital=self.equity_capital,
+            available_capital=self.equity_available_capital,
+            option_premium=est_prem,
+            lot_size=contract.lot_size,
+            risk_pct=self.risk_pct,
+            opt_sl_pts=risk_pt,
+            brokerage_per_lot=40.0,
+            max_lots=100
+        )
 
-        # Institutional Capital Reservation & Margin Blocking
-        required_capital = round(est_prem * units, 2)
-        if required_capital > self.equity_available_capital:
+        if not allowed:
             logger.warning(
-                f"❌ [LIVE TRADE ABORTED] Insufficient equity capital. "
+                f"❌ [LIVE TRADE ABORTED] {reason} "
                 f"Required: ₹{required_capital:,.2f}, Available: ₹{self.equity_available_capital:,.2f}"
             )
             return
@@ -862,25 +884,42 @@ class LiveTradeDaemon:
         opt_tgt_pts = 25.0
         opt_sl_pts = 12.0
 
-        step = 50.0
-        atm_strike = int(round(current_price / step) * step)
-        opt_type = "CE" if direction == "CALL" else "PE"
-        contract_sym = f"CRUDEOIL {atm_strike} {opt_type}"
+        from trading_engine.quant_core.option_pricing import (
+            get_canonical_contract_info,
+            estimate_option_premium,
+            calculate_realistic_lots_and_margin
+        )
 
-        est_prem = max(80.0, round(110.0 + (current_price % 50), 2))
-        risk_per_lot = (opt_sl_pts * lot_size) + 90.0
-        lots = self.strategy_evaluator.calculate_lots(self.commodity_capital, self.risk_pct, risk_per_lot, max_lots=50)
-        units = lots * lot_size
+        contract_info = get_canonical_contract_info("CRUDEOIL", current_price, direction, now)
+        atm_strike = contract_info["strike"]
+        opt_type = contract_info["option_type"]
+        contract_sym = contract_info["display_symbol"]
+        lot_size = contract_info["lot_size"]
 
-        required_margin = round(lots * lot_size * est_prem, 2)
-        if required_margin > self.commodity_available_capital:
-            lots = max(1, int(self.commodity_available_capital // (lot_size * est_prem)))
-            units = lots * lot_size
-            required_margin = round(lots * lot_size * est_prem, 2)
+        # Authoritative pricing: Live broker quote or Black-76 commodity model
+        est_prem, pricing_source = estimate_option_premium(
+            underlying="CRUDEOIL",
+            underlying_price=current_price,
+            strike=atm_strike,
+            option_type=opt_type,
+            current_dt=now,
+            broker_adapter=getattr(self, "broker_adapter", None)
+        )
 
-        if required_margin > self.commodity_available_capital:
+        lots, units, required_margin, allowed, reason = calculate_realistic_lots_and_margin(
+            capital=self.commodity_capital,
+            available_capital=self.commodity_available_capital,
+            option_premium=est_prem,
+            lot_size=lot_size,
+            risk_pct=self.risk_pct,
+            opt_sl_pts=opt_sl_pts,
+            brokerage_per_lot=90.0,
+            max_lots=50
+        )
+
+        if not allowed:
             logger.warning(
-                f"❌ [COMMODITY LIVE TRADE ABORTED] Insufficient commodity capital. "
+                f"❌ [COMMODITY LIVE TRADE ABORTED] {reason} "
                 f"Required: ₹{required_margin:,.2f}, Available: ₹{self.commodity_available_capital:,.2f}"
             )
             return
@@ -902,6 +941,9 @@ class LiveTradeDaemon:
             "day": now.strftime("%A"),
             "symbol": symbol,
             "contract": contract_sym,
+            "canonical_symbol": contract_info.get("exchange_symbol", contract_sym),
+            "expiry_date": contract_info.get("expiry_date"),
+            "pricing_source": pricing_source,
             "strike": atm_strike,
             "option_type": opt_type,
             "trend": trend_str,
