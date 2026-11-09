@@ -93,7 +93,8 @@ class PaperTradeDaemon:
 
         # Real-time state
         self.is_running = True
-        self.active_trade: Optional[Dict[str, Any]] = None
+        self._active_trade: Optional[Dict[str, Any]] = None
+        self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.trade_history: List[Dict[str, Any]] = []
 
         # Real-time market metrics
@@ -256,6 +257,28 @@ class PaperTradeDaemon:
     def available_capital(self, val: float):
         pass
 
+    @property
+    def active_trade(self) -> Optional[Dict[str, Any]]:
+        """Returns the primary active trade (equity preferred if both active, else commodity)."""
+        if not hasattr(self, "active_trades") or not self.active_trades:
+            return getattr(self, "_active_trade", None)
+        if "equity" in self.active_trades:
+            return self.active_trades["equity"]
+        if "commodity" in self.active_trades:
+            return self.active_trades["commodity"]
+        return list(self.active_trades.values())[0]
+
+    @active_trade.setter
+    def active_trade(self, val: Optional[Dict[str, Any]]):
+        if not hasattr(self, "active_trades"):
+            self.active_trades = {}
+        self._active_trade = val
+        if val is None:
+            self.active_trades.clear()
+        else:
+            seg = "commodity" if self._is_commodity_trade(val) else "equity"
+            self.active_trades[seg] = val
+
     def _is_commodity_trade(self, t: Optional[Dict[str, Any]]) -> bool:
         """Determines if a trade belongs to the MCX Commodity fund ledger."""
         if not t:
@@ -380,7 +403,16 @@ class PaperTradeDaemon:
                         saved_total = self.max_trades_index + self.max_trades_commodity
                     self.max_trades_per_day = saved_total
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
-                    self.active_trade = data.get("active_trade")
+                    self.active_trades = {}
+                    if "active_trades" in data and isinstance(data["active_trades"], list):
+                        for at in data["active_trades"]:
+                            if isinstance(at, dict):
+                                seg = "commodity" if self._is_commodity_trade(at) else "equity"
+                                self.active_trades[seg] = at
+                    elif "active_trade" in data and isinstance(data["active_trade"], dict):
+                        at = data["active_trade"]
+                        seg = "commodity" if self._is_commodity_trade(at) else "equity"
+                        self.active_trades[seg] = at
                     self.trade_history = data.get("trade_history", [])
 
                     # Dual-Account Segregation (ICICI Direct style separate ledgers)
@@ -453,7 +485,8 @@ class PaperTradeDaemon:
         self.commodity_blocked_capital = 0.0
         self.commodity_available_capital = float(commodity_capital)
 
-        self.active_trade = None
+        self.active_trades.clear()
+        self._active_trade = None
         self.trade_history = []
         self.last_crude_exit_time = None
         self.last_equity_exit_time = None
@@ -490,6 +523,7 @@ class PaperTradeDaemon:
                 "max_trades_commodity": self.max_trades_commodity,
                 "blocked_time_slots": self.blocked_time_slots,
                 "active_trade": self.active_trade,
+                "active_trades": list(self.active_trades.values()) if hasattr(self, "active_trades") else ([] if not self.active_trade else [self.active_trade]),
                 "trade_history": self.trade_history,
                 "updated_at": datetime.now().isoformat()
             }
@@ -671,133 +705,138 @@ class PaperTradeDaemon:
         self.prev_tick_price = ltp
 
     def _evaluate_active_position_tick(self, symbol: str, ltp: float, now: datetime):
-        pos = self.active_trade
-        if not pos:
+        if not hasattr(self, "active_trades") or not self.active_trades:
             return
-        contract_sym = pos.get("contract", "")
-        pos_sym = pos.get("symbol", "")
 
-        # MCX Commodity Position Evaluation
-        if pos.get("segment") == "MCX Commodity" or pos_sym in ("CRUDEOIL", "NATURALGAS"):
-            if symbol == contract_sym or symbol == pos_sym:
-                underlying_px = ltp
-                pos["current_underlying"] = underlying_px
-                trend = pos.get("trend", "BULLISH")
-                u_entry = pos.get("entry_underlying", pos["entry_price"])
+        for seg_key in list(self.active_trades.keys()):
+            pos = self.active_trades.get(seg_key)
+            if not pos:
+                continue
+            contract_sym = pos.get("contract", "")
+            pos_sym = pos.get("symbol", "")
 
-                if trend in ("BULLISH", "LONG", "CALL"):
-                    gain_u = round(underlying_px - u_entry, 2)
-                    pts_opt = round(gain_u * 0.55, 2)
+            # MCX Commodity Position Evaluation
+            if pos.get("segment") == "MCX Commodity" or pos_sym in ("CRUDEOIL", "NATURALGAS"):
+                if symbol == contract_sym or symbol == pos_sym:
+                    underlying_px = ltp
+                    pos["current_underlying"] = underlying_px
+                    trend = pos.get("trend", "BULLISH")
+                    u_entry = pos.get("entry_underlying", pos["entry_price"])
 
-                    # Trailing Trigger (+22 pts underlying move locks +3 pts option profit)
-                    if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
-                        pos["trail_active"] = True
-                        pos["sl_underlying"] = round(u_entry + pos.get("trail_lock_u", 5.5), 2)
-                        pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
-                        logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+                    if trend in ("BULLISH", "LONG", "CALL"):
+                        gain_u = round(underlying_px - u_entry, 2)
+                        pts_opt = round(gain_u * 0.55, 2)
 
-                    # Target Hit (+45 pts underlying move -> +25 pts option gain)
-                    if underlying_px >= pos.get("target_underlying", u_entry + 45.0):
+                        # Trailing Trigger (+22 pts underlying move locks +3 pts option profit)
+                        if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
+                            pos["trail_active"] = True
+                            pos["sl_underlying"] = round(u_entry + pos.get("trail_lock_u", 5.5), 2)
+                            pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
+                            logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+
+                        # Target Hit (+45 pts underlying move -> +25 pts option gain)
+                        if underlying_px >= pos.get("target_underlying", u_entry + 45.0):
+                            self._close_active_trade(
+                                reason="Target Hit (+25 pts Option)",
+                                exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
+                                exit_time=now,
+                                opt_pts=pos.get("opt_tgt_pts", 25.0),
+                                trade_to_close=pos
+                            )
+                            continue
+                        # Stop Loss / Trailed SL Hit
+                        elif underlying_px <= pos.get("sl_underlying", u_entry - 22.0):
+                            opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
+                            reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
+                            self._close_active_trade(
+                                reason=reason,
+                                exit_price=pos["entry_price"] + opt_exit_pts,
+                                exit_time=now,
+                                opt_pts=opt_exit_pts,
+                                trade_to_close=pos
+                            )
+                            continue
+                    else:  # Short (BEARISH / PUT)
+                        gain_u = round(u_entry - underlying_px, 2)
+                        pts_opt = round(gain_u * 0.55, 2)
+
+                        if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
+                            pos["trail_active"] = True
+                            pos["sl_underlying"] = round(u_entry - pos.get("trail_lock_u", 5.5), 2)
+                            pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
+                            logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+
+                        if underlying_px <= pos.get("target_underlying", u_entry - 45.0):
+                            self._close_active_trade(
+                                reason="Target Hit (+25 pts Option)",
+                                exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
+                                exit_time=now,
+                                opt_pts=pos.get("opt_tgt_pts", 25.0),
+                                trade_to_close=pos
+                            )
+                            continue
+                        elif underlying_px >= pos.get("sl_underlying", u_entry + 22.0):
+                            opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
+                            reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
+                            self._close_active_trade(
+                                reason=reason,
+                                exit_price=pos["entry_price"] + opt_exit_pts,
+                                exit_time=now,
+                                opt_pts=opt_exit_pts,
+                                trade_to_close=pos
+                            )
+                            continue
+
+                    # Commodity Auto Square-Off at 23:25 IST
+                    if now.hour == 23 and now.minute >= 25:
                         self._close_active_trade(
-                            reason="Target Hit (+25 pts Option)",
-                            exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
+                            reason="23:25 EOD Square-Off",
+                            exit_price=pos["entry_price"] + pts_opt,
                             exit_time=now,
-                            opt_pts=pos.get("opt_tgt_pts", 25.0)
+                            opt_pts=pts_opt,
+                            trade_to_close=pos
                         )
-                        return
-                    # Stop Loss / Trailed SL Hit
-                    elif underlying_px <= pos.get("sl_underlying", u_entry - 22.0):
-                        opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
-                        reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
-                        self._close_active_trade(
-                            reason=reason,
-                            exit_price=pos["entry_price"] + opt_exit_pts,
-                            exit_time=now,
-                            opt_pts=opt_exit_pts
-                        )
-                        return
-                else:  # Short (BEARISH / PUT)
-                    gain_u = round(u_entry - underlying_px, 2)
-                    pts_opt = round(gain_u * 0.55, 2)
+                        continue
 
-                    if not pos.get("trail_active") and gain_u >= pos.get("trail_trig_u", 22.0):
-                        pos["trail_active"] = True
-                        pos["sl_underlying"] = round(u_entry - pos.get("trail_lock_u", 5.5), 2)
-                        pos["sl"] = round(pos["entry_price"] + pos.get("opt_trail_pts", 3.0), 2)
-                        logger.info(f"🛡️ [CRUDE TRAILING SL ACTIVATED] Underlying gain +{gain_u:.1f} pts >= {pos.get('trail_trig_u', 22.0)} pts. SL secured at ₹{pos['sl_underlying']:.2f} (+3 pts opt)")
+                    pos["current_price"] = round(pos["entry_price"] + pts_opt, 2)
+                    pos["points_gained"] = pts_opt
+                    pos["points"] = pts_opt
+                    pos["unrealized_pnl"] = round(pts_opt * pos["units"], 2)
+                    pos["buyer_strength"] = self.buyer_strength
+                    pos["seller_strength"] = self.seller_strength
+            else:
+                # Option LTP update for Equity / NIFTY
+                opt_ltp = pos.get("current_price", pos["entry_price"])
+                if symbol == contract_sym:
+                    opt_ltp = ltp
+                elif symbol in ("NIFTY", "NIFTY 50"):
+                    spot_diff = ltp - pos.get("spot_at_entry", ltp)
+                    delta = 0.55 if pos.get("trend") == "BULLISH" else -0.55
+                    opt_ltp = max(5.0, round(pos["entry_price"] + spot_diff * delta, 2))
+                else:
+                    continue
 
-                    if underlying_px <= pos.get("target_underlying", u_entry - 45.0):
-                        self._close_active_trade(
-                            reason="Target Hit (+25 pts Option)",
-                            exit_price=pos["entry_price"] + pos.get("opt_tgt_pts", 25.0),
-                            exit_time=now,
-                            opt_pts=pos.get("opt_tgt_pts", 25.0)
-                        )
-                        return
-                    elif underlying_px >= pos.get("sl_underlying", u_entry + 22.0):
-                        opt_exit_pts = pos.get("opt_trail_pts", 3.0) if pos.get("trail_active") else -pos.get("opt_sl_pts", 12.0)
-                        reason = "Trailing SL Hit (+3 pts Option)" if pos.get("trail_active") else "Stop Loss Hit (-12 pts Option)"
-                        self._close_active_trade(
-                            reason=reason,
-                            exit_price=pos["entry_price"] + opt_exit_pts,
-                            exit_time=now,
-                            opt_pts=opt_exit_pts
-                        )
-                        return
-
-                # Commodity Auto Square-Off at 23:25 IST
-                if now.hour == 23 and now.minute >= 25:
-                    self._close_active_trade(
-                        reason="23:25 EOD Square-Off",
-                        exit_price=pos["entry_price"] + pts_opt,
-                        exit_time=now,
-                        opt_pts=pts_opt
-                    )
-                    return
-
-                pos["current_price"] = round(pos["entry_price"] + pts_opt, 2)
-                pos["points_gained"] = pts_opt
-                pos["points"] = pts_opt
-                pos["unrealized_pnl"] = round(pts_opt * pos["units"], 2)
+                pos["current_price"] = round(opt_ltp, 2)
+                pos["unrealized_pnl"] = round((opt_ltp - pos["entry_price"]) * pos["units"], 2)
+                pos["points_gained"] = round(opt_ltp - pos["entry_price"], 2)
+                pos["points"] = pos["points_gained"]
                 pos["buyer_strength"] = self.buyer_strength
                 pos["seller_strength"] = self.seller_strength
-            return
 
-        # Option LTP update:
-        # 1. Exact match if direct contract tick arrives from broker WebSocket
-        # 2. Delta estimation ONLY against spot index benchmark (NIFTY / NIFTY 50)
-        # Note: Do NOT match substring (e.g. 'NIFTY' in 'NIFTY26N0924600PE') and do NOT evaluate against futures (NIFTY-I)
-        opt_ltp = pos.get("current_price", pos["entry_price"])
-        if symbol == contract_sym:
-            opt_ltp = ltp
-        elif symbol in ("NIFTY", "NIFTY 50"):
-            spot_diff = ltp - pos.get("spot_at_entry", ltp)
-            delta = 0.55 if pos.get("trend") == "BULLISH" else -0.55
-            opt_ltp = max(5.0, round(pos["entry_price"] + spot_diff * delta, 2))
-        else:
-            # Irrelevant tick (BANKNIFTY, SENSEX, or NIFTY-I futures) - do not touch active position
-            return
+                # Check Stop Loss Hit
+                if opt_ltp <= pos["sl"]:
+                    self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now, trade_to_close=pos)
+                    continue
 
-        pos["current_price"] = round(opt_ltp, 2)
-        pos["unrealized_pnl"] = round((opt_ltp - pos["entry_price"]) * pos["units"], 2)
-        pos["points_gained"] = round(opt_ltp - pos["entry_price"], 2)
-        pos["points"] = pos["points_gained"]
-        pos["buyer_strength"] = self.buyer_strength
-        pos["seller_strength"] = self.seller_strength
+                # Check Target Hit
+                if opt_ltp >= pos["target"]:
+                    self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now, trade_to_close=pos)
+                    continue
 
-        # Check Stop Loss Hit
-        if opt_ltp <= pos["sl"]:
-            self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
-            return
-
-        # Check Target Hit
-        if opt_ltp >= pos["target"]:
-            self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
-            return
-
-        # Auto Square-Off at 15:15 IST
-        if now.hour == 15 and now.minute >= 15:
-            self._close_active_trade(reason="15:15 Auto Square-Off", exit_price=opt_ltp, exit_time=now)
+                # Auto Square-Off at 15:15 IST
+                if now.hour == 15 and now.minute >= 15:
+                    self._close_active_trade(reason="15:15 Auto Square-Off", exit_price=opt_ltp, exit_time=now, trade_to_close=pos)
+                    continue
 
     def _accumulate_minute_bar(self, symbol: str, ltp: float, volume: int, now: datetime):
         """Rolls incoming ticks into 1-minute OHLCV candles."""
@@ -863,16 +902,17 @@ class PaperTradeDaemon:
         if symbol in ("NIFTY", "NIFTY 50", "CRUDEOIL", "NATURALGAS"):
             logger.info(f"📊 [1-MIN BAR CLOSED] {symbol} @ {now.strftime('%H:%M:%S')} | O:{bar['open']} H:{bar['high']} L:{bar['low']} C:{bar['close']} | History: {len(self.bar_history[symbol])} bars")
 
-        # Only evaluate entries if no active position
-        if self.active_trade is not None:
-            return
-
         # Handle Commodity Entry Evaluation
         if symbol in ("CRUDEOIL", "NATURALGAS"):
-            # Commodity Market Hours Gating: 13:00 to 23:15 IST (Institutional US overlap as backtested)
+            # Commodity Market Hours Gating: MCX market must be open (09:00 - 23:30 IST)
+            if not self.is_market_open("MCX Commodity"):
+                return
+            # Cutoff: no new commodity entries after 23:15 IST
             if now.hour > 23 or (now.hour == 23 and now.minute >= 15):
                 return
-            if now.hour < 13:
+
+            # Segment-specific active position check: do not enter if commodity trade is already active
+            if hasattr(self, "active_trades") and "commodity" in self.active_trades:
                 return
 
             # Cooldown Gating: at least 15 minutes since last crude exit
@@ -898,6 +938,10 @@ class PaperTradeDaemon:
 
         # Pre-Market & Regular Hours Gating: NSE market must be open (09:15 - 15:30 IST)
         if not self.is_market_open("NSE Cash"):
+            return
+
+        # Segment-specific active position check: do not enter if equity trade is already active
+        if hasattr(self, "active_trades") and "equity" in self.active_trades:
             return
 
         # Gating 1: Blocked Time Slots (e.g. 09:15 to 10:05 opening volatility noise filter)
@@ -1234,13 +1278,23 @@ class PaperTradeDaemon:
         )
         self.save_state()
 
-    def _close_active_trade(self, reason: str, exit_price: float, exit_time: datetime, opt_pts: Optional[float] = None):
+    def _close_active_trade(
+        self,
+        reason: str,
+        exit_price: float,
+        exit_time: datetime,
+        opt_pts: Optional[float] = None,
+        trade_to_close: Optional[Dict[str, Any]] = None
+    ):
         """Finalizes active trade and adds to persistent ledger with separated fund settlement."""
-        if not self.active_trade:
+        if trade_to_close is None:
+            trade_to_close = self.active_trade
+        if not trade_to_close:
             return
 
-        pos = self.active_trade
+        pos = trade_to_close
         is_comm = self._is_commodity_trade(pos)
+        seg_key = "commodity" if is_comm else "equity"
 
         if opt_pts is not None:
             pts = round(opt_pts, 2)
@@ -1259,22 +1313,22 @@ class PaperTradeDaemon:
         roi = round((net / invested) * 100.0, 2) if invested > 0 else 0.0
 
         closed_rec = {
-            "id": pos["id"],
-            "trade_id": pos["id"],
-            "date": pos["date"],
-            "day": pos["day"],
-            "symbol": pos["symbol"],
-            "contract": pos["contract"],
-            "strike": pos["strike"],
-            "option_type": pos["option_type"],
-            "trend": pos["trend"],
-            "action": f"BUY_{pos['option_type']}",
-            "indicator": pos["strategy"],
-            "strategy": pos["strategy"],
-            "probability": pos["probability"],
-            "entry_time": pos["entry_time"],
-            "entry_price": pos["entry_price"],
-            "entry_rate": pos["entry_price"],
+            "id": pos.get("id", f"PTR_{exit_time.strftime('%Y%m%d_%H%M%S')}"),
+            "trade_id": pos.get("trade_id", pos.get("id", "")),
+            "date": pos.get("date", exit_time.strftime("%Y-%m-%d")),
+            "day": pos.get("day", exit_time.strftime("%A")),
+            "symbol": pos.get("symbol", "NIFTY"),
+            "contract": pos.get("contract", "NIFTY ATM"),
+            "strike": pos.get("strike", 0.0),
+            "option_type": pos.get("option_type", "CE"),
+            "trend": pos.get("trend", "BULLISH"),
+            "action": f"BUY_{pos.get('option_type', 'CE')}",
+            "indicator": pos.get("strategy", pos.get("indicator", "Unified AI Trader")),
+            "strategy": pos.get("strategy", pos.get("indicator", "Unified AI Trader")),
+            "probability": pos.get("probability", "70%"),
+            "entry_time": pos.get("entry_time", "--"),
+            "entry_price": pos.get("entry_price", pos.get("entry_rate", 0.0)),
+            "entry_rate": pos.get("entry_rate", pos.get("entry_price", 0.0)),
             "exit_time": exit_time.strftime("%H:%M:%S"),
             "exit_price": round(exit_price, 2),
             "exit_rate": round(exit_price, 2),
@@ -1285,10 +1339,10 @@ class PaperTradeDaemon:
             "charges": charges,
             "net": net,
             "roi": roi,
-            "lots": pos["lots"],
-            "units": pos["units"],
-            "quantity": pos["units"],
-            "segment": pos.get("segment", "NIFTY")
+            "lots": pos.get("lots", 1),
+            "units": pos.get("units", pos.get("quantity", 50)),
+            "quantity": pos.get("units", pos.get("quantity", 50)),
+            "segment": pos.get("segment", "NSE Cash" if not is_comm else "MCX Commodity")
         }
 
         self.trade_history.append(closed_rec)
@@ -1309,7 +1363,10 @@ class PaperTradeDaemon:
             acc_name = "Stock Fund"
             acc_cap = self.equity_capital
 
-        self.active_trade = None
+        if hasattr(self, "active_trades") and seg_key in self.active_trades:
+            del self.active_trades[seg_key]
+        if hasattr(self, "active_trades") and not self.active_trades:
+            self._active_trade = None
         self.save_state()
         self._record_to_db(closed_rec)
         logger.info(

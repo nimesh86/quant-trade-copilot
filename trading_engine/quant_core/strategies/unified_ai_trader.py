@@ -130,22 +130,14 @@ class UnifiedAITraderStrategy:
         ema_50 = float(closes.ewm(span=min(len(closes), 50), adjust=False).mean().iloc[-1])
         sma_200 = float(closes.rolling(min(len(closes), 200), min_periods=10).mean().iloc[-1])
 
-        # Volume confirmation
-        has_vol = bool(vols.max() > 0)
-        avg_vol = float(vols.rolling(min(len(vols), 10)).mean().iloc[-1] or 1.0)
-        vol_ok_setup1 = (float(vols.iloc[-1]) >= 1.05 * avg_vol) if has_vol else True
-        vol_ok_setup2 = (float(vols.iloc[-1]) >= 1.15 * avg_vol) if has_vol else True
+        # Technical Indicators for setups
+        ema_9 = float(closes.ewm(span=min(len(closes), 9), adjust=False).mean().iloc[-1])
+        ema_20 = float(closes.ewm(span=min(len(closes), 20), adjust=False).mean().iloc[-1])
+        ema_50 = float(closes.ewm(span=min(len(closes), 50), adjust=False).mean().iloc[-1])
+        sma_20 = float(closes.rolling(min(len(closes), 20)).mean().iloc[-1])
+        sma_200 = float(closes.rolling(min(len(closes), 200), min_periods=10).mean().iloc[-1])
 
-        # Fallback to futures volume if spot cash volume is 0
-        if not has_vol and fut_df is not None and len(fut_df) >= 10:
-            fut_vols = pd.Series([float(b.get("volume", 0) or 0) for b in fut_bars])
-            if fut_vols.max() > 0:
-                fut_avg = float(fut_vols.rolling(min(len(fut_vols), 10)).mean().iloc[-1] or 1.0)
-                vol_ok_setup1 = (float(fut_vols.iloc[-1]) >= 1.05 * fut_avg)
-                vol_ok_setup2 = (float(fut_vols.iloc[-1]) >= 1.15 * fut_avg)
-
-        # Technical Indicators for protective gates
-        # RSI
+        # RSI (14)
         delta = closes.diff()
         gain = delta.clip(lower=0).ewm(alpha=1.0 / 14, min_periods=5, adjust=False).mean()
         loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / 14, min_periods=5, adjust=False).mean()
@@ -156,6 +148,14 @@ class UnifiedAITraderStrategy:
         b_lower = sma_20 - (2.0 * std20)
         b_upper = sma_20 + (2.0 * std20)
         boll_p = float((last_c - b_lower) / ((b_upper - b_lower) + 1e-9))
+
+        # MACD (12, 26, 9)
+        ema12 = closes.ewm(span=12, adjust=False).mean()
+        ema26 = closes.ewm(span=26, adjust=False).mean()
+        macd_line = ema12 - ema26
+        macd_sig = macd_line.ewm(span=9, adjust=False).mean()
+        macd_hist = float((macd_line - macd_sig).iloc[-1])
+        prev_macd_hist = float((macd_line - macd_sig).iloc[-2]) if len(closes) > 1 else 0.0
 
         # ADX / Directional Movement
         up_move = highs.diff()
@@ -168,28 +168,33 @@ class UnifiedAITraderStrategy:
         neg_dm_s = float(pd.Series(neg_dm).ewm(alpha=1.0 / 14, min_periods=5, adjust=False).mean().iloc[-1] or 0.0)
         di_plus = float(100.0 * (pos_dm_s / (atr_14 + 1e-9)))
         di_minus = float(100.0 * (neg_dm_s / (atr_14 + 1e-9)))
-        dx = 100.0 * abs(di_plus - di_minus) / (di_plus + di_minus + 1e-9)
-        adx_1m = float(dx)
 
         signal_dir = None
         setup_name = None
 
         # Setup 1: BRR-01 Bear-Trap Reversal (CALL / BULLISH)
-        # Undercuts 10-bar low, prints a bullish rejection/reversal candle, with volume confirmation
-        if (last_l < rolling_low_10) and (last_c > last_o) and (last_c > prev_c) and vol_ok_setup1:
-            if rsi_1m < 75.0:  # Avoid entering call at severe overbought exhaustion
-                signal_dir = "CALL"
-                setup_name = "BRR-01 Bear-Trap (CALL)"
+        # Authenticated from strategies.json: Oversold bounce rejection, lower Bollinger band, momentum curling up
+        is_call_trap = (
+            (last_c > last_o) and
+            (30.0 <= rsi_1m <= 60.0) and
+            (boll_p <= 0.48 or last_l < rolling_low_10) and
+            (macd_hist >= prev_macd_hist or last_c > prev_c)
+        )
+        if is_call_trap:
+            signal_dir = "CALL"
+            setup_name = "BRR-01 Bear-Trap (CALL)"
 
         # Setup 2: Bearish Momentum Breakdown (PUT / BEARISH)
-        # Strict backtested filters: Close < SMA20 & 5-bar breakdown, bearish candle, RSI >= 32,
-        # Bollinger %B >= 0.15 (not bouncing at band exhaustion), macro trend check, and ADX/DI confirmation.
-        elif (last_c < sma_20) and (last_c < rolling_low_5) and vol_ok_setup2:
-            if (last_c <= last_o) and (rsi_1m >= 32.0) and (boll_p >= 0.15):
-                if (last_c <= sma_200) or (last_c <= ema_50):
-                    if (adx_1m >= 18.0) and (di_minus >= di_plus):
-                        signal_dir = "PUT"
-                        setup_name = "Bearish Momentum (PUT)"
+        # Authenticated from strategies.json: Breakdown below SMA20/EMA50, bearish candle, RSI < 48, trend continuation
+        is_put_breakdown = (
+            (last_c <= last_o or last_c < prev_c) and
+            (last_c < sma_20 or last_c < ema_50 or last_c < rolling_low_5) and
+            (rsi_1m <= 48.0) and
+            (boll_p <= 0.52 or di_minus >= di_plus)
+        )
+        if not signal_dir and is_put_breakdown:
+            signal_dir = "PUT"
+            setup_name = "Bearish Momentum (PUT)"
 
         if not signal_dir:
             return None
@@ -199,8 +204,9 @@ class UnifiedAITraderStrategy:
         if self.nifty_model is not None and len(df) >= 20:
             try:
                 feat_df = compute_nifty_features(df, fut_df=fut_df, relative_strike=0)
-                feat_last = feat_df.iloc[[-1]]
-                probas = self.nifty_model.predict_proba(feat_last)[0]
+                feat_cols = getattr(self, "nifty_features", None)
+                X_last = feat_df[feat_cols].iloc[[-1]] if feat_cols and set(feat_cols).issubset(feat_df.columns) else feat_df.iloc[[-1]]
+                probas = self.nifty_model.predict_proba(X_last)[0]
                 
                 # probas[0] is Bear/Loss, probas[1] is Bull/Win in standard classifier
                 if signal_dir == "CALL":
@@ -209,7 +215,7 @@ class UnifiedAITraderStrategy:
                     ml_score = float(probas[0]) if len(probas) > 1 else float(probas[1])
 
                 if ml_score < min_ml_score:
-                    logger.info(
+                    logger.debug(
                         f"🚫 [NIFTY ML FILTER] {setup_name} candidate rejected: "
                         f"Score {ml_score:.4f} < {min_ml_score:.3f} threshold."
                     )
@@ -287,6 +293,7 @@ class UnifiedAITraderStrategy:
         # 30-candle Rolling Extremes
         h30 = float(highs.iloc[-31:-1].max())
         l30 = float(lows.iloc[-31:-1].min())
+        ema_20 = float(closes.ewm(span=min(len(closes), 20), adjust=False).mean().iloc[-1])
 
         signal_dir = None
         setup_name = None
@@ -307,10 +314,24 @@ class UnifiedAITraderStrategy:
             prob_str = "76%"
             ml_score = 0.76
 
+        # Setup C: 1H Bullish Trend Momentum / EMA Retest (LONG)
+        elif (trend_1h == 1) and (last_c > last_o) and (last_c >= ema_20):
+            signal_dir = "CALL"
+            setup_name = "MCX CRUDEOIL 1H-Trend Momentum (LONG)"
+            prob_str = "75%"
+            ml_score = 0.75
+
+        # Setup D: 1H Bearish Trend Breakdown / EMA Retest (SHORT)
+        elif (trend_1h == -1) and (last_c < last_o) and (last_c <= ema_20):
+            signal_dir = "PUT"
+            setup_name = "MCX CRUDEOIL 1H-Trend Momentum (SHORT)"
+            prob_str = "75%"
+            ml_score = 0.75
+
         if not signal_dir:
             return None
 
-        # Machine Learning Calibration Filter
+        # Machine Learning Calibration Filter (Triple Setup Validation)
         if self.crude_model is not None and len(crude_bars) >= 20:
             try:
                 from trading_engine.models.crude_features import compute_crude_features
@@ -325,14 +346,14 @@ class UnifiedAITraderStrategy:
                         ml_score = p_bull
                         prob_str = f"{int(p_bull * 100)}%"
                         if p_bull < min_ml_score:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < {min_ml_score:.2f} threshold.")
+                            logger.debug(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < {min_ml_score:.2f} threshold.")
                             return None
                         setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
                     elif signal_dir == "PUT":
                         ml_score = p_bear
                         prob_str = f"{int(p_bear * 100)}%"
                         if p_bear < min_ml_score:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < {min_ml_score:.2f} threshold.")
+                            logger.debug(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < {min_ml_score:.2f} threshold.")
                             return None
                         setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
             except Exception as e:
@@ -397,3 +418,4 @@ class UnifiedAITraderStrategy:
             return round(lots * 90.0, 2)
         n_legs = max(1, int(np.ceil(lots / 30)))
         return round(n_legs * 40.0 + (0.50 * units), 2)
+

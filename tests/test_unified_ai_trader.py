@@ -101,3 +101,79 @@ def test_backtest_engine_unification():
     assert len(res["trades"]) == 364
     assert res["scorecard"]["total_trades"] == 364
     assert res["scorecard"]["win_rate_pct"] == 65.7
+
+
+def test_concurrent_multi_segment_non_blocking():
+    """Verifies that an open Stock trade does NOT block a Crude trade and vice-versa."""
+    from datetime import datetime
+    from trading_engine.live_engine.paper_trade_daemon import PaperTradeDaemon
+
+    daemon = PaperTradeDaemon.get_instance()
+    daemon.reset_state(20000.0, 50000.0)
+
+    # 1. Open equity position
+    eq_trade = {
+        "id": "PTR_EQ_TEST",
+        "symbol": "NIFTY",
+        "contract": "NIFTY26N0924900CE",
+        "segment": "NSE Cash",
+        "entry_price": 100.0,
+        "units": 50,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "BRR-01 Bear-Trap (CALL)",
+        "probability": "75%"
+    }
+    daemon.active_trade = eq_trade
+    assert "equity" in daemon.active_trades
+    assert "commodity" not in daemon.active_trades
+
+    # 2. Open commodity position concurrently
+    comm_trade = {
+        "id": "PTR_COMM_TEST",
+        "symbol": "CRUDEOIL",
+        "contract": "CRUDEOIL 8450 CE",
+        "segment": "MCX Commodity",
+        "entry_price": 115.0,
+        "units": 100,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "MCX CRUDEOIL 1H-Trend Sweep (LONG)",
+        "probability": "76%"
+    }
+    daemon.active_trade = comm_trade
+    assert "equity" in daemon.active_trades
+    assert "commodity" in daemon.active_trades
+    assert len(daemon.active_trades) == 2
+
+    # 3. Close equity trade - verify commodity position remains completely untouched
+    daemon._close_active_trade(
+        reason="Target Hit",
+        exit_price=120.0,
+        exit_time=datetime.now(),
+        trade_to_close=eq_trade
+    )
+    assert "equity" not in daemon.active_trades
+    assert "commodity" in daemon.active_trades
+    assert daemon.equity_capital == 20935.0  # +₹935 gain (gross ₹1000 - ₹65 charges)
+    assert daemon.commodity_capital == 50000.0  # untouched
+
+    # 4. Close commodity trade
+    daemon._close_active_trade(
+        reason="Target Hit",
+        exit_price=140.0,
+        exit_time=datetime.now(),
+        trade_to_close=comm_trade
+    )
+    assert "commodity" not in daemon.active_trades
+    assert len(daemon.active_trades) == 0
+    assert daemon.commodity_capital == 52410.0  # +₹2410 gain (gross ₹2500 - ₹90 charges)
+
+    # Clean reset
+    daemon.reset_state(20000.0, 50000.0)
+    assert daemon.equity_capital == 20000.0
+    assert daemon.commodity_capital == 50000.0
+
+

@@ -85,10 +85,17 @@ def compute_crude_features(df: pd.DataFrame) -> pd.DataFrame:
     Input must contain: ['datetime', 'open', 'high', 'low', 'close', 'volume']
     """
     df = df.copy()
-    if not pd.api.types.is_datetime64_any_dtype(df["datetime"]):
-        df["dt"] = pd.to_datetime(df["datetime"])
+    if "datetime" in df.columns:
+        if not pd.api.types.is_datetime64_any_dtype(df["datetime"]):
+            df["dt"] = pd.to_datetime(df["datetime"])
+        else:
+            df["dt"] = df["datetime"]
+    elif "timestamp" in df.columns:
+        df["dt"] = pd.to_datetime(df["timestamp"])
+    elif "time" in df.columns:
+        df["dt"] = pd.to_datetime(df["time"])
     else:
-        df["dt"] = df["datetime"]
+        df["dt"] = pd.date_range("2026-01-01", periods=len(df), freq="1min")
 
     close = df["close"]
     high = df["high"]
