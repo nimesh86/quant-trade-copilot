@@ -8038,11 +8038,22 @@
             const rawList = Array.isArray(pData) ? pData : (pData.candles || []);
             if (rawList.length > 0) {
               candles = rawList.map(c => {
-                let timeStr = c.time || '09:15:00';
-                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
-                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
+                let cDate = trade.date;
+                let cTime = c.time || '09:15:00';
+                if (c.timestamp && typeof c.timestamp === 'string' && c.timestamp.includes('-') && c.timestamp.includes(' ')) {
+                  const parts = c.timestamp.split(' ');
+                  cDate = parts[0];
+                  cTime = parts[1];
+                } else if (c.time && c.time.includes('-') && c.time.includes(' ')) {
+                  const parts = c.time.split(' ');
+                  cDate = parts[0];
+                  cTime = parts[1];
+                } else {
+                  if (cTime.includes(' ')) cTime = cTime.split(' ')[1];
+                  else if (cTime.includes('T')) cTime = cTime.split('T')[1];
+                }
                 return {
-                  time: parseDateTimeToSecs(trade.date, timeStr),
+                  time: parseDateTimeToSecs(cDate, cTime),
                   open: Number(c.open),
                   high: Number(c.high),
                   low: Number(c.low),
@@ -8062,11 +8073,18 @@
             const rawCandles = data.candles || [];
             if (rawCandles.length > 0) {
               candles = rawCandles.map(c => {
-                let timeStr = c.time || '09:15:00';
-                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
-                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
+                let cDate = trade.date;
+                let cTime = c.time || '09:15:00';
+                if (c.timestamp && typeof c.timestamp === 'string' && c.timestamp.includes('-') && c.timestamp.includes(' ')) {
+                  const parts = c.timestamp.split(' ');
+                  cDate = parts[0];
+                  cTime = parts[1];
+                } else {
+                  if (cTime.includes(' ')) cTime = cTime.split(' ')[1];
+                  else if (cTime.includes('T')) cTime = cTime.split('T')[1];
+                }
                 return {
-                  time: parseDateTimeToSecs(trade.date, timeStr),
+                  time: parseDateTimeToSecs(cDate, cTime),
                   open: Number(c.open),
                   high: Number(c.high),
                   low: Number(c.low),
@@ -8085,11 +8103,18 @@
             const rawList = Array.isArray(spotData) ? spotData : (spotData.candles || []);
             if (rawList.length > 0) {
               candles = rawList.map(c => {
-                let timeStr = c.time || '09:15:00';
-                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
-                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
+                let cDate = trade.date;
+                let cTime = c.time || '09:15:00';
+                if (c.timestamp && typeof c.timestamp === 'string' && c.timestamp.includes('-') && c.timestamp.includes(' ')) {
+                  const parts = c.timestamp.split(' ');
+                  cDate = parts[0];
+                  cTime = parts[1];
+                } else {
+                  if (cTime.includes(' ')) cTime = cTime.split(' ')[1];
+                  else if (cTime.includes('T')) cTime = cTime.split('T')[1];
+                }
                 return {
-                  time: parseDateTimeToSecs(trade.date, timeStr),
+                  time: parseDateTimeToSecs(cDate, cTime),
                   open: Number(c.open),
                   high: Number(c.high),
                   low: Number(c.low),
@@ -8120,65 +8145,88 @@
       });
       activeTradePriceLines = [];
 
+      // Check if candles are spot candles or contract premium candles
+      let entryPrice = trade.entryRate;
+      let exitPrice = trade.exitRate;
+      let targetPrice = trade.target;
+      let slPrice = trade.sl;
+      let entryTitle = `ENTRY ₹${entryPrice.toFixed(2)}`;
+      let exitTitle = `EXIT [${trade.reason}] ₹${exitPrice.toFixed(2)}`;
+      let ltpTitle = `LIVE LTP ₹${exitPrice.toFixed(2)}`;
+
+      if (sortedCandles.length > 0) {
+        const avgCandleClose = sortedCandles.reduce((acc, c) => acc + c.close, 0) / sortedCandles.length;
+        if (avgCandleClose > 1000 && entryPrice < 1000) {
+          const rawTrade = trade.raw || {};
+          const spotEntry = Number(rawTrade.spot_at_entry || rawTrade.spot_price || avgCandleClose);
+          entryPrice = spotEntry;
+          entryTitle = `ENTRY (SPOT) ₹${entryPrice.toFixed(2)} (Opt ₹${trade.entryRate.toFixed(2)})`;
+          if (trade.is_active) {
+            exitPrice = Number(rawTrade.current_price || avgCandleClose);
+            ltpTitle = `LIVE SPOT ₹${exitPrice.toFixed(2)}`;
+          }
+        }
+      }
+
       // Add Price Line for Entry
-      if (trade.entryRate > 0) {
+      if (entryPrice > 0) {
         const entryPriceLine = activeTradeCandleSeries.createPriceLine({
-          price: trade.entryRate,
+          price: entryPrice,
           color: '#10b981',
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
-          title: `ENTRY ₹${trade.entryRate.toFixed(2)}`
+          title: entryTitle
         });
         activeTradePriceLines.push(entryPriceLine);
       }
 
       if (trade.is_active) {
         // Target line
-        if (trade.target > 0) {
+        if (targetPrice > 0) {
           const tgtLine = activeTradeCandleSeries.createPriceLine({
-            price: trade.target,
+            price: targetPrice,
             color: '#10b981',
             lineWidth: 2,
             lineStyle: LightweightCharts.LineStyle.Dashed,
             axisLabelVisible: true,
-            title: `TARGET ₹${trade.target.toFixed(2)}`
+            title: `TARGET ₹${targetPrice.toFixed(2)}`
           });
           activeTradePriceLines.push(tgtLine);
         }
         // Stop Loss line
-        if (trade.sl > 0) {
+        if (slPrice > 0) {
           const slLine = activeTradeCandleSeries.createPriceLine({
-            price: trade.sl,
+            price: slPrice,
             color: '#f43f5e',
             lineWidth: 2,
             lineStyle: LightweightCharts.LineStyle.Dashed,
             axisLabelVisible: true,
-            title: `STOP LOSS ₹${trade.sl.toFixed(2)}`
+            title: `STOP LOSS ₹${slPrice.toFixed(2)}`
           });
           activeTradePriceLines.push(slLine);
         }
         // Live LTP line
-        if (trade.exitRate > 0) {
+        if (exitPrice > 0) {
           const ltpLine = activeTradeCandleSeries.createPriceLine({
-            price: trade.exitRate,
+            price: exitPrice,
             color: '#00f0ff',
             lineWidth: 2,
             lineStyle: LightweightCharts.LineStyle.Dotted,
             axisLabelVisible: true,
-            title: `LIVE LTP ₹${trade.exitRate.toFixed(2)}`
+            title: ltpTitle
           });
           activeTradePriceLines.push(ltpLine);
         }
-      } else if (trade.exitRate > 0) {
+      } else if (exitPrice > 0) {
         // Closed trade Exit Price Line
         const exitPriceLine = activeTradeCandleSeries.createPriceLine({
-          price: trade.exitRate,
+          price: exitPrice,
           color: trade.points >= 0 ? '#00f0ff' : '#f43f5e',
           lineWidth: 2,
           lineStyle: LightweightCharts.LineStyle.Dashed,
           axisLabelVisible: true,
-          title: `EXIT [${trade.reason}] ₹${trade.exitRate.toFixed(2)}`
+          title: exitTitle
         });
         activeTradePriceLines.push(exitPriceLine);
       }
@@ -8293,6 +8341,14 @@
 
     function zoomTradeChartToWindow() {
       if (!activeTradeChart || !activeTradeObj) return;
+      if (!currentChartCandles || currentChartCandles.length === 0) {
+        activeTradeChart.timeScale().fitContent();
+        return;
+      }
+
+      const minCandleTime = currentChartCandles[0].time;
+      const maxCandleTime = currentChartCandles[currentChartCandles.length - 1].time;
+
       const entryTimeSec = parseDateTimeToSecs(activeTradeObj.date, activeTradeObj.entryTime);
       let exitTimeSec = (activeTradeObj.exitTime && activeTradeObj.exitTime !== '--' && activeTradeObj.exitTime !== 'LIVE')
         ? parseDateTimeToSecs(activeTradeObj.date, activeTradeObj.exitTime)
@@ -8302,9 +8358,15 @@
         exitTimeSec = entryTimeSec + 1800;
       }
 
+      // If trade execution timestamp falls outside the range of loaded candles, fit full session
+      if (entryTimeSec < minCandleTime || entryTimeSec > maxCandleTime) {
+        activeTradeChart.timeScale().fitContent();
+        return;
+      }
+
       // Margin of 15 minutes (900 seconds) before entry and after exit
-      const fromSec = entryTimeSec - 900;
-      const toSec = exitTimeSec + 900;
+      const fromSec = Math.max(minCandleTime, entryTimeSec - 900);
+      const toSec = Math.min(maxCandleTime, exitTimeSec + 900);
 
       try {
         activeTradeChart.timeScale().setVisibleRange({

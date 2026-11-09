@@ -1533,11 +1533,15 @@ async def get_paper_candles(
     if not target_date or target_date.lower() == "today":
         target_date = session_date
 
-    # 1. If an option contract is requested (e.g. NIFTY24DEC24300CE or NIFTY 24350 CE), try fetch_contract_candles
+    # 1. If an option contract is requested for index options (NIFTY/BANKNIFTY/SENSEX), try fetch_contract_candles
+    is_index = canon in ("NIFTY", "BANKNIFTY", "SENSEX")
     contract_id = req_contract if (("CE" in req_contract.upper() or "PE" in req_contract.upper()) and any(c.isdigit() for c in req_contract)) else req_symbol
-    if ("CE" in contract_id.upper() or "PE" in contract_id.upper()) and any(c.isdigit() for c in contract_id):
+    if is_index and ("CE" in contract_id.upper() or "PE" in contract_id.upper()) and any(c.isdigit() for c in contract_id):
         try:
-            c_res = await asyncio.to_thread(fetch_contract_candles, contract_id, target_date, state.db_engine)
+            c_res = await asyncio.wait_for(
+                asyncio.to_thread(fetch_contract_candles, contract_id, target_date, state.db_engine),
+                timeout=1.5
+            )
             if c_res and c_res.get("candles") and len(c_res["candles"]) > 0:
                 return {
                     "symbol": canon,
@@ -1545,7 +1549,8 @@ async def get_paper_candles(
                     "date": target_date,
                     "num_candles": len(c_res["candles"]),
                     "candles": c_res["candles"],
-                    "source": "contract_candles"
+                    "source": "contract_candles",
+                    "is_spot": False
                 }
         except Exception as ex:
             logger.debug(f"contract_candles lookup skipped: {ex}")
