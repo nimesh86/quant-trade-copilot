@@ -33,6 +33,7 @@ if str(ROOT_DIR) not in sys.path:
 from trading_engine.quant_core.option_resolver import OptionResolver
 from trading_engine.quant_core.contracts import Bar, Signal, Position, TradeRecord
 from trading_engine.quant_core.costs import CostCalculator
+from trading_engine.quant_core.strategies import UnifiedAITraderStrategy, UnifiedSignal
 
 logger = logging.getLogger("paper_trade_daemon")
 logger.setLevel(logging.INFO)
@@ -214,10 +215,10 @@ class PaperTradeDaemon:
         self.buyer_strength: float = 52.0
         self.seller_strength: float = 48.0
 
-        # Crude ML Model (Trained XGBoost)
-        self.crude_model = None
-        self.crude_feature_cols = []
-        self._load_crude_model()
+        # Unified AI-Trader Strategy Evaluator (Shared across Backtest, Paper, Live)
+        self.strategy_evaluator = UnifiedAITraderStrategy.get_instance()
+        self.crude_model = self.strategy_evaluator.crude_model
+        self.crude_feature_cols = self.strategy_evaluator.crude_feature_cols
 
         # Load saved state from disk & bootstrap today's candle history
         self.load_state()
@@ -814,6 +815,30 @@ class PaperTradeDaemon:
             closed_bar = current_bar.copy()
             self._on_minute_candle_close(symbol, closed_bar, now)
 
+            # Fill any missed minutes with flat candles to maintain clean time series on tick dropouts
+            try:
+                prev_dt = datetime.strptime(closed_bar["timestamp"], "%Y-%m-%d %H:%M:00")
+                curr_dt = datetime.strptime(minute_key, "%Y-%m-%d %H:%M:00")
+                gap_mins = int((curr_dt - prev_dt).total_seconds() // 60)
+                if 1 < gap_mins <= 5:
+                    for m in range(1, gap_mins):
+                        g_ts = (prev_dt + timedelta(minutes=m)).strftime("%Y-%m-%d %H:%M:00")
+                        flat_b = {
+                            "timestamp": g_ts,
+                            "open": closed_bar["close"],
+                            "high": closed_bar["close"],
+                            "low": closed_bar["close"],
+                            "close": closed_bar["close"],
+                            "volume": 0,
+                            "symbol": symbol
+                        }
+                        if symbol in self.bar_history:
+                            self.bar_history[symbol].append(flat_b)
+                            if len(self.bar_history[symbol]) > 1000:
+                                self.bar_history[symbol].pop(0)
+            except Exception:
+                pass
+
             # Start new candle
             self.forming_bars[symbol] = {
                 "timestamp": minute_key,
@@ -907,179 +932,35 @@ class PaperTradeDaemon:
         self._evaluate_strategy_signal(now)
 
     def _evaluate_strategy_signal(self, now: datetime):
-        """Evaluates Dual XGBoost + Macro high-edge setups."""
+        """Evaluates Dual XGBoost + Macro high-edge setups via Unified Strategy Evaluator."""
         nifty_bars = self.bar_history.get("NIFTY") or self.bar_history.get("NIFTY 50") or []
-        if len(nifty_bars) < 15:
-            return
-
-        df = pd.DataFrame(nifty_bars)
-        closes = df["close"]
-        highs = df["high"]
-        lows = df["low"]
-        opens = df["open"]
-        vols = df["volume"]
-
-        last_c = closes.iloc[-1]
-        last_o = opens.iloc[-1]
-        prev_c = closes.iloc[-2]
-        rolling_low_10 = lows.iloc[-10:-1].min()
-        rolling_high_10 = highs.iloc[-10:-1].max()
-        sma_20 = closes.rolling(min(len(closes), 20)).mean().iloc[-1]
-        avg_vol = vols.rolling(min(len(vols), 10)).mean().iloc[-1] or 1.0
-
-        # Check if volume is available (Spot index cash feeds on NSE have 0 volume)
-        has_vol = bool(vols.max() > 0)
-        vol_ok_setup1 = (vols.iloc[-1] >= 1.1 * avg_vol) if has_vol else True
-        vol_ok_setup2 = (vols.iloc[-1] >= 1.2 * avg_vol) if has_vol else True
-
-        # If spot volume is 0, check NIFTY-I (Near Month Futures) volume if available
         fut_bars = self.bar_history.get("NIFTY-I") or []
-        if not has_vol and len(fut_bars) >= 10:
-            fut_vols = pd.Series([float(b.get("volume", 0) or 0) for b in fut_bars])
-            if fut_vols.max() > 0:
-                fut_avg = fut_vols.rolling(min(len(fut_vols), 10)).mean().iloc[-1] or 1.0
-                vol_ok_setup1 = (fut_vols.iloc[-1] >= 1.05 * fut_avg)
-                vol_ok_setup2 = (fut_vols.iloc[-1] >= 1.15 * fut_avg)
-
-        signal_dir = None
-        setup_name = None
-        prob_str = "68%"
-
-        # Setup 1: BRR-01 Bear-Trap Reversal (CALL / BULLISH)
-        if (lows.iloc[-1] < rolling_low_10) and (last_c > last_o) and (last_c > prev_c) and vol_ok_setup1:
-            signal_dir = "CALL"
-            setup_name = "BRR-01 Bear-Trap (CALL)"
-            prob_str = "72%"
-
-        # Setup 2: Bullish Momentum Breakout (CALL / BULLISH) - captures one-way trend days
-        elif (last_c > sma_20) and (last_c > rolling_high_10) and (last_c > last_o) and (last_c - last_o >= 3.0):
-            signal_dir = "CALL"
-            setup_name = "Bullish Momentum Breakout (CALL)"
-            prob_str = "74%"
-
-        # Setup 3: Bearish Momentum Breakdown (PUT / BEARISH)
-        elif (last_c < sma_20) and (last_c < lows.iloc[-5:-1].min()) and vol_ok_setup2:
-            signal_dir = "PUT"
-            setup_name = "Bearish Momentum (PUT)"
-            prob_str = "67%"
-
-        # Setup 4: BSS-02 Bull-Trap Reversal (PUT / BEARISH)
-        elif (highs.iloc[-1] > rolling_high_10) and (last_c < last_o) and (last_c < prev_c) and vol_ok_setup2:
-            signal_dir = "PUT"
-            setup_name = "BSS-02 Bull-Trap (PUT)"
-            prob_str = "69%"
-
-        if signal_dir:
-            logger.info(f"🎯 [STRATEGY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Spot: {last_c:.2f} | Prob: {prob_str}")
+        sig = self.strategy_evaluator.evaluate_nifty(nifty_bars, fut_bars=fut_bars)
+        if sig:
+            logger.info(f"🎯 [STRATEGY SIGNAL DETECTED] Setup: {sig.strategy_name} | Direction: {sig.direction} | Spot: {sig.spot_price:.2f} | Prob: {sig.probability_pct}")
             self._open_paper_trade(
-                direction=signal_dir,
-                strategy_name=setup_name,
-                probability=prob_str,
-                spot_price=last_c,
+                direction=sig.direction,
+                strategy_name=sig.strategy_name,
+                probability=sig.probability_pct,
+                spot_price=sig.spot_price,
                 now=now
             )
 
     def _evaluate_commodity_strategy_signal(self, symbol: str, now: datetime):
-        """Evaluates 1-Hour Trend & 30-Bar Sweep/Retest setups for MCX Commodities."""
+        """Evaluates 1-Hour Trend & 30-Bar Sweep setups for MCX Commodities via Unified Strategy Evaluator."""
         bars = self.bar_history.get(symbol) or []
-        if len(bars) < 31:
-            return
-
-        df = pd.DataFrame(bars)
-        closes = df["close"]
-        highs = df["high"]
-        lows = df["low"]
-        opens = df["open"]
-
-        last_c = closes.iloc[-1]
-        last_o = opens.iloc[-1]
-        last_h = highs.iloc[-1]
-        last_l = lows.iloc[-1]
-
-        # 1-Hour Trend Alignment (EMA20 on resampled 1-Hour candles or rolling 60-bar EMA)
-        trend_1h = 0
-        if "timestamp" in df.columns:
-            try:
-                df_dt = df.copy()
-                df_dt["dt"] = pd.to_datetime(df_dt["timestamp"])
-                df_1h = df_dt.set_index("dt").resample("1h").agg({
-                    "open": "first", "high": "max", "low": "min", "close": "last"
-                }).dropna()
-                if len(df_1h) >= 3:
-                    ema20_1h = df_1h["close"].ewm(span=min(len(df_1h), 20), adjust=False).mean().iloc[-1]
-                    trend_1h = 1 if df_1h["close"].iloc[-1] > ema20_1h else -1
-            except Exception:
-                pass
-
-        if trend_1h == 0:
-            ema_60 = closes.ewm(span=min(len(closes), 60), adjust=False).mean().iloc[-1]
-            trend_1h = 1 if last_c > ema_60 else -1
-
-        # 30-candle Rolling Extremes
-        h30 = highs.iloc[-31:-1].max()
-        l30 = lows.iloc[-31:-1].min()
-
-        signal_dir = None
-        setup_name = None
-        prob_str = "75%"
-
-        # Setup A: 1H Trend Bullish + 30-Bar Low Sweep Retest (LONG / CALL)
-        if (trend_1h == 1) and (last_l < l30) and (last_c > last_o) and (last_c > l30):
-            signal_dir = "CALL"
-            setup_name = f"MCX {symbol} 1H-Trend Sweep (LONG)"
-            prob_str = "76%"
-        # Setup B: 1H Trend Bearish + 30-Bar High Sweep Retest (SHORT / PUT)
-        elif (trend_1h == -1) and (last_h > h30) and (last_c < last_o) and (last_c < h30):
-            signal_dir = "PUT"
-            setup_name = f"MCX {symbol} 1H-Trend Sweep (SHORT)"
-            prob_str = "76%"
-        # Setup C: Momentum Trend Follower
-        elif (trend_1h == 1) and (last_c > h30) and (last_c > last_o):
-            signal_dir = "CALL"
-            setup_name = f"MCX {symbol} Momentum Breakout (LONG)"
-            prob_str = "71%"
-        elif (trend_1h == -1) and (last_c < l30) and (last_c < last_o):
-            signal_dir = "PUT"
-            setup_name = f"MCX {symbol} Momentum Breakdown (SHORT)"
-            prob_str = "71%"
-
-        # Machine Learning Calibration Filter
-        if signal_dir and symbol == "CRUDEOIL" and self.crude_model and len(bars) >= 20:
-            try:
-                from trading_engine.models.crude_features import compute_crude_features
-                df_feat = compute_crude_features(df)
-                if self.crude_feature_cols:
-                    X_last = df_feat[self.crude_feature_cols].iloc[[-1]]
-                    probas = self.crude_model.predict_proba(X_last)[0]
-                    p_bull = float(probas[1])
-                    p_bear = float(probas[2])
-
-                    thresh = 0.35
-                    if signal_dir == "CALL":
-                        prob_str = f"{int(p_bull * 100)}%"
-                        if p_bull < thresh:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bullish signal rejected: P(Bull)={p_bull:.3f} < {thresh:.2f} threshold.")
-                            return
-                        setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
-                    elif signal_dir == "PUT":
-                        prob_str = f"{int(p_bear * 100)}%"
-                        if p_bear < thresh:
-                            logger.info(f"🚫 [CRUDE ML FILTER] Bearish signal rejected: P(Bear)={p_bear:.3f} < {thresh:.2f} threshold.")
-                            return
-                        setup_name = f"MCX CRUDE 1H-Trend Dual XGBoost ({prob_str})"
-            except Exception as e:
-                logger.debug(f"Crude ML probability evaluation skipped: {e}")
-
-        if signal_dir:
-            logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Spot: {last_c:.2f} | Prob: {prob_str}")
-            self._execute_commodity_paper_entry(
-                symbol=symbol,
-                direction=signal_dir,
-                strategy_name=setup_name,
-                probability=prob_str,
-                current_price=last_c,
-                now=now
-            )
+        if symbol == "CRUDEOIL":
+            sig = self.strategy_evaluator.evaluate_crude(bars)
+            if sig:
+                logger.info(f"🎯 [COMMODITY SIGNAL DETECTED] Setup: {sig.strategy_name} | Direction: {sig.direction} | Spot: {sig.spot_price:.2f} | Prob: {sig.probability_pct}")
+                self._execute_commodity_paper_entry(
+                    symbol=symbol,
+                    direction=sig.direction,
+                    strategy_name=sig.strategy_name,
+                    probability=sig.probability_pct,
+                    current_price=sig.spot_price,
+                    now=now
+                )
 
     def _execute_commodity_paper_entry(
         self,
@@ -1113,11 +994,8 @@ class PaperTradeDaemon:
             est_prem = max(80.0, round(110.0 + (current_price % 50), 2))
 
             # Dynamic 7% Compounding Sizing on Commodity Account
-            risk_amt = self.commodity_capital * self.risk_pct  # 7%
             risk_per_lot = (opt_sl_pts * lot_size) + 90.0      # ₹1,290 risk per lot
-            max_lots_cap = 50
-            calc_lots = int(risk_amt // risk_per_lot)
-            lots = max(1, min(max_lots_cap, calc_lots))
+            lots = self.strategy_evaluator.calculate_lots(self.commodity_capital, self.risk_pct, risk_per_lot, max_lots=50)
             units = lots * lot_size
 
             # Margin reservation (Option Premium = lots * 100 * est_prem)
@@ -1288,8 +1166,8 @@ class PaperTradeDaemon:
         risk_pt = max(15.0, round(est_prem * self.sl_pct, 2))
         risk_per_lot = risk_pt * contract.lot_size
 
-        # Institutional 7% compounding sizing on Equity Capital
-        lots = max(1, min(100, int((self.equity_capital * self.risk_pct) // risk_per_lot)))
+        # Institutional 7% compounding sizing on Equity Capital via Unified Sizer
+        lots = self.strategy_evaluator.calculate_lots(self.equity_capital, self.risk_pct, risk_per_lot, max_lots=100)
         units = lots * contract.lot_size
 
         # Institutional Capital Reservation & Margin Blocking in Equity Fund
@@ -1373,13 +1251,8 @@ class PaperTradeDaemon:
 
         gross = round(pts * pos["units"], 2)
 
-        # Statutory charges + slippage friction
-        if is_comm:
-            # ₹90 per lot friction (brokerage ₹40 + turnover/slippage ₹50)
-            charges = round(pos["lots"] * 90.0, 2)
-        else:
-            n_legs = max(1, int(np.ceil(pos["lots"] / 30)))
-            charges = round(n_legs * 40.0 + (0.50 * pos["units"]), 2)
+        # Statutory charges + slippage friction via Unified Strategy Engine
+        charges = self.strategy_evaluator.calculate_charges(pos["lots"], pos["units"], is_commodity=is_comm)
 
         net = round(gross - charges, 2)
         invested = pos["entry_price"] * pos["units"]

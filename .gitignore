@@ -27,6 +27,8 @@ data/*.json
 
 # Model Weights & Residual Dumps
 trading_engine/ai/kronos_src/
+!models/saved/*.pkl
+!models/saved/*.json
 
 # Backtest CSV Dumps (Keep Git history lightweight)
 *.csv

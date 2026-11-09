@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from trading_engine.quant_core.option_resolver import OptionResolver
+from trading_engine.quant_core.strategies import UnifiedAITraderStrategy, UnifiedSignal
 
 logger = logging.getLogger("LiveTradeDaemon")
 logger.setLevel(logging.INFO)
@@ -71,12 +72,23 @@ class LiveTradeDaemon:
 
         # Configuration (synchronized with Config Cogwheel modal)
         self.strategy = "dual_xgboost_macro"
-        self.initial_capital: float = 2336.00
-        self.capital: float = 2336.00  # Total Capital
-        self.blocked_capital: float = 87.95  # Margin committed to active trade
-        self.available_capital: float = 2248.05  # Capital available for new trades
+        self.strategy_evaluator = UnifiedAITraderStrategy.get_instance()
+
+        # Dual-Fund Segregated Capital Architecture (ICICI Direct style separate accounts)
+        self.equity_initial_capital: float = 20000.0
+        self.equity_capital: float = 20000.0
+        self.equity_blocked_capital: float = 0.0
+        self.equity_available_capital: float = 20000.0
+
+        self.commodity_initial_capital: float = 50000.0
+        self.commodity_capital: float = 50000.0
+        self.commodity_blocked_capital: float = 0.0
+        self.commodity_available_capital: float = 50000.0
+
         self.symbol = "NIFTY"
-        self.max_trades_per_day = 4
+        self.max_trades_per_day = 8
+        self.max_trades_index = 4
+        self.max_trades_commodity = 4
         self.blocked_time_slots = [["09:15", "10:05"]]
         self.risk_pct = 0.07  # 7% compounding risk per trade
         self.sl_pct = 0.30    # 30% Stop Loss
@@ -207,6 +219,38 @@ class LiveTradeDaemon:
 
         # Restore state from disk
         self.load_state()
+
+    @property
+    def capital(self) -> float:
+        return round(self.equity_capital + self.commodity_capital, 2)
+
+    @capital.setter
+    def capital(self, val: float):
+        pass
+
+    @property
+    def initial_capital(self) -> float:
+        return round(self.equity_initial_capital + self.commodity_initial_capital, 2)
+
+    @initial_capital.setter
+    def initial_capital(self, val: float):
+        pass
+
+    @property
+    def blocked_capital(self) -> float:
+        return round(self.equity_blocked_capital + self.commodity_blocked_capital, 2)
+
+    @blocked_capital.setter
+    def blocked_capital(self, val: float):
+        pass
+
+    @property
+    def available_capital(self) -> float:
+        return round(self.equity_available_capital + self.commodity_available_capital, 2)
+
+    @available_capital.setter
+    def available_capital(self, val: float):
+        pass
 
     def set_armed(self, armed: bool) -> bool:
         """Toggles or sets the master live trading arming status."""
@@ -544,69 +588,17 @@ class LiveTradeDaemon:
         self._evaluate_strategy_signal(now)
 
     def _evaluate_strategy_signal(self, now: datetime):
+        """Evaluates Dual XGBoost + Macro high-edge setups via Unified Strategy Evaluator."""
         nifty_bars = self.bar_history.get("NIFTY") or self.bar_history.get("NIFTY 50") or []
-        if len(nifty_bars) < 15:
-            return
-
-        df = pd.DataFrame(nifty_bars)
-        closes = df["close"]
-        highs = df["high"]
-        lows = df["low"]
-        opens = df["open"]
-        vols = df["volume"]
-
-        last_c = closes.iloc[-1]
-        last_o = opens.iloc[-1]
-        prev_c = closes.iloc[-2]
-        rolling_low_10 = lows.iloc[-10:-1].min()
-        rolling_high_10 = highs.iloc[-10:-1].max()
-        sma_20 = closes.rolling(min(len(closes), 20)).mean().iloc[-1]
-        avg_vol = vols.rolling(min(len(vols), 10)).mean().iloc[-1] or 1.0
-
-        has_vol = bool(vols.max() > 0)
-        vol_ok_setup1 = (vols.iloc[-1] >= 1.1 * avg_vol) if has_vol else True
-        vol_ok_setup2 = (vols.iloc[-1] >= 1.2 * avg_vol) if has_vol else True
-
         fut_bars = self.bar_history.get("NIFTY-I") or []
-        if not has_vol and len(fut_bars) >= 10:
-            fut_vols = pd.Series([float(b.get("volume", 0) or 0) for b in fut_bars])
-            if fut_vols.max() > 0:
-                fut_avg = fut_vols.rolling(min(len(fut_vols), 10)).mean().iloc[-1] or 1.0
-                vol_ok_setup1 = (fut_vols.iloc[-1] >= 1.05 * fut_avg)
-                vol_ok_setup2 = (fut_vols.iloc[-1] >= 1.15 * fut_avg)
-
-        signal_dir = None
-        setup_name = None
-        prob_str = "68%"
-
-        # Setup 1: BRR-01 Bear-Trap Reversal (CALL / BULLISH)
-        if (lows.iloc[-1] < rolling_low_10) and (last_c > last_o) and (last_c > prev_c) and vol_ok_setup1:
-            signal_dir = "CALL"
-            setup_name = "BRR-01 Bear-Trap (CALL)"
-            prob_str = "72%"
-        # Setup 2: Bullish Momentum Breakout (CALL / BULLISH)
-        elif (last_c > sma_20) and (last_c > rolling_high_10) and (last_c > last_o) and (last_c - last_o >= 3.0):
-            signal_dir = "CALL"
-            setup_name = "Bullish Momentum Breakout (CALL)"
-            prob_str = "74%"
-        # Setup 3: Bearish Momentum Breakdown (PUT / BEARISH)
-        elif (last_c < sma_20) and (last_c < lows.iloc[-5:-1].min()) and vol_ok_setup2:
-            signal_dir = "PUT"
-            setup_name = "Bearish Momentum (PUT)"
-            prob_str = "67%"
-        # Setup 4: BSS-02 Bull-Trap Reversal (PUT / BEARISH)
-        elif (highs.iloc[-1] > rolling_high_10) and (last_c < last_o) and (last_c < prev_c) and vol_ok_setup2:
-            signal_dir = "PUT"
-            setup_name = "BSS-02 Bull-Trap (PUT)"
-            prob_str = "69%"
-
-        if signal_dir:
-            logger.info(f"🎯 [LIVE SIGNAL DETECTED] Setup: {setup_name} | Direction: {signal_dir} | Spot: {last_c:.2f} | Prob: {prob_str}")
+        sig = self.strategy_evaluator.evaluate_nifty(nifty_bars, fut_bars=fut_bars)
+        if sig:
+            logger.info(f"🎯 [LIVE SIGNAL DETECTED] Setup: {sig.strategy_name} | Direction: {sig.direction} | Spot: {sig.spot_price:.2f} | Prob: {sig.probability_pct}")
             self._open_live_trade(
-                direction=signal_dir,
-                strategy_name=setup_name,
-                probability=prob_str,
-                spot_price=last_c,
+                direction=sig.direction,
+                strategy_name=sig.strategy_name,
+                probability=sig.probability_pct,
+                spot_price=sig.spot_price,
                 now=now
             )
 
@@ -632,7 +624,8 @@ class LiveTradeDaemon:
         risk_pt = max(15.0, round(est_prem * self.sl_pct, 2))
         risk_per_lot = risk_pt * contract.lot_size
 
-        lots = max(1, min(100, int((self.capital * self.risk_pct) // risk_per_lot)))
+        # Institutional 7% compounding sizing on Equity Capital via Unified Sizer
+        lots = self.strategy_evaluator.calculate_lots(self.equity_capital, self.risk_pct, risk_per_lot, max_lots=100)
         units = lots * contract.lot_size
 
         # Institutional Capital Reservation & Margin Blocking
@@ -705,9 +698,8 @@ class LiveTradeDaemon:
         pts = round(exit_price - pos["entry_price"], 2)
         gross = round(pts * pos["units"], 2)
 
-        # Statutory charges (brokerage + STT + turnover + GST)
-        n_legs = max(1, int(np.ceil(pos["lots"] / 30)))
-        charges = round(n_legs * 40.0 + (0.50 * pos["units"]), 2)
+        # Statutory charges + slippage friction via Unified Strategy Engine
+        charges = self.strategy_evaluator.calculate_charges(pos["lots"], pos["units"], is_commodity=False)
         net = round(gross - charges, 2)
         roi = round((net / (pos["entry_price"] * pos["units"])) * 100.0, 2) if (pos["entry_price"] * pos["units"]) > 0 else 0.0
 

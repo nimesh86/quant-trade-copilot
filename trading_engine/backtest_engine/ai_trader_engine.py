@@ -23,6 +23,7 @@ import pandas as pd
 import numpy as np
 
 from trading_engine.quant_core.contracts import TradeRecord
+from trading_engine.quant_core.strategies import UnifiedAITraderStrategy
 from trading_engine.backtest_engine.scorecard import ScorecardGenerator
 from trading_engine.data.historical_client import HistoricalDataClient
 
@@ -172,7 +173,7 @@ class AITraderBacktestEngine:
                 else:
                     risk_pt = max(1.0, abs(prem - float(r["stop_loss"])))
                     risk_per_lot = risk_pt * 65
-                    lots = max(1, min(300, int((cur_bal * 0.07) // risk_per_lot)))
+                    lots = UnifiedAITraderStrategy.calculate_lots(cur_bal, 0.07, risk_per_lot, max_lots=300)
                     qty = lots * 65
 
             # If capital exactly equals benchmark capital over the full period and mode is 7% compounding,
@@ -184,8 +185,7 @@ class AITraderBacktestEngine:
                 gross = round(pts * qty, 2)
                 commission = round(gross - net, 2)
             else:
-                n_legs = max(1, int(np.ceil(lots / 30)))  # Iceberg slicing 30-lot legs
-                commission = round(n_legs * 40.0 + (0.50 * qty), 2)  # ₹40 brokerage + ₹0.50 spread
+                commission = UnifiedAITraderStrategy.calculate_charges(lots, qty, is_commodity=False)
                 gross = round(pts * qty, 2)
                 net = round(gross - commission, 2)
 
