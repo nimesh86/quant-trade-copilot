@@ -58,7 +58,11 @@ class CrudeBacktestEngine:
         sl_pts: float = 20.0,           # -20 points (-₹2,000 / lot)
         trail_trigger_pts: float = 25.0,# Trigger trailing SL once +25 pts reached
         trail_lock_pts: float = 5.0,    # Move SL to +5 pts (breakeven profit)
-        max_trades_per_day: int = 4,    # Commodity trade cap
+        max_trades_per_day: int = 4,    # Commodity trade cap (fallback if dynamic disabled)
+        dynamic_trade_limit: bool = True,# Dynamic: Profit=∞ | 2-Loss=2.5h pause | 3-Loss=Stop
+        pause_hours: float = 2.5,
+        loss_streak_pause: int = 2,
+        loss_streak_stop: int = 3,
         score_threshold: float = 0.40,  # Calibrated ML probability hurdle
         vol_ratio_min: float = 1.00,    # Volume ratio threshold
         enable_pullback_setup: bool = True,
@@ -72,6 +76,10 @@ class CrudeBacktestEngine:
         self.trail_trigger_pts = trail_trigger_pts
         self.trail_lock_pts = trail_lock_pts
         self.max_trades_per_day = max_trades_per_day
+        self.dynamic_trade_limit = dynamic_trade_limit
+        self.pause_hours = pause_hours
+        self.loss_streak_pause = loss_streak_pause
+        self.loss_streak_stop = loss_streak_stop
         self.score_threshold = score_threshold
         self.vol_ratio_min = vol_ratio_min
         self.enable_pullback_setup = enable_pullback_setup
@@ -149,6 +157,10 @@ class CrudeBacktestEngine:
         trade_log: List[Dict[str, Any]] = []
         trades_today = 0
         current_day_str = ""
+        day_comm_net = 0.0
+        day_consecutive_losses = 0
+        day_pause_until: Optional[datetime] = None
+        day_stopped = False
 
         # Simulation loop over 1-minute bars
         logger.info("Executing tick simulation...")
@@ -165,6 +177,10 @@ class CrudeBacktestEngine:
             if day_str != current_day_str:
                 current_day_str = day_str
                 trades_today = 0
+                day_comm_net = 0.0
+                day_consecutive_losses = 0
+                day_pause_until = None
+                day_stopped = False
 
             # ── 1. ACTIVE POSITION MANAGEMENT ──
             if active_position is not None:
@@ -256,6 +272,15 @@ class CrudeBacktestEngine:
                         "ml_score": pos["ml_score"]
                     }
                     trade_log.append(trade_rec)
+                    day_comm_net += net
+                    if net <= 0:
+                        day_consecutive_losses += 1
+                        if day_consecutive_losses >= self.loss_streak_stop:
+                            day_stopped = True
+                        elif day_consecutive_losses == self.loss_streak_pause:
+                            day_pause_until = dt + timedelta(hours=self.pause_hours)
+                    else:
+                        day_consecutive_losses = 0
                     active_position = None
                 continue
 
@@ -266,8 +291,15 @@ class CrudeBacktestEngine:
             if dt.hour > 22 or (dt.hour == 22 and dt.minute > 45):
                 continue
 
-            # Max Trades Per Day Gating
-            if self.max_trades_per_day > 0 and trades_today >= self.max_trades_per_day:
+            # Dynamic vs Static Trade Limit Gating
+            if self.dynamic_trade_limit:
+                if day_stopped:
+                    continue
+                if day_pause_until is not None and dt < day_pause_until:
+                    continue
+                # If day_comm_net > 0 -> unlimited trades allowed!
+                # If day_comm_net <= 0 -> allowed unless stopped or paused
+            elif self.max_trades_per_day > 0 and trades_today >= self.max_trades_per_day:
                 continue
 
             p_bull = float(row["p_bull"])

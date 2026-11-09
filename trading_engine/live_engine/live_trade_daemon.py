@@ -89,6 +89,11 @@ class LiveTradeDaemon:
         self.max_trades_per_day = 8
         self.max_trades_index = 4
         self.max_trades_commodity = 4
+        # Dynamic Commodity Risk & Trade Sizing Rules (Profitable = ∞ | 2-Loss = 2.5h Pause | 3-Loss = Stop)
+        self.commodity_dynamic_trade_limit: bool = True
+        self.commodity_pause_hours: float = 2.5
+        self.commodity_loss_streak_pause: int = 2
+        self.commodity_loss_streak_stop: int = 3
         self.blocked_time_slots = [["09:15", "10:05"]]
         self.risk_pct = 0.07  # 7% compounding risk per trade
         self.sl_pct = 0.30    # 30% Stop Loss
@@ -359,6 +364,8 @@ class LiveTradeDaemon:
                     self.max_trades_per_day = int(data.get("max_trades_per_day", self.max_trades_per_day))
                     self.max_trades_index = int(data.get("max_trades_index", self.max_trades_index))
                     self.max_trades_commodity = int(data.get("max_trades_commodity", self.max_trades_commodity))
+                    self.commodity_dynamic_trade_limit = bool(data.get("commodity_dynamic_trade_limit", True))
+                    self.commodity_pause_hours = float(data.get("commodity_pause_hours", 2.5))
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
 
                     self.active_trades = {}
@@ -429,6 +436,8 @@ class LiveTradeDaemon:
                 "max_trades_per_day": self.max_trades_per_day,
                 "max_trades_index": self.max_trades_index,
                 "max_trades_commodity": self.max_trades_commodity,
+                "commodity_dynamic_trade_limit": self.commodity_dynamic_trade_limit,
+                "commodity_pause_hours": self.commodity_pause_hours,
                 "blocked_time_slots": self.blocked_time_slots,
                 "active_trade": self.active_trade,
                 "active_trades": list(self.active_trades.values()) if hasattr(self, "active_trades") else ([] if not self.active_trade else [self.active_trade]),
@@ -674,11 +683,11 @@ class LiveTradeDaemon:
                 mins_since = (now - self.last_crude_exit_time).total_seconds() / 60.0
                 if mins_since < 15.0:
                     return
+            # Dynamic Commodity Trade Gating (Profit: unlimited | 2-Loss: 2.5h pause | 3-Loss: stop)
             today_str = now.strftime("%Y-%m-%d")
-            idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
-            if self.max_trades_commodity > 0 and comm_cnt >= self.max_trades_commodity:
-                return
-            if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
+            allowed, reason, comm_status = self.check_commodity_dynamic_trade_allowed(now, today_str)
+            if not allowed:
+                logger.debug(f"LiveTradeDaemon: Commodity trade gated: {reason}")
                 return
 
             self._evaluate_commodity_strategy_signal(symbol, now)
@@ -1060,6 +1069,207 @@ class LiveTradeDaemon:
         idx_cnt = len(today_trades) - comm_cnt
         return idx_cnt, comm_cnt, len(today_trades)
 
+    def check_commodity_dynamic_trade_allowed(
+        self,
+        now: Optional[datetime] = None,
+        today_str: Optional[str] = None
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Evaluates dynamic commodity trade rules:
+        1. If the day is profitable (today net P&L > 0) -> Unlimited trades allowed.
+        2. If 2 trades consecutively result in loss -> Take 2-3 hours pause (default 2.5h), then try again.
+        3. If 3rd trade also results in loss -> Stop commodity trading for the day.
+        """
+        if now is None:
+            now = datetime.now()
+        if today_str is None:
+            today_str = now.strftime("%Y-%m-%d")
+
+        # Static fallback if dynamic is disabled
+        if not self.commodity_dynamic_trade_limit:
+            idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+            if self.max_trades_commodity > 0 and comm_cnt >= self.max_trades_commodity:
+                return False, f"Static commodity trade limit reached ({comm_cnt}/{self.max_trades_commodity})", {
+                    "dynamic_enabled": False,
+                    "allowed": False,
+                    "day_profitable": False,
+                    "today_comm_net": 0.0,
+                    "today_comm_count": comm_cnt,
+                    "consecutive_losses": 0,
+                    "is_paused": False,
+                    "pause_remaining_minutes": 0.0,
+                    "is_stopped_for_day": False,
+                    "status_label": f"STATIC CAP ({comm_cnt}/{self.max_trades_commodity})",
+                    "status_message": f"Static trade cap of {self.max_trades_commodity} reached"
+                }
+            if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
+                return False, f"Static total trade limit reached ({tot_cnt}/{self.max_trades_per_day})", {
+                    "dynamic_enabled": False,
+                    "allowed": False,
+                    "day_profitable": False,
+                    "today_comm_net": 0.0,
+                    "today_comm_count": comm_cnt,
+                    "consecutive_losses": 0,
+                    "is_paused": False,
+                    "pause_remaining_minutes": 0.0,
+                    "is_stopped_for_day": False,
+                    "status_label": f"TOTAL CAP ({tot_cnt}/{self.max_trades_per_day})",
+                    "status_message": f"Total daily trade cap of {self.max_trades_per_day} reached"
+                }
+            return True, "Static commodity trade allowed", {
+                "dynamic_enabled": False,
+                "allowed": True,
+                "day_profitable": False,
+                "today_comm_net": 0.0,
+                "today_comm_count": comm_cnt,
+                "consecutive_losses": 0,
+                "is_paused": False,
+                "pause_remaining_minutes": 0.0,
+                "is_stopped_for_day": False,
+                "status_label": f"STATIC ({comm_cnt}/{self.max_trades_commodity})",
+                "status_message": "Within static trade limit"
+            }
+
+        today_trades = [t for t in self.trade_history if t.get("date") == today_str]
+        today_comm_trades = [t for t in today_trades if self._is_commodity_trade(t)]
+        comm_cnt = len(today_comm_trades)
+
+        if comm_cnt == 0:
+            return True, "Allowed: First commodity trade of the day", {
+                "dynamic_enabled": True,
+                "allowed": True,
+                "day_profitable": False,
+                "today_comm_net": 0.0,
+                "today_comm_count": 0,
+                "consecutive_losses": 0,
+                "is_paused": False,
+                "pause_remaining_minutes": 0.0,
+                "is_stopped_for_day": False,
+                "status_label": "DYNAMIC ACTIVE (0 trades)",
+                "status_message": "Ready for commodity entry"
+            }
+
+        today_comm_net = round(sum(float(t.get("net", t.get("net_pnl", 0.0))) for t in today_comm_trades), 2)
+        day_profitable = (today_comm_net > 0)
+
+        # Count consecutive losses at the end of today's commodity trades
+        consecutive_losses = 0
+        last_loss_exit_dt: Optional[datetime] = None
+        for t in reversed(today_comm_trades):
+            net_val = float(t.get("net", t.get("net_pnl", 0.0)))
+            if net_val <= 0:
+                consecutive_losses += 1
+                if last_loss_exit_dt is None:
+                    ex_val = t.get("exit_time")
+                    if isinstance(ex_val, datetime):
+                        last_loss_exit_dt = ex_val
+                    elif isinstance(ex_val, str) and ":" in ex_val:
+                        try:
+                            parts = [int(p) for p in ex_val.split(":")]
+                            last_loss_exit_dt = now.replace(
+                                hour=parts[0],
+                                minute=parts[1],
+                                second=parts[2] if len(parts) > 2 else 0,
+                                microsecond=0
+                            )
+                        except Exception:
+                            pass
+            else:
+                break
+
+        # Fallback to self.last_crude_exit_time if available and recent
+        if consecutive_losses > 0 and self.last_crude_exit_time and isinstance(self.last_crude_exit_time, datetime):
+            if last_loss_exit_dt is None or self.last_crude_exit_time > last_loss_exit_dt:
+                last_loss_exit_dt = self.last_crude_exit_time
+
+        # Rule 3: If 3rd trade is also giving loss then stop for the day
+        if consecutive_losses >= self.commodity_loss_streak_stop:
+            return False, f"🛑 Commodity trading stopped for today: {consecutive_losses} consecutive losses reached", {
+                "dynamic_enabled": True,
+                "allowed": False,
+                "day_profitable": day_profitable,
+                "today_comm_net": today_comm_net,
+                "today_comm_count": comm_cnt,
+                "consecutive_losses": consecutive_losses,
+                "is_paused": False,
+                "pause_remaining_minutes": 0.0,
+                "is_stopped_for_day": True,
+                "status_label": f"STOPPED TODAY ({consecutive_losses} Losses)",
+                "status_message": f"Capital protection: stopped for the day after {consecutive_losses} consecutive losses"
+            }
+
+        # Rule 2: If 2 trades consecutively getting loss, pause 2-3 hours (default 2.5h), then try again
+        if consecutive_losses == self.commodity_loss_streak_pause:
+            pause_mins = self.commodity_pause_hours * 60.0
+            elapsed_mins = 0.0
+            if last_loss_exit_dt:
+                elapsed_mins = max(0.0, (now - last_loss_exit_dt).total_seconds() / 60.0)
+
+            if elapsed_mins < pause_mins:
+                rem_mins = round(pause_mins - elapsed_mins, 1)
+                pause_until_dt = (last_loss_exit_dt or now) + timedelta(minutes=pause_mins)
+                pause_until_str = pause_until_dt.strftime("%H:%M")
+                return False, f"⏸️ Commodity trading paused: 2 consecutive losses. Paused until {pause_until_str} ({rem_mins}m left)", {
+                    "dynamic_enabled": True,
+                    "allowed": False,
+                    "day_profitable": day_profitable,
+                    "today_comm_net": today_comm_net,
+                    "today_comm_count": comm_cnt,
+                    "consecutive_losses": consecutive_losses,
+                    "is_paused": True,
+                    "pause_remaining_minutes": rem_mins,
+                    "pause_until": pause_until_str,
+                    "is_stopped_for_day": False,
+                    "status_label": f"PAUSED ({int(rem_mins)}m left | {pause_until_str})",
+                    "status_message": f"In {self.commodity_pause_hours}h cooling pause after 2 consecutive losses. Resumes at {pause_until_str} IST"
+                }
+            else:
+                # Pause has expired -> Try again!
+                return True, f"Allowed: Cooling pause of {self.commodity_pause_hours}h completed. Trying trade #3", {
+                    "dynamic_enabled": True,
+                    "allowed": True,
+                    "day_profitable": day_profitable,
+                    "today_comm_net": today_comm_net,
+                    "today_comm_count": comm_cnt,
+                    "consecutive_losses": consecutive_losses,
+                    "is_paused": False,
+                    "pause_remaining_minutes": 0.0,
+                    "is_stopped_for_day": False,
+                    "status_label": "RESUMED (Trying Trade #3)",
+                    "status_message": "Cooling pause completed after 2 losses; permitted to try trade #3"
+                }
+
+        # Rule 1: If the day is profitable, no limit!
+        if day_profitable:
+            return True, f"Allowed: Day is profitable (+₹{today_comm_net:,.2f}) - Unlimited commodity trades", {
+                "dynamic_enabled": True,
+                "allowed": True,
+                "day_profitable": True,
+                "today_comm_net": today_comm_net,
+                "today_comm_count": comm_cnt,
+                "consecutive_losses": consecutive_losses,
+                "is_paused": False,
+                "pause_remaining_minutes": 0.0,
+                "is_stopped_for_day": False,
+                "status_label": f"UNLIMITED (+₹{today_comm_net:,.0f} 🟢)",
+                "status_message": "Day is profitable. Unlimited commodity trades permitted."
+            }
+
+        # Day is not yet profitable, but streak < 2 (0 or 1 loss) -> Allowed
+        return True, f"Allowed: Dynamic commodity active ({consecutive_losses} loss streak, P&L: ₹{today_comm_net:,.2f})", {
+            "dynamic_enabled": True,
+            "allowed": True,
+            "day_profitable": False,
+            "today_comm_net": today_comm_net,
+            "today_comm_count": comm_cnt,
+            "consecutive_losses": consecutive_losses,
+            "is_paused": False,
+            "pause_remaining_minutes": 0.0,
+            "is_stopped_for_day": False,
+            "status_label": f"DYNAMIC ({comm_cnt} trades | ₹{today_comm_net:,.0f})",
+            "status_message": "Active dynamic commodity trading"
+        }
+
     def sync_broker_data(self, force: bool = False) -> Dict[str, Any]:
         """
         Synchronizes live broker account data directly from ICICI Direct Breeze API:
@@ -1344,6 +1554,7 @@ class LiveTradeDaemon:
         equity_net_pnl = sum(t.get("net", 0.0) for t in equity_trades)
         commodity_net_pnl = sum(t.get("net", 0.0) for t in commodity_trades)
         idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+        comm_allowed, comm_reason, comm_dyn_status = self.check_commodity_dynamic_trade_allowed(datetime.now(), today_str)
 
         # Monthly breakdown
         monthly_map: Dict[str, Dict[str, Any]] = {}
@@ -1392,6 +1603,8 @@ class LiveTradeDaemon:
             "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
             "commodity_available_capital": round(self.commodity_available_capital, 2),
             "commodity_net_pnl": round(commodity_net_pnl, 2),
+            "commodity_today_net": round(comm_dyn_status.get("today_comm_net", 0.0), 2),
+            "commodity_dynamic_status": comm_dyn_status,
             "today_net": today_net,
             "today_trades_count": len(today_tr),
             "today_trades_index": idx_cnt,

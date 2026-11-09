@@ -79,3 +79,4 @@ def test_paper_candles_in_memory_forming(auth_client):
     last = data["candles"][-1]
     assert last["time"] == "18:00"
     assert last["close"] == 5860.0
+

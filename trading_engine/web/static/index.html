@@ -5120,13 +5120,14 @@
                 <div class="cfg-field">
                   <label class="cfg-label" for="cfg-paper-trades-comm">Commodity Trades/Day</label>
                   <select id="cfg-paper-trades-comm" class="cfg-select">
-                    <option value="4" selected>4 Trades (Default)</option>
+                    <option value="dynamic" selected>⚡ Dynamic (Profit: ∞ | 2-Loss: 2.5h | 3-Loss: Stop)</option>
+                    <option value="4">4 Trades (Fixed)</option>
                     <option value="2">2 Trades</option>
                     <option value="3">3 Trades</option>
                     <option value="5">5 Trades</option>
                     <option value="0">Uncapped</option>
                   </select>
-                  <span class="cfg-hint">MCX (Crude/Gas) Limit</span>
+                  <span class="cfg-hint">Dynamic: Profit=∞, 2-Loss=2.5h pause, 3-Loss=Stop</span>
                 </div>
               </div>
               <input type="hidden" id="cfg-paper-trades-day" value="8" />
@@ -5909,7 +5910,9 @@
         const bFrom = document.getElementById('cfg-paper-block-from')?.value || '09:15';
         const bTo = document.getElementById('cfg-paper-block-to')?.value || '10:05';
         const maxIdx = parseInt(document.getElementById('cfg-paper-trades-index')?.value) || 4;
-        const maxComm = parseInt(document.getElementById('cfg-paper-trades-comm')?.value) || 4;
+        const commSelectVal = document.getElementById('cfg-paper-trades-comm')?.value || 'dynamic';
+        const isCommDynamic = (commSelectVal === 'dynamic');
+        const maxComm = isCommDynamic ? 4 : (parseInt(commSelectVal) || 4);
         const maxTr = maxIdx + maxComm;
 
         await fetch('/api/paper/config', {
@@ -5920,7 +5923,8 @@
             capital: paperCap,
             blocked_slots: `${bFrom}-${bTo}`,
             max_trades_index: maxIdx,
-            max_trades_commodity: maxComm,
+            max_trades_commodity: commSelectVal,
+            commodity_dynamic_trade_limit: isCommDynamic,
             max_trades_per_day: maxTr
           })
         });
@@ -6062,8 +6066,12 @@
           if (pCfg.max_trades_index !== undefined && document.getElementById('cfg-paper-trades-index')) {
             document.getElementById('cfg-paper-trades-index').value = String(pCfg.max_trades_index);
           }
-          if (pCfg.max_trades_commodity !== undefined && document.getElementById('cfg-paper-trades-comm')) {
-            document.getElementById('cfg-paper-trades-comm').value = String(pCfg.max_trades_commodity);
+          if (document.getElementById('cfg-paper-trades-comm')) {
+            if (pCfg.commodity_dynamic_trade_limit !== false) {
+              document.getElementById('cfg-paper-trades-comm').value = 'dynamic';
+            } else if (pCfg.max_trades_commodity !== undefined) {
+              document.getElementById('cfg-paper-trades-comm').value = String(pCfg.max_trades_commodity);
+            }
           }
           if (pCfg.max_trades_per_day !== undefined && document.getElementById('cfg-paper-trades-day')) {
             document.getElementById('cfg-paper-trades-day').value = String(pCfg.max_trades_per_day);
@@ -8728,13 +8736,25 @@
 
       const limitPill = document.getElementById('paper-pill-trade-limit');
       if (limitPill) {
-        const maxTot = cfg.max_trades_per_day || sum.max_trades_total || 8;
         const maxIdx = cfg.max_trades_index || sum.max_trades_index || 4;
-        const maxComm = cfg.max_trades_commodity || sum.max_trades_commodity || 4;
         const totCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
         const idxCount = sum.today_trades_index !== undefined ? sum.today_trades_index : 0;
         const commCount = sum.today_trades_commodity !== undefined ? sum.today_trades_commodity : 0;
-        limitPill.textContent = `📊 Trades Today: ${totCount} / ${maxTot} (Idx: ${idxCount}/${maxIdx} | Comm: ${commCount}/${maxComm})`;
+        const commDyn = sum.commodity_dynamic_status;
+
+        let commBadge = `${commCount}/${cfg.max_trades_commodity || sum.max_trades_commodity || 4}`;
+        if (commDyn && commDyn.dynamic_enabled) {
+          if (commDyn.is_stopped_for_day) {
+            commBadge = `${commCount} [🛑 STOPPED TODAY]`;
+          } else if (commDyn.is_paused) {
+            commBadge = `${commCount} [⏸️ PAUSED ${Math.round(commDyn.pause_remaining_minutes)}m left]`;
+          } else if (commDyn.day_profitable) {
+            commBadge = `${commCount}/∞ [🟢 PROFIT +₹${Math.round(commDyn.today_comm_net || 0).toLocaleString('en-IN')}]`;
+          } else {
+            commBadge = `${commCount}/∞ [⚡ DYNAMIC]`;
+          }
+        }
+        limitPill.textContent = `📊 Trades Today: ${totCount} (Idx: ${idxCount}/${maxIdx} | Comm: ${commBadge})`;
       }
 
       // 2. Active Trade Card vs Idle Card
@@ -9425,9 +9445,25 @@
 
       const limitPill = document.getElementById('live-pill-trade-limit');
       if (limitPill) {
-        const maxTr = cfg.max_trades_per_day || 4;
-        const dayCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
-        limitPill.textContent = `📊 Trades Today: ${dayCount} / ${maxTr}`;
+        const maxIdx = cfg.max_trades_index || sum.max_trades_index || 4;
+        const totCount = sum.today_trades_count !== undefined ? sum.today_trades_count : (today.count || todayList.length);
+        const idxCount = sum.today_trades_index !== undefined ? sum.today_trades_index : 0;
+        const commCount = sum.today_trades_commodity !== undefined ? sum.today_trades_commodity : 0;
+        const commDyn = sum.commodity_dynamic_status;
+
+        let commBadge = `${commCount}/${cfg.max_trades_commodity || sum.max_trades_commodity || 4}`;
+        if (commDyn && commDyn.dynamic_enabled) {
+          if (commDyn.is_stopped_for_day) {
+            commBadge = `${commCount} [🛑 STOPPED TODAY]`;
+          } else if (commDyn.is_paused) {
+            commBadge = `${commCount} [⏸️ PAUSED ${Math.round(commDyn.pause_remaining_minutes)}m left]`;
+          } else if (commDyn.day_profitable) {
+            commBadge = `${commCount}/∞ [🟢 PROFIT +₹${Math.round(commDyn.today_comm_net || 0).toLocaleString('en-IN')}]`;
+          } else {
+            commBadge = `${commCount}/∞ [⚡ DYNAMIC]`;
+          }
+        }
+        limitPill.textContent = `📊 Trades Today: ${totCount} (Idx: ${idxCount}/${maxIdx} | Comm: ${commBadge})`;
       }
 
       const quotaPill = document.getElementById('live-pill-api-quota');
