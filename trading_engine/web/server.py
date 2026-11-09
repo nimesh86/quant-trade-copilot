@@ -29,6 +29,9 @@ import asyncio
 from datetime import datetime, timezone, time as dtime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+import logging
+
+logger = logging.getLogger("quant_server")
 
 import numpy as np
 import pandas as pd
