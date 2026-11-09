@@ -1499,6 +1499,177 @@ async def reset_paper_trading_account(payload: Dict[str, Any] = Body(default={})
     return paper_daemon.get_full_state()
 
 
+@app.get("/api/paper/candles")
+async def get_paper_candles(
+    symbol: Optional[str] = Query("NIFTY"),
+    contract: Optional[str] = Query(None),
+    date: Optional[str] = Query(None)
+):
+    """
+    Returns 1-minute intraday candlestick data for a paper trade.
+    Prioritizes:
+    1. Real-time in-memory bars and forming candles from PaperTradeDaemon (<1ms).
+    2. Actual contract-level candles via fetch_contract_candles (for option strikes).
+    3. Historical session archive CSVs (CRUDEOIL / NIFTY50) or database minute_candles.
+    """
+    req_symbol = (symbol or "").strip()
+    req_contract = (contract or "").strip()
+    combined_str = f"{req_symbol} {req_contract}".upper()
+
+    if "CRUDE" in combined_str:
+        canon = "CRUDEOIL"
+    elif "NATURALGAS" in combined_str or "NATGAS" in combined_str:
+        canon = "NATURALGAS"
+    elif "BANKNIFTY" in combined_str:
+        canon = "BANKNIFTY"
+    elif "SENSEX" in combined_str:
+        canon = "SENSEX"
+    else:
+        canon = "NIFTY"
+
+    today_str = get_today_str()
+    session_date = getattr(paper_daemon, "session_date", today_str) or today_str
+    target_date = (date or "").strip()
+    if not target_date or target_date.lower() == "today":
+        target_date = session_date
+
+    # 1. If an option contract is requested (e.g. NIFTY24DEC24300CE or NIFTY 24350 CE), try fetch_contract_candles
+    contract_id = req_contract if (("CE" in req_contract.upper() or "PE" in req_contract.upper()) and any(c.isdigit() for c in req_contract)) else req_symbol
+    if ("CE" in contract_id.upper() or "PE" in contract_id.upper()) and any(c.isdigit() for c in contract_id):
+        try:
+            c_res = await asyncio.to_thread(fetch_contract_candles, contract_id, target_date, state.db_engine)
+            if c_res and c_res.get("candles") and len(c_res["candles"]) > 0:
+                return {
+                    "symbol": canon,
+                    "contract": contract_id,
+                    "date": target_date,
+                    "num_candles": len(c_res["candles"]),
+                    "candles": c_res["candles"],
+                    "source": "contract_candles"
+                }
+        except Exception as ex:
+            logger.debug(f"contract_candles lookup skipped: {ex}")
+
+    # 2. Check in-memory bars from PaperTradeDaemon for current session
+    is_current_session = (target_date == session_date or target_date == today_str)
+    if is_current_session:
+        daemon_bars = paper_daemon.bar_history.get(canon) or paper_daemon.bar_history.get(req_symbol) or []
+        if not daemon_bars and canon == "NIFTY":
+            daemon_bars = paper_daemon.bar_history.get("NIFTY 50") or paper_daemon.bar_history.get("NIFTY-I") or []
+
+        bars = []
+        for b in daemon_bars:
+            ts_str = str(b.get("timestamp", ""))
+            if " " in ts_str:
+                time_str = ts_str.split(" ")[1][:5]
+            elif "T" in ts_str:
+                time_str = ts_str.split("T")[1][:5]
+            else:
+                time_str = ts_str[:5]
+
+            bars.append({
+                "time": time_str,
+                "timestamp": ts_str,
+                "open": round(float(b.get("open", 0.0)), 2),
+                "high": round(float(b.get("high", 0.0)), 2),
+                "low": round(float(b.get("low", 0.0)), 2),
+                "close": round(float(b.get("close", 0.0)), 2),
+                "volume": int(b.get("volume", 0) or 0)
+            })
+
+        # Add forming bar if live
+        forming = paper_daemon.forming_bars.get(canon) or paper_daemon.forming_bars.get(req_symbol)
+        if forming and float(forming.get("close", 0.0)) > 0:
+            f_time = str(forming.get("time", ""))
+            if " " in f_time:
+                f_time = f_time.split(" ")[1][:5]
+            elif "T" in f_time:
+                f_time = f_time.split("T")[1][:5]
+            else:
+                f_time = f_time[:5]
+
+            if not bars or bars[-1]["time"] != f_time:
+                bars.append({
+                    "time": f_time,
+                    "timestamp": forming.get("timestamp", f"{target_date} {f_time}:00"),
+                    "open": round(float(forming.get("open", 0.0)), 2),
+                    "high": round(float(forming.get("high", 0.0)), 2),
+                    "low": round(float(forming.get("low", 0.0)), 2),
+                    "close": round(float(forming.get("close", 0.0)), 2),
+                    "volume": int(forming.get("volume", 0) or 0)
+                })
+
+        if len(bars) > 0:
+            return {
+                "symbol": canon,
+                "contract": req_contract or canon,
+                "date": target_date,
+                "num_candles": len(bars),
+                "candles": bars,
+                "source": "paper_daemon_memory"
+            }
+
+    # 3. Fallback to Historical Archive CSVs
+    csv_file = None
+    if canon == "CRUDEOIL":
+        csv_file = PROJECT_ROOT / "data" / "historical" / "CRUDEOIL_1min_3years.csv"
+    elif canon == "NIFTY":
+        csv_file = PROJECT_ROOT / "data" / "historical" / "NIFTY50_1min_3years.csv"
+
+    if csv_file and csv_file.exists():
+        def _read_historical_csv(path: Path, req_d: str) -> List[Dict[str, Any]]:
+            import pandas as pd
+            res_candles = []
+            try:
+                df = pd.read_csv(path)
+                col = "datetime" if "datetime" in df.columns else ("timestamp" if "timestamp" in df.columns else df.columns[0])
+                df[col] = df[col].astype(str)
+                mask = df[col].str.startswith(req_d)
+                df_day = df[mask]
+                if df_day.empty:
+                    # Fallback to the latest session in the archive
+                    last_val = df[col].dropna().iloc[-1]
+                    last_d = last_val[:10]
+                    df_day = df[df[col].str.startswith(last_d)]
+                
+                for _, r in df_day.iterrows():
+                    ts = str(r[col])
+                    t_str = ts.split(" ")[1][:5] if " " in ts else ts[:5]
+                    res_candles.append({
+                        "time": t_str,
+                        "timestamp": ts,
+                        "open": round(float(r["open"]), 2),
+                        "high": round(float(r["high"]), 2),
+                        "low": round(float(r["low"]), 2),
+                        "close": round(float(r["close"]), 2),
+                        "volume": int(r.get("volume", 0) or 0)
+                    })
+            except Exception as e:
+                logger.debug(f"Historical CSV parse error: {e}")
+            return res_candles
+
+        csv_candles = await asyncio.to_thread(_read_historical_csv, csv_file, target_date)
+        if csv_candles:
+            return {
+                "symbol": canon,
+                "contract": req_contract or canon,
+                "date": target_date,
+                "num_candles": len(csv_candles),
+                "candles": csv_candles,
+                "source": "historical_csv"
+            }
+
+    # 4. Fallback to empty response
+    return {
+        "symbol": canon,
+        "contract": req_contract or canon,
+        "date": target_date,
+        "num_candles": 0,
+        "candles": [],
+        "source": "empty"
+    }
+
+
 _paper_websockets: List[WebSocket] = []
 
 def register_paper_client(ws: WebSocket):

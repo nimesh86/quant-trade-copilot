@@ -7682,84 +7682,191 @@
     let currentDayTradesList = [];
     let currentChartCandles = [];
     let activeTradeObj = null;
+    let activeTradeSource = 'backtest'; // 'backtest' or 'paper'
 
-    function openTradeChart(tradeId) {
-      if (!currentBacktestTrades || currentBacktestTrades.length === 0) return;
-      const trade = currentBacktestTrades.find(t => t.id === tradeId);
+    function openTradeChart(tradeId, source = 'auto') {
+      let trade = null;
+      let tradeSource = source;
+
+      if (source === 'paper') {
+        const pTrades = window.currentPaperTrades || [];
+        const actTrades = window.currentPaperActiveTrades || [];
+        const todayTrades = window.currentPaperTodayTrades || [];
+        trade = pTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                todayTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                actTrades.find(t => (t.id === tradeId || t.trade_id === tradeId));
+        tradeSource = 'paper';
+      } else if (source === 'live') {
+        const lTrades = window.currentLiveTrades || [];
+        const actTrades = window.currentLiveActiveTrades || [];
+        const todayTrades = window.currentLiveTodayTrades || [];
+        trade = lTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                todayTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                actTrades.find(t => (t.id === tradeId || t.trade_id === tradeId));
+        tradeSource = 'live';
+      } else if (source === 'backtest') {
+        const bTrades = currentBacktestTrades || [];
+        trade = bTrades.find(t => t.id === tradeId);
+        tradeSource = 'backtest';
+      } else {
+        // 'auto' detection: check backtest -> paper -> live
+        const bTrades = currentBacktestTrades || [];
+        trade = bTrades.find(t => t.id === tradeId);
+        if (trade) {
+          tradeSource = 'backtest';
+        } else {
+          const pTrades = window.currentPaperTrades || [];
+          const actTrades = window.currentPaperActiveTrades || [];
+          const todayTrades = window.currentPaperTodayTrades || [];
+          trade = pTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                  todayTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                  actTrades.find(t => (t.id === tradeId || t.trade_id === tradeId));
+          if (trade) {
+            tradeSource = 'paper';
+          } else {
+            const lTrades = window.currentLiveTrades || [];
+            const lActTrades = window.currentLiveActiveTrades || [];
+            const lTodayTrades = window.currentLiveTodayTrades || [];
+            trade = lTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                    lTodayTrades.find(t => (t.id === tradeId || t.trade_id === tradeId)) ||
+                    lActTrades.find(t => (t.id === tradeId || t.trade_id === tradeId));
+            if (trade) tradeSource = 'live';
+          }
+        }
+      }
+
       if (!trade) return;
-
+      activeTradeSource = tradeSource;
       activeSelectedTradeId = tradeId;
-      activeTradeObj = trade;
-      currentDayTradesList = currentBacktestTrades.filter(t => t.date === trade.date);
-      const dayTradeIdx = currentDayTradesList.findIndex(t => t.id === tradeId);
+
+      // Normalize trade fields for unified chart presentation
+      const isPaperOrLive = (activeTradeSource === 'paper' || activeTradeSource === 'live');
+      const isAct = Boolean(isPaperOrLive && (trade.is_active || !trade.exit_time || trade.exit_time === '--'));
+
+      const normTrade = {
+        id: trade.id || trade.trade_id,
+        symbol: trade.symbol || 'NIFTY',
+        contract: trade.contract || trade.symbol || 'NIFTY ATM',
+        contractSymbol: trade.contractSymbol || trade.contract_symbol || trade.contract || trade.symbol || '',
+        optionType: trade.optionType || trade.option_type || ((trade.trend || '').toUpperCase() === 'BEARISH' ? 'PE' : 'CE'),
+        date: trade.date || (trade.entry_time && trade.entry_time.includes('-') ? trade.entry_time.split(' ')[0] : (trade.entry_datetime ? trade.entry_datetime.split('T')[0] : (getTodayStr ? getTodayStr() : '2026-11-09'))),
+        day: trade.day || '',
+        net: trade.net !== undefined ? trade.net : (trade.net_pnl !== undefined ? trade.net_pnl : (trade.unrealized_pnl || 0)),
+        points: trade.points !== undefined ? trade.points : 0,
+        indicator: trade.indicator || trade.strategy || 'Unified AI Trader',
+        trend: (trade.trend || 'BULLISH').toUpperCase(),
+        probability: trade.probability || (trade.ml_score ? `${Math.round(trade.ml_score * 100)}%` : '75%'),
+        entryTime: trade.entryTime || (trade.entry_time ? (trade.entry_time.includes(' ') ? trade.entry_time.split(' ')[1] : trade.entry_time) : '09:15:00'),
+        entryRate: Number(trade.entryRate !== undefined ? trade.entryRate : (trade.entry_price !== undefined ? trade.entry_price : (trade.entry_rate || 0))),
+        exitTime: isAct ? 'LIVE' : (trade.exitTime || (trade.exit_time ? (trade.exit_time.includes(' ') ? trade.exit_time.split(' ')[1] : trade.exit_time) : '--')),
+        exitRate: Number(trade.exitRate !== undefined ? trade.exitRate : (trade.exit_price !== undefined ? trade.exit_price : (trade.current_price || trade.entry_price || 0))),
+        reason: trade.reason || trade.exit_reason || (isAct ? 'ACTIVE' : 'TARGET'),
+        target: Number(trade.target || 0),
+        sl: Number(trade.sl || trade.stop_loss || 0),
+        lots: trade.lots || 1,
+        units: trade.units || trade.quantity || 50,
+        is_active: isAct,
+        source: tradeSource,
+        raw: trade
+      };
+
+      activeTradeObj = normTrade;
+
+      // Build day trades list for navigation and secondary markers
+      let activeList = currentBacktestTrades || [];
+      if (activeTradeSource === 'paper') {
+        activeList = (window.currentPaperTrades && window.currentPaperTrades.length > 0) ? window.currentPaperTrades : (window.currentPaperTodayTrades || []);
+      } else if (activeTradeSource === 'live') {
+        activeList = (window.currentLiveTrades && window.currentLiveTrades.length > 0) ? window.currentLiveTrades : (window.currentLiveTodayTrades || []);
+      }
+      currentDayTradesList = activeList.filter(t => {
+        const tDate = t.date || (t.entry_time && t.entry_time.includes('-') ? t.entry_time.split(' ')[0] : (t.entry_datetime ? t.entry_datetime.split('T')[0] : ''));
+        return tDate === normTrade.date;
+      });
+      const dayTradeIdx = currentDayTradesList.findIndex(t => (t.id === normTrade.id || t.trade_id === normTrade.id));
+
+      // Modal Title
+      const titleLabelEl = document.querySelector('#bt-trade-chart-modal .bt-modal-title-label');
+      if (titleLabelEl) {
+        if (activeTradeSource === 'paper') {
+          titleLabelEl.textContent = '📈 Paper Trade Candlestick Chart';
+        } else if (activeTradeSource === 'live') {
+          titleLabelEl.textContent = '📈 Live Trade Candlestick Chart';
+        } else {
+          titleLabelEl.textContent = '📈 Intraday Candlestick Chart';
+        }
+      }
 
       // Populate Modal Header Info
       const contractEl = document.getElementById('bt-modal-contract');
-      if (contractEl) contractEl.textContent = trade.contract || `${trade.symbol} ${trade.optionType || 'CE'}`;
+      if (contractEl) contractEl.textContent = normTrade.contract;
 
       const dateEl = document.getElementById('bt-modal-date');
-      if (dateEl) dateEl.textContent = `📅 ${trade.date} (${trade.day})`;
+      if (dateEl) dateEl.textContent = `📅 ${normTrade.date} ${normTrade.day ? '(' + normTrade.day + ')' : ''}`;
 
       const tradeNumEl = document.getElementById('bt-modal-trade-num');
-      if (tradeNumEl) tradeNumEl.textContent = `Trade ${dayTradeIdx + 1} of ${currentDayTradesList.length}`;
+      if (tradeNumEl) tradeNumEl.textContent = isAct ? '⚡ Active Position' : `Trade ${dayTradeIdx >= 0 ? dayTradeIdx + 1 : 1} of ${currentDayTradesList.length || 1}`;
 
       const pnlPill = document.getElementById('bt-modal-pnl-pill');
       if (pnlPill) {
-        const isPos = trade.net >= 0;
+        const isPos = normTrade.net >= 0;
         pnlPill.className = `bt-modal-pnl-pill ${isPos ? 'pos' : 'neg'}`;
-        const ptsSign = trade.points >= 0 ? '+' : '';
+        const ptsSign = normTrade.points >= 0 ? '+' : '';
         const netSign = isPos ? '+₹' : '-₹';
-        pnlPill.innerHTML = `<span class="bt-modal-pnl-net">${netSign}${Math.abs(trade.net).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span><span class="bt-modal-pnl-pts">(${ptsSign}${trade.points.toFixed(2)} pts)</span>`;
+        const pnlPrefix = isAct ? 'LIVE ' : '';
+        pnlPill.innerHTML = `<span class="bt-modal-pnl-net">${pnlPrefix}${netSign}${Math.abs(normTrade.net).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span class="bt-modal-pnl-pts">(${ptsSign}${normTrade.points.toFixed(2)} pts)</span>`;
       }
 
       // Populate Summary Chips
       const contractChip = document.getElementById('bt-chip-contract');
-      if (contractChip) contractChip.textContent = trade.contract || `${trade.symbol} ${trade.optionType || 'CE'}`;
+      if (contractChip) contractChip.textContent = normTrade.contract;
 
       const indChip = document.getElementById('bt-chip-indicator');
-      if (indChip) indChip.textContent = trade.indicator;
+      if (indChip) indChip.textContent = normTrade.indicator;
 
       const trendChip = document.getElementById('bt-chip-trend');
       if (trendChip) {
-        trendChip.innerHTML = trade.trend === 'BULLISH' 
+        trendChip.innerHTML = normTrade.trend === 'BULLISH' 
           ? '<span style="color:#10b981;">▲ BULLISH (BUY)</span>'
           : '<span style="color:#ef4444;">▼ BEARISH (SELL)</span>';
       }
 
       const probChip = document.getElementById('bt-chip-prob');
-      if (probChip) probChip.textContent = trade.probability;
+      if (probChip) probChip.textContent = normTrade.probability;
 
       const entryChip = document.getElementById('bt-chip-entry');
-      if (entryChip) entryChip.textContent = `${trade.entryTime} @ ₹${trade.entryRate.toFixed(2)}`;
+      if (entryChip) entryChip.textContent = `${normTrade.entryTime} @ ₹${normTrade.entryRate.toFixed(2)}`;
 
       const exitChip = document.getElementById('bt-chip-exit');
-      if (exitChip) exitChip.textContent = `${trade.exitTime} @ ₹${trade.exitRate.toFixed(2)}`;
+      if (exitChip) {
+        exitChip.textContent = isAct ? `LIVE @ ₹${normTrade.exitRate.toFixed(2)}` : `${normTrade.exitTime} @ ₹${normTrade.exitRate.toFixed(2)}`;
+      }
 
       const reasonChip = document.getElementById('bt-chip-reason');
       if (reasonChip) {
-        reasonChip.textContent = trade.reason;
-        reasonChip.title = getReasonTitle(trade.reason);
+        reasonChip.textContent = normTrade.reason;
+        reasonChip.title = getReasonTitle(normTrade.reason);
       }
 
       const pointsChip = document.getElementById('bt-chip-points');
       if (pointsChip) {
-        pointsChip.className = `chip-val bt-mono ${trade.points >= 0 ? 'bt-val-pos' : 'bt-val-neg'}`;
-        pointsChip.textContent = `${trade.points >= 0 ? '+' : ''}${trade.points.toFixed(2)} pts`;
+        pointsChip.className = `chip-val bt-mono ${normTrade.points >= 0 ? 'bt-val-pos' : 'bt-val-neg'}`;
+        pointsChip.textContent = `${normTrade.points >= 0 ? '+' : ''}${normTrade.points.toFixed(2)} pts`;
       }
 
       const netChip = document.getElementById('bt-chip-net');
       if (netChip) {
-        const isPos = trade.net >= 0;
+        const isPos = normTrade.net >= 0;
         netChip.className = `chip-val bt-mono ${isPos ? 'bt-val-pos' : 'bt-val-neg'}`;
-        netChip.textContent = `${isPos ? '+₹' : '-₹'}${Math.abs(trade.net).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+        netChip.textContent = `${isPos ? '+₹' : '-₹'}${Math.abs(normTrade.net).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       }
 
       // Update Prev / Next buttons
-      const currentOverallIdx = currentBacktestTrades.findIndex(t => t.id === tradeId);
+      const currentOverallIdx = activeList.findIndex(t => (t.id === normTrade.id || t.trade_id === normTrade.id));
       const prevBtn = document.getElementById('bt-modal-prev-btn');
       const nextBtn = document.getElementById('bt-modal-next-btn');
       if (prevBtn) prevBtn.disabled = (currentOverallIdx <= 0);
-      if (nextBtn) nextBtn.disabled = (currentOverallIdx >= currentBacktestTrades.length - 1);
+      if (nextBtn) nextBtn.disabled = (currentOverallIdx < 0 || currentOverallIdx >= activeList.length - 1);
 
       // Open Modal Backdrop
       const modal = document.getElementById('bt-trade-chart-modal');
@@ -7769,7 +7876,7 @@
       }
 
       // Render Candlestick Chart for this date
-      renderTradeCandlestickChart(trade, currentDayTradesList);
+      renderTradeCandlestickChart(normTrade, currentDayTradesList);
     }
 
     function closeTradeChart() {
@@ -7787,25 +7894,37 @@
     }
 
     function navigateTrade(direction) {
-      if (!currentBacktestTrades || currentBacktestTrades.length === 0) return;
-      const currentIdx = currentBacktestTrades.findIndex(t => t.id === activeSelectedTradeId);
+      let activeList = currentBacktestTrades || [];
+      if (activeTradeSource === 'paper') {
+        activeList = (window.currentPaperTrades && window.currentPaperTrades.length > 0) ? window.currentPaperTrades : (window.currentPaperTodayTrades || []);
+      } else if (activeTradeSource === 'live') {
+        activeList = (window.currentLiveTrades && window.currentLiveTrades.length > 0) ? window.currentLiveTrades : (window.currentLiveTodayTrades || []);
+      }
+      if (!activeList || activeList.length === 0) return;
+      const currentIdx = activeList.findIndex(t => (t.id === activeSelectedTradeId || t.trade_id === activeSelectedTradeId));
       if (currentIdx === -1) return;
       const newIdx = currentIdx + direction;
-      if (newIdx >= 0 && newIdx < currentBacktestTrades.length) {
-        openTradeChart(currentBacktestTrades[newIdx].id);
+      if (newIdx >= 0 && newIdx < activeList.length) {
+        openTradeChart(activeList[newIdx].id || activeList[newIdx].trade_id, activeTradeSource);
       }
     }
 
     // Parse 'YYYY-MM-DD HH:MM:SS' into UTC seconds preserving IST visual time
     function parseDateTimeToSecs(dateStr, timeStr) {
-      const dateParts = dateStr.split('-');
-      const year = parseInt(dateParts[0], 10);
-      const month = parseInt(dateParts[1], 10) - 1;
-      const day = parseInt(dateParts[2], 10);
+      const dateParts = (dateStr || '').split('-');
+      const year = parseInt(dateParts[0], 10) || 2026;
+      const month = (parseInt(dateParts[1], 10) || 1) - 1;
+      const day = parseInt(dateParts[2], 10) || 1;
 
-      const timeParts = (timeStr || '09:15:00').split(':');
-      const hour = parseInt(timeParts[0], 10);
-      const min = parseInt(timeParts[1], 10);
+      let cleanTime = timeStr || '09:15:00';
+      if (cleanTime.includes(' ')) {
+        cleanTime = cleanTime.split(' ')[1];
+      } else if (cleanTime.includes('T')) {
+        cleanTime = cleanTime.split('T')[1];
+      }
+      const timeParts = cleanTime.split(':');
+      const hour = parseInt(timeParts[0], 10) || 9;
+      const min = parseInt(timeParts[1], 10) || 15;
       const sec = parseInt(timeParts[2] || 0, 10);
 
       return Math.floor(Date.UTC(year, month, day, hour, min, sec) / 1000);
@@ -7908,29 +8027,57 @@
         }
       }
 
-      // Fetch actual option contract candles from the server
+      // Fetch actual option contract candles or paper candles from the server
       let candles = [];
       try {
-        const contractSym = trade.contractSymbol || trade.symbol || '';
-        let resp = await fetch(`/api/contracts/candles?symbol=${encodeURIComponent(contractSym)}&date=${encodeURIComponent(trade.date)}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          const rawCandles = data.candles || [];
-          if (rawCandles.length > 0) {
-            candles = rawCandles.map(c => {
-              const timeStr = c.time ? (c.time.length > 5 ? c.time.slice(-5) : c.time) : '09:15';
-              return {
-                time: parseDateTimeToSecs(trade.date, timeStr),
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close
-              };
-            });
+        if (activeTradeSource === 'paper') {
+          // Fetch from dedicated paper candles endpoint
+          const pResp = await fetch(`/api/paper/candles?symbol=${encodeURIComponent(trade.symbol || '')}&contract=${encodeURIComponent(trade.contractSymbol || trade.contract || '')}&date=${encodeURIComponent(trade.date || '')}`);
+          if (pResp.ok) {
+            const pData = await pResp.json();
+            const rawList = Array.isArray(pData) ? pData : (pData.candles || []);
+            if (rawList.length > 0) {
+              candles = rawList.map(c => {
+                let timeStr = c.time || '09:15:00';
+                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
+                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
+                return {
+                  time: parseDateTimeToSecs(trade.date, timeStr),
+                  open: Number(c.open),
+                  high: Number(c.high),
+                  low: Number(c.low),
+                  close: Number(c.close)
+                };
+              });
+            }
           }
         }
 
-        // If specific contract not found, fallback to spot candles
+        // Fallback or backtest candles lookup
+        if (!candles || candles.length === 0) {
+          const contractSym = trade.contractSymbol || trade.symbol || '';
+          let resp = await fetch(`/api/contracts/candles?symbol=${encodeURIComponent(contractSym)}&date=${encodeURIComponent(trade.date)}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            const rawCandles = data.candles || [];
+            if (rawCandles.length > 0) {
+              candles = rawCandles.map(c => {
+                let timeStr = c.time || '09:15:00';
+                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
+                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
+                return {
+                  time: parseDateTimeToSecs(trade.date, timeStr),
+                  open: Number(c.open),
+                  high: Number(c.high),
+                  low: Number(c.low),
+                  close: Number(c.close)
+                };
+              });
+            }
+          }
+        }
+
+        // Fallback to spot candles
         if (!candles || candles.length === 0) {
           const spotResp = await fetch(`/api/candles?date=${encodeURIComponent(trade.date)}`);
           if (spotResp.ok) {
@@ -7938,24 +8085,34 @@
             const rawList = Array.isArray(spotData) ? spotData : (spotData.candles || []);
             if (rawList.length > 0) {
               candles = rawList.map(c => {
-                const timeStr = c.time ? (c.time.length > 5 ? c.time.slice(-5) : c.time) : '09:15';
+                let timeStr = c.time || '09:15:00';
+                if (timeStr.includes(' ')) timeStr = timeStr.split(' ')[1];
+                else if (timeStr.includes('T')) timeStr = timeStr.split('T')[1];
                 return {
                   time: parseDateTimeToSecs(trade.date, timeStr),
-                  open: c.open,
-                  high: c.high,
-                  low: c.low,
-                  close: c.close
+                  open: Number(c.open),
+                  high: Number(c.high),
+                  low: Number(c.low),
+                  close: Number(c.close)
                 };
               });
             }
           }
         }
       } catch (err) {
-        console.warn("Error fetching real candles:", err);
+        console.warn("Error fetching candles:", err);
       }
 
-      currentChartCandles = candles;
-      activeTradeCandleSeries.setData(candles);
+      // Deduplicate and sort strictly ascending by timestamp for LightweightCharts
+      const candleMap = new Map();
+      candles.forEach(c => {
+        if (c && typeof c.time === 'number' && !isNaN(c.time) && c.open != null && c.high != null && c.low != null && c.close != null) {
+          candleMap.set(c.time, c);
+        }
+      });
+      const sortedCandles = Array.from(candleMap.values()).sort((a, b) => a.time - b.time);
+      currentChartCandles = sortedCandles;
+      activeTradeCandleSeries.setData(sortedCandles);
 
       // Clean up previous price lines
       activeTradePriceLines.forEach(pl => {
@@ -7963,34 +8120,75 @@
       });
       activeTradePriceLines = [];
 
-      // Add Price Lines for Entry & Exit
-      const entryPriceLine = activeTradeCandleSeries.createPriceLine({
-        price: trade.entryRate,
-        color: '#10b981',
-        lineWidth: 2,
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: `ENTRY ₹${trade.entryRate.toFixed(2)}`
-      });
-      activeTradePriceLines.push(entryPriceLine);
+      // Add Price Line for Entry
+      if (trade.entryRate > 0) {
+        const entryPriceLine = activeTradeCandleSeries.createPriceLine({
+          price: trade.entryRate,
+          color: '#10b981',
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `ENTRY ₹${trade.entryRate.toFixed(2)}`
+        });
+        activeTradePriceLines.push(entryPriceLine);
+      }
 
-      const exitPriceLine = activeTradeCandleSeries.createPriceLine({
-        price: trade.exitRate,
-        color: trade.points >= 0 ? '#00f0ff' : '#f43f5e',
-        lineWidth: 2,
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: `EXIT [${trade.reason}] ₹${trade.exitRate.toFixed(2)}`
-      });
-      activeTradePriceLines.push(exitPriceLine);
+      if (trade.is_active) {
+        // Target line
+        if (trade.target > 0) {
+          const tgtLine = activeTradeCandleSeries.createPriceLine({
+            price: trade.target,
+            color: '#10b981',
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `TARGET ₹${trade.target.toFixed(2)}`
+          });
+          activeTradePriceLines.push(tgtLine);
+        }
+        // Stop Loss line
+        if (trade.sl > 0) {
+          const slLine = activeTradeCandleSeries.createPriceLine({
+            price: trade.sl,
+            color: '#f43f5e',
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `STOP LOSS ₹${trade.sl.toFixed(2)}`
+          });
+          activeTradePriceLines.push(slLine);
+        }
+        // Live LTP line
+        if (trade.exitRate > 0) {
+          const ltpLine = activeTradeCandleSeries.createPriceLine({
+            price: trade.exitRate,
+            color: '#00f0ff',
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `LIVE LTP ₹${trade.exitRate.toFixed(2)}`
+          });
+          activeTradePriceLines.push(ltpLine);
+        }
+      } else if (trade.exitRate > 0) {
+        // Closed trade Exit Price Line
+        const exitPriceLine = activeTradeCandleSeries.createPriceLine({
+          price: trade.exitRate,
+          color: trade.points >= 0 ? '#00f0ff' : '#f43f5e',
+          lineWidth: 2,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `EXIT [${trade.reason}] ₹${trade.exitRate.toFixed(2)}`
+        });
+        activeTradePriceLines.push(exitPriceLine);
+      }
 
       // Build Indicator Signal Markers
       const markers = [];
       const entryTimeSec = parseDateTimeToSecs(trade.date, trade.entryTime);
-      const exitTimeSec = parseDateTimeToSecs(trade.date, trade.exitTime);
-
-      // 1. Primary Active Trade Entry Signal Marker
       const isBullish = trade.trend === 'BULLISH';
+
+      // 1. Primary Entry Signal Marker
       markers.push({
         time: entryTimeSec,
         position: isBullish ? 'belowBar' : 'aboveBar',
@@ -8000,46 +8198,76 @@
         size: 2
       });
 
-      // 2. Primary Active Trade Exit Trigger Marker
-      const ptsSign = trade.points >= 0 ? '+' : '';
-      markers.push({
-        time: exitTimeSec,
-        position: trade.points >= 0 ? 'aboveBar' : 'belowBar',
-        color: trade.points >= 0 ? '#00f0ff' : '#f43f5e',
-        shape: trade.points >= 0 ? 'arrowDown' : 'arrowUp',
-        text: `🏁 EXIT [${trade.reason}] @ ₹${trade.exitRate.toFixed(2)} (${ptsSign}${trade.points.toFixed(2)} pts)`,
-        size: 2
-      });
+      // 2. Exit / Live Position Marker
+      if (trade.is_active) {
+        const lastCandle = sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1] : null;
+        const liveMarkerTime = lastCandle ? lastCandle.time : entryTimeSec;
+        markers.push({
+          time: liveMarkerTime,
+          position: 'aboveBar',
+          color: '#00f0ff',
+          shape: 'circle',
+          text: `⚡ LIVE ACTIVE POSITION @ ₹${trade.exitRate.toFixed(2)} (${trade.points >= 0 ? '+' : ''}${trade.points.toFixed(2)} pts)`,
+          size: 2
+        });
+      } else {
+        const exitTimeSec = parseDateTimeToSecs(trade.date, trade.exitTime);
+        const ptsSign = trade.points >= 0 ? '+' : '';
+        markers.push({
+          time: exitTimeSec,
+          position: trade.points >= 0 ? 'aboveBar' : 'belowBar',
+          color: trade.points >= 0 ? '#00f0ff' : '#f43f5e',
+          shape: trade.points >= 0 ? 'arrowDown' : 'arrowUp',
+          text: `🏁 EXIT [${trade.reason}] @ ₹${trade.exitRate.toFixed(2)} (${ptsSign}${trade.points.toFixed(2)} pts)`,
+          size: 2
+        });
+      }
 
       // 3. Secondary Markers for other trades of the same day
-      dayTrades.forEach(ot => {
-        if (ot.id === trade.id) return;
-        const otEntrySec = parseDateTimeToSecs(ot.date, ot.entryTime);
-        const otExitSec = parseDateTimeToSecs(ot.date, ot.exitTime);
-        const otBull = ot.trend === 'BULLISH';
+      if (dayTrades && dayTrades.length > 0) {
+        dayTrades.forEach(ot => {
+          const otId = ot.id || ot.trade_id;
+          if (otId === trade.id) return;
+          const otDate = ot.date || trade.date;
+          const otEntryTime = ot.entryTime || (ot.entry_time ? (ot.entry_time.includes(' ') ? ot.entry_time.split(' ')[1] : ot.entry_time) : '09:15:00');
+          const otExitTime = ot.exitTime || (ot.exit_time ? (ot.exit_time.includes(' ') ? ot.exit_time.split(' ')[1] : ot.exit_time) : null);
+          const otEntryRate = Number(ot.entryRate !== undefined ? ot.entryRate : (ot.entry_price || ot.entry_rate || 0));
+          const otPts = Number(ot.points || 0);
+          const otReason = ot.reason || ot.exit_reason || 'EXIT';
+          const otEntrySec = parseDateTimeToSecs(otDate, otEntryTime);
+          const otBull = (ot.trend || 'BULLISH').toUpperCase() === 'BULLISH';
+          const otInd = ot.indicator || ot.strategy || '';
 
-        markers.push({
-          time: otEntrySec,
-          position: otBull ? 'belowBar' : 'aboveBar',
-          color: otBull ? 'rgba(16, 185, 129, 0.65)' : 'rgba(239, 68, 68, 0.65)',
-          shape: otBull ? 'arrowUp' : 'arrowDown',
-          text: `${ot.indicator} (${otBull ? 'BUY' : 'SELL'}) @ ₹${ot.entryRate.toFixed(2)}`,
-          size: 1
-        });
+          markers.push({
+            time: otEntrySec,
+            position: otBull ? 'belowBar' : 'aboveBar',
+            color: otBull ? 'rgba(16, 185, 129, 0.65)' : 'rgba(239, 68, 68, 0.65)',
+            shape: otBull ? 'arrowUp' : 'arrowDown',
+            text: `${otInd} (${otBull ? 'BUY' : 'SELL'}) @ ₹${otEntryRate.toFixed(2)}`,
+            size: 1
+          });
 
-        markers.push({
-          time: otExitSec,
-          position: ot.points >= 0 ? 'aboveBar' : 'belowBar',
-          color: ot.points >= 0 ? 'rgba(56, 189, 248, 0.65)' : 'rgba(244, 63, 94, 0.65)',
-          shape: 'circle',
-          text: `Exit [${ot.reason}] (${ot.points >= 0 ? '+' : ''}${ot.points.toFixed(1)} pts)`,
-          size: 1
+          if (otExitTime && otExitTime !== '--' && otExitTime !== 'LIVE') {
+            const otExitSec = parseDateTimeToSecs(otDate, otExitTime);
+            markers.push({
+              time: otExitSec,
+              position: otPts >= 0 ? 'aboveBar' : 'belowBar',
+              color: otPts >= 0 ? 'rgba(56, 189, 248, 0.65)' : 'rgba(244, 63, 94, 0.65)',
+              shape: 'circle',
+              text: `Exit [${otReason}] (${otPts >= 0 ? '+' : ''}${otPts.toFixed(1)} pts)`,
+              size: 1
+            });
+          }
         });
-      });
+      }
 
       // Sort markers in strictly ascending order by timestamp
       markers.sort((a, b) => a.time - b.time);
-      activeTradeCandleSeries.setMarkers(markers);
+      try {
+        activeTradeCandleSeries.setMarkers(markers);
+      } catch (mErr) {
+        console.warn("Marker render notice:", mErr);
+      }
 
       // Default zoom: Zoom directly into the trade execution window
       zoomTradeChartToWindow();
@@ -8066,16 +8294,26 @@
     function zoomTradeChartToWindow() {
       if (!activeTradeChart || !activeTradeObj) return;
       const entryTimeSec = parseDateTimeToSecs(activeTradeObj.date, activeTradeObj.entryTime);
-      const exitTimeSec = parseDateTimeToSecs(activeTradeObj.date, activeTradeObj.exitTime);
+      let exitTimeSec = (activeTradeObj.exitTime && activeTradeObj.exitTime !== '--' && activeTradeObj.exitTime !== 'LIVE')
+        ? parseDateTimeToSecs(activeTradeObj.date, activeTradeObj.exitTime)
+        : entryTimeSec + 1800;
+
+      if (exitTimeSec <= entryTimeSec) {
+        exitTimeSec = entryTimeSec + 1800;
+      }
 
       // Margin of 15 minutes (900 seconds) before entry and after exit
       const fromSec = entryTimeSec - 900;
       const toSec = exitTimeSec + 900;
 
-      activeTradeChart.timeScale().setVisibleRange({
-        from: fromSec,
-        to: toSec
-      });
+      try {
+        activeTradeChart.timeScale().setVisibleRange({
+          from: fromSec,
+          to: toSec
+        });
+      } catch (zErr) {
+        activeTradeChart.timeScale().fitContent();
+      }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -8274,7 +8512,10 @@
                 </span>
                 <span class="paper-qty-pill">${actLots} Lot${actLots > 1 ? 's' : ''} (${actQty} Qty)</span>
               </div>
-              <div class="paper-active-header-right">
+              <div class="paper-active-header-right" style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="btn-paper-chart" onclick="openTradeChart('${trade.trade_id || trade.id || ''}', 'paper')" title="View live candlestick chart with entry, SL, and target levels" style="background: rgba(0, 240, 255, 0.12); border: 1px solid rgba(0, 240, 255, 0.4); color: #00f0ff; padding: 6px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                  📈 View Chart
+                </button>
                 <button type="button" class="btn-paper-force-exit" onclick="forceExitPaperTrade('${trade.trade_id || trade.id || ''}')" title="Instantly force market exit for this position">
                   ⚡ Force Market Exit
                 </button>
@@ -8339,6 +8580,12 @@
       const tradesList = sum.all_trades || state.trades || [];
       const monthlyList = sum.monthly_breakdown || state.monthly || [];
       const todayList = sum.today_trades || state.today_trades || [];
+
+      window.currentPaperTrades = tradesList;
+      window.currentPaperTodayTrades = todayList;
+      window.currentPaperActiveTrades = (state.active_trades && Array.isArray(state.active_trades) && state.active_trades.length > 0)
+        ? state.active_trades
+        : (act ? [act] : []);
 
       // 0. Live Indices Statistics Cards at the Top
       if (state.indices && Array.isArray(state.indices)) {
@@ -8528,8 +8775,8 @@
             const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
 
             rowsHtml += `
-              <tr class="bt-trade-row">
-                <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)}</td>
+              <tr class="bt-trade-row" onclick="openTradeChart('${t.id || t.trade_id}', 'paper')" style="cursor: pointer;" title="Click to view intraday candlestick chart">
+                <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)} <span class="bt-chart-hint-icon" title="View Chart">📈</span></td>
                 <td class="bt-mono">${t.date || (t.entry_time ? t.entry_time.split(' ')[0] : '--')}</td>
                 <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
                 <td class="bt-text-center">
@@ -8606,8 +8853,8 @@
             const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
 
             rowsHtml += `
-              <tr class="bt-trade-row">
-                <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)}</td>
+              <tr class="bt-trade-row" onclick="openTradeChart('${t.id || t.trade_id}', 'paper')" style="cursor: pointer;" title="Click to view intraday candlestick chart">
+                <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)} <span class="bt-chart-hint-icon" title="View Chart">📈</span></td>
                 <td class="bt-mono">${t.entry_time || '--'}</td>
                 <td class="bt-mono">${t.exit_time || '--'}</td>
                 <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
@@ -9019,6 +9266,12 @@
       const monthlyList = sum.monthly_breakdown || state.monthly || [];
       const todayList = sum.today_trades || state.today_trades || [];
 
+      window.currentLiveTrades = tradesList;
+      window.currentLiveTodayTrades = todayList;
+      window.currentLiveActiveTrades = (state.active_trades && Array.isArray(state.active_trades) && state.active_trades.length > 0)
+        ? state.active_trades
+        : (act ? [act] : []);
+
       // 0. Master Arming Toggle & Header Status Pulse
       const armBtn = document.getElementById('btn-live-arm-toggle');
       const pulseWrap = document.getElementById('live-engine-status-pulse');
@@ -9217,8 +9470,8 @@
             const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
 
             rowsHtml += `
-              <tr class="bt-trade-row">
-                <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)}</td>
+              <tr class="bt-trade-row" onclick="openTradeChart('${t.id || t.trade_id}', 'paper')" style="cursor: pointer;" title="Click to view intraday candlestick chart">
+                <td class="bt-mono">${t.id || t.trade_id || (tradesList.length - idx)} <span class="bt-chart-hint-icon" title="View Chart">📈</span></td>
                 <td class="bt-mono">${t.date || (t.entry_time ? t.entry_time.split(' ')[0] : '--')}</td>
                 <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
                 <td class="bt-text-center">
@@ -9295,8 +9548,8 @@
             const exitVal = Number(t.exit_price !== undefined ? t.exit_price : (t.exit_rate || 0)).toFixed(2);
 
             rowsHtml += `
-              <tr class="bt-trade-row">
-                <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)}</td>
+              <tr class="bt-trade-row" onclick="openTradeChart('${t.id || t.trade_id}', 'paper')" style="cursor: pointer;" title="Click to view intraday candlestick chart">
+                <td class="bt-mono">${t.id || t.trade_id || (todayList.length - idx)} <span class="bt-chart-hint-icon" title="View Chart">📈</span></td>
                 <td class="bt-mono">${t.entry_time || '--'}</td>
                 <td class="bt-mono">${t.exit_time || '--'}</td>
                 <td class="bt-mono"><span class="bt-contract-pill">${t.contract || t.symbol || 'NIFTY ATM'}</span></td>
