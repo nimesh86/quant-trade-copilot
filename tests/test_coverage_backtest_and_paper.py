@@ -216,12 +216,25 @@ def test_ai_trader_engine_spot_candle_handling(tmp_path):
     df.to_csv(sample_csv, index=False)
 
     with patch("trading_engine.backtest_engine.ai_trader_engine.BENCHMARK_20K_CANDIDATES", [sample_csv]):
-        # 1. Feeder returns empty DataFrame (line 280)
+        # 1. Feeder returns populated DataFrame (lines 268-279)
+        mock_spot_df = pd.DataFrame({
+            "timestamp": pd.date_range("2026-11-03 09:15", periods=5, freq="1min"),
+            "open": [24500.0] * 5,
+            "high": [24510.0] * 5,
+            "low": [24490.0] * 5,
+            "close": [24505.0] * 5,
+            "volume": [100.0] * 5
+        })
+        with patch("trading_engine.backtest_engine.feeder.BacktestFeeder.load_spot_candles", return_value=mock_spot_df):
+            res_candles = AITraderBacktestEngine.run({"capital": 20000.0})
+            assert len(res_candles["spotCandles"]) == 5
+
+        # 2. Feeder returns empty DataFrame (line 280)
         with patch("trading_engine.backtest_engine.feeder.BacktestFeeder.load_spot_candles", return_value=pd.DataFrame()):
             res_empty = AITraderBacktestEngine.run({"capital": 20000.0})
             assert res_empty["spotCandles"] == []
 
-        # 2. Feeder raises Exception (lines 281-282)
+        # 3. Feeder raises Exception (lines 281-282)
         with patch("trading_engine.backtest_engine.feeder.BacktestFeeder.load_spot_candles", side_effect=RuntimeError("Data feeder down")):
             res_err = AITraderBacktestEngine.run({"capital": 20000.0})
             assert res_err["spotCandles"] == []
