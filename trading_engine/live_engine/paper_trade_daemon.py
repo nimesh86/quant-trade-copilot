@@ -1126,7 +1126,7 @@ class PaperTradeDaemon:
         # Fallback for other commodities (e.g. NATURALGAS)
         lots = 1
         units = lots * lot_size
-        required_margin = min(self.commodity_available_capital, 10000.0)
+        required_margin = 10000.0
         if required_margin > self.commodity_available_capital:
             logger.warning(
                 f"❌ [COMMODITY PAPER TRADE ABORTED] Insufficient capital. "
