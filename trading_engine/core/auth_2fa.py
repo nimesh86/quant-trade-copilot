@@ -181,3 +181,4 @@ def extract_session_token(request: Request) -> Optional[str]:
     if auth_header and auth_header.startswith("Bearer "):
         return auth_header[7:].strip()
     return None
+

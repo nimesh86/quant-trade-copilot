@@ -871,7 +871,11 @@ class PaperTradeDaemon:
         if symbol not in ("NIFTY", "NIFTY 50"):
             return
 
-        # Gating 1: Blocked Time Slots (e.g. 09:15 to 10:05)
+        # Pre-Market & Regular Hours Gating: NSE market must be open (09:15 - 15:30 IST)
+        if not self.is_market_open("NSE Cash"):
+            return
+
+        # Gating 1: Blocked Time Slots (e.g. 09:15 to 10:05 opening volatility noise filter)
         hm = now.strftime("%H:%M")
         for slot in self.blocked_time_slots:
             if isinstance(slot, (list, tuple)) and len(slot) >= 2:

@@ -8,7 +8,7 @@ import threading
 from typing import Optional, Dict, Any, Callable, List, Tuple
 from datetime import datetime
 
-from trading_engine.core.keyvault import get_secret
+from trading_engine.core.keyvault import get_secret, get_kite_credentials
 
 _kite_client = None
 
@@ -50,9 +50,7 @@ class KiteBrokerAdapter:
 
     def is_configured(self) -> bool:
         """Returns True if Kite API Key and Access Token are configured."""
-        api_key = get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY", "")
-        access_token = get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN", "")
-        return bool(api_key and access_token and len(api_key.strip()) > 3 and len(access_token.strip()) > 10)
+        return get_kite_credentials().is_configured
 
     def connect(self) -> Optional[Any]:
         """Initializes KiteConnect client and validates session."""
@@ -61,18 +59,16 @@ class KiteBrokerAdapter:
             self.client = _kite_client
             return self.client
 
-        api_key = (get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY", "")).strip()
-        access_token = (get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN", "")).strip()
-
-        if not (api_key and access_token):
+        creds = get_kite_credentials()
+        if not creds.is_configured:
             print("KiteBrokerAdapter: Credentials missing in KeyVault.", flush=True)
             self.is_connected = False
             return None
 
         try:
             from kiteconnect import KiteConnect
-            kc = KiteConnect(api_key=api_key)
-            kc.set_access_token(access_token)
+            kc = KiteConnect(api_key=creds.api_key)
+            kc.set_access_token(creds.access_token)
 
             # Test connection with profile call
             profile = kc.profile()
@@ -102,12 +98,13 @@ class KiteBrokerAdapter:
         if self.kws and self.ws_connected:
             return True
 
-        api_key = (get_secret("KITE_API_KEY") or os.getenv("KITE_API_KEY", "")).strip()
-        access_token = (get_secret("KITE_ACCESS_TOKEN") or os.getenv("KITE_ACCESS_TOKEN", "")).strip()
+        creds = get_kite_credentials()
+        if not creds.is_configured:
+            return False
 
         try:
             from kiteconnect import KiteTicker
-            self.kws = KiteTicker(api_key=api_key, access_token=access_token)
+            self.kws = KiteTicker(api_key=creds.api_key, access_token=creds.access_token)
 
             self.kws.on_ticks = self._on_ticks
             self.kws.on_connect = self._on_connect

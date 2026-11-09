@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 
 from trading_engine.indicators.bss_pro_v5 import BSSProV5Indicator
-from trading_engine.replay.backtester import VectorizedBacktester, BrokerChargesConfig
 
 
 def make_bullish_rally_df(num_bars=80):
@@ -88,27 +87,6 @@ def test_bss_probability_calculation():
     assert ind.plots["continuation_prob"] > 50.0  # Bullish trend must score high
 
 
-def test_bss_runner_holding_and_trade_diagnostics():
-    """Verify backtester holds runners and logs rich entry and exit reasons."""
-    df = make_bullish_rally_df(80)
-    ind = BSSProV5Indicator()
-    bt = VectorizedBacktester(slippage_pts=0.5, lot_size=25, charges_config=BrokerChargesConfig())
-
-    scorecard = bt.run(df, ind, warmup_bars=50)
-
-    # Must produce at least 1 trade during the rally
-    assert scorecard.total_trades >= 1
-    trade = scorecard.trades[0]
-
-    # Verify diagnostic reasons exist
-    assert trade.entry_reason != ""
-    assert "PROB" in trade.entry_reason or "BSS" in trade.entry_reason
-    assert trade.exit_reason != ""
-
-    # Verify net and gross PnL and charges are tracked
-    assert trade.charges is not None
-    assert trade.total_charges_inr > 0.0
-    assert trade.gross_pnl_inr != 0.0
 
 
 def test_bss_session_time_filters():

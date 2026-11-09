@@ -309,3 +309,4 @@ if __name__ == "__main__":
 
     csv_p = Path(args.csv) if args.csv else None
     train_crude_model(csv_path=csv_p, lookback_candles=args.candles)
+

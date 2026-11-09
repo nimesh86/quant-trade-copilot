@@ -29,7 +29,8 @@ if workspace_root not in sys.path:
 
 import pyotp
 
-from trading_engine.core.keyvault import get_secret, set_secret
+from trading_engine.core.keyvault import get_breeze_credentials, set_breeze_session_token, set_secret
+from trading_engine.core.credentials import BreezeCredentials
 
 logger = logging.getLogger("breeze_autologin")
 
@@ -46,36 +47,34 @@ class BreezeAutoLogin:
         user_id: Optional[str] = None,
         password: Optional[str] = None,
         totp_key: Optional[str] = None,
+        creds: Optional[BreezeCredentials] = None,
     ):
-        self.api_key = (api_key or get_secret("BREEZE_API_KEY") or "").strip()
-        self.api_secret = (api_secret or get_secret("BREEZE_API_SECRET") or "").strip()
-        self.user_id = (user_id or get_secret("BREEZE_USER_ID") or "").strip()
-        self.password = (password or get_secret("BREEZE_PASSWORD") or "").strip()
-        
-        raw_totp = (totp_key or get_secret("BREEZE_TOTP_KEY") or "").strip()
-        self.totp_key = raw_totp.replace(" ", "").upper()
+        base_creds = creds or get_breeze_credentials()
+        self.creds = BreezeCredentials(
+            api_key=(api_key or base_creds.api_key).strip(),
+            api_secret=(api_secret or base_creds.api_secret).strip(),
+            user_id=(user_id or base_creds.user_id).strip(),
+            password=(password or base_creds.password).strip(),
+            totp_key=(totp_key or base_creds.totp_key).strip(),
+            session_token=base_creds.session_token
+        )
+        # Convenience accessors
+        self.api_key = self.creds.api_key
+        self.api_secret = self.creds.api_secret
+        self.user_id = self.creds.user_id
+        self.password = self.creds.password
+        self.totp_key = self.creds.clean_totp
 
     def generate_current_totp(self) -> str:
         """Generates dynamic 6-digit TOTP code from secret key."""
-        if not self.totp_key:
-            raise ValueError("BREEZE_TOTP_KEY is missing or empty in KeyVault.")
-        totp = pyotp.TOTP(self.totp_key)
+        if not self.creds.clean_totp:
+            raise ValueError("Breeze TOTP key is missing or empty in KeyVault.")
+        totp = pyotp.TOTP(self.creds.clean_totp)
         return totp.now()
 
     def check_prerequisites(self) -> Dict[str, Any]:
-        """Validates that all required credentials exist."""
-        missing = []
-        if not self.api_key:
-            missing.append("BREEZE_API_KEY")
-        if not self.api_secret:
-            missing.append("BREEZE_API_SECRET")
-        if not self.user_id:
-            missing.append("BREEZE_USER_ID")
-        if not self.password:
-            missing.append("BREEZE_PASSWORD")
-        if not self.totp_key:
-            missing.append("BREEZE_TOTP_KEY")
-
+        """Validates that all required credentials exist using typed model."""
+        missing = self.creds.missing_autologin_fields
         if missing:
             return {
                 "success": False,
@@ -239,9 +238,9 @@ class BreezeAutoLogin:
                 browser.close()
 
         # Step 5: Save token and generate session with Breeze SDK
-        logger.info(f"Persisting BREEZE_SESSION_TOKEN into KeyVault...")
-        set_secret("BREEZE_SESSION_TOKEN", captured_session_token)
-        set_secret("ACTIVE_BROKER", "breeze")
+        from trading_engine.core.credentials import SecretKey
+        set_breeze_session_token(captured_session_token)
+        set_secret(SecretKey.ACTIVE_BROKER, "breeze")
 
         # Step 6: Initialize BreezeConnect SDK and generate daily session
         try:

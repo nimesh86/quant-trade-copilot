@@ -22,6 +22,12 @@
     "antigravity"
   ],
   "main": "./src/extension.js",
+  "scripts": {
+    "deploy": "./deploy.sh",
+    "deploy:full": "./deploy.sh --full",
+    "deploy:watch": "./deploy.sh --watch",
+    "package": "npx @vscode/vsce package --no-git-tag-version --allow-missing-repository"
+  },
   "activationEvents": [
     "onCommand:quantStudio.openChart",
     "onCommand:quantStudio.debugIndicator",

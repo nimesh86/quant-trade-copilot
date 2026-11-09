@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
+import time
 
 # Ensure workspace root is always in sys.path regardless of how python is invoked
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -64,7 +65,7 @@ def load_indicator_from_file(file_path: str) -> Indicator:
 
     if indicator_cls is None:
         # Check if user pressed F5 while viewing a non-indicator file (e.g., backtester.py)
-        fallback_path = Path(__file__).resolve().parent.parent / "indicators" / "bss_pro_v5.py"
+        fallback_path = Path(__file__).resolve().parent.parent / "indicators" / "adaptive_trend_pro.py"
         if fallback_path.exists() and path != fallback_path:
             logger.warning(
                 f"No concrete Indicator subclass found in '{path.name}'. "
@@ -73,7 +74,7 @@ def load_indicator_from_file(file_path: str) -> Indicator:
             return load_indicator_from_file(str(fallback_path))
         raise ValueError(
             f"No concrete Indicator subclass found in {file_path}. "
-            f"Please open an indicator file (e.g. trading_engine/indicators/bss_pro_v5.py) before starting debug."
+            f"Please open an indicator file (e.g. trading_engine/indicators/adaptive_trend_pro.py) before starting debug."
         )
 
     logger.info(f"Loaded indicator class '{indicator_cls.__name__}' from {file_path}")
@@ -115,14 +116,46 @@ class ReplayDebugServer:
         self.is_playing = False
         self._play_task: Optional[asyncio.Task] = None
         self._server = None
+        self._pending_model_queries: Dict[str, asyncio.Future] = {}
+
+        ind_inputs = {}
+        for k, v in getattr(self.indicator, "__dict__", {}).items():
+            if hasattr(v, 'value'):
+                ind_inputs[k] = v.value
+
+        # Preserve existing parameters across debug sessions
+        existing_params = None
+        for p_file in [
+            os.path.join(PROJECT_ROOT, "reports", "quant_studio_model.json"),
+            os.path.join(PROJECT_ROOT, "reports", "quant_studio_state.json")
+        ]:
+            if os.path.exists(p_file):
+                try:
+                    with open(p_file, "r") as f:
+                        content = json.load(f)
+                        existing_params = content.get("parameters")
+                        if existing_params and isinstance(existing_params, dict):
+                            break
+                except Exception:
+                    pass
 
         self.quant_studio_state: Dict[str, Any] = {
+            "parameters": existing_params or {
+                "symbol": self.symbol,
+                "segment": "NSE",
+                "dateFrom": "2026-10-29",
+                "dateTo": self.date_str,
+                "optionType": "CE",
+                "capital": 20000.0,
+                "strategy": "bss_pro_v5"
+            },
             "session": {
                 "symbol": self.symbol,
                 "contract": self.contract,
                 "date": self.date_str,
                 "indicator_name": self.indicator.__class__.__name__,
                 "indicator_file": self.indicator_file,
+                "indicator_inputs": ind_inputs,
                 "tick_cursor": 0,
                 "cursor": 0,
                 "total_bars": 0,
@@ -299,7 +332,73 @@ class ReplayDebugServer:
         self.end_date_str = end_date or start_date
         self._init_session()
         logger.info(f"Session reloaded for date range: {self.date_str} to {self.end_date_str}")
-        await self.broadcast(self.get_init_payload())
+    def _save_model_snapshot(self, payload: Dict[str, Any]):
+        try:
+            report_dir = os.path.join(PROJECT_ROOT, "reports")
+            os.makedirs(report_dir, exist_ok=True)
+            model_file = os.path.join(report_dir, "quant_studio_model.json")
+            with open(model_file, "w") as f:
+                json.dump(payload, f, indent=2)
+            if isinstance(payload, dict):
+                if "parameters" in payload and isinstance(payload["parameters"], dict):
+                    self.quant_studio_state["parameters"] = payload["parameters"]
+                elif "capital" in payload or "optionType" in payload or "dateFrom" in payload:
+                    self.quant_studio_state["parameters"] = payload
+                if "selected_trade" in payload:
+                    self.quant_studio_state["viewport"]["focused_trade"] = payload["selected_trade"]
+                self._persist_state()
+        except Exception as e:
+            logger.debug(f"Failed to save model snapshot: {e}")
+
+    def _get_cached_scope(self, scope: str) -> Dict[str, Any]:
+        report_dir = os.path.join(PROJECT_ROOT, "reports")
+        model_file = os.path.join(report_dir, "quant_studio_model.json")
+        if os.path.exists(model_file):
+            try:
+                with open(model_file, "r") as f:
+                    mod = json.load(f)
+                    return mod.get(scope, mod) if scope != "all" else mod
+            except Exception:
+                pass
+        if scope == "parameters":
+            return self.quant_studio_state.get("parameters", {})
+        elif scope == "selected_trade":
+            return {"trade": self.quant_studio_state.get("viewport", {}).get("focused_trade")}
+        elif scope == "backtest_results":
+            return self.quant_studio_state.get("last_backtest", {})
+        return self.quant_studio_state
+
+    async def request_live_model(self, scope: str = "all", timeout: float = 2.0, exclude_ws: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+        """Queries connected webview client for its live QuantStudioModel snapshot."""
+        target_clients = [ws for ws in list(self.connected_clients) if ws != exclude_ws]
+        if not target_clients:
+            logger.debug("No webview client connected for live model query; using cached model.")
+            return self._get_cached_scope(scope)
+
+        req_id = f"q_{int(time.time() * 1000)}"
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._pending_model_queries[req_id] = future
+
+        msg = json.dumps({
+            "type": "query_model",
+            "query_id": req_id,
+            "scope": scope
+        })
+
+        for ws in target_clients:
+            try:
+                await ws.send(msg)
+            except Exception as err:
+                logger.debug(f"Failed to send query_model to client: {err}")
+
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except Exception:
+            return self._get_cached_scope(scope)
+        finally:
+            self._pending_model_queries.pop(req_id, None)
 
     async def run_backtest_range(
         self,
@@ -307,67 +406,81 @@ class ReplayDebugServer:
         end_date: str,
         charges_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Executes vectorized backtest across historical date range with ICICI Direct charges."""
-        from trading_engine.replay.backtester import VectorizedBacktester, BrokerChargesConfig
-        store = LocalDataStore()
-        start_ts = f"{start_date} 09:15:00"
-        end_ts = f"{end_date} 15:30:00"
-        df = pd.DataFrame()
-        try:
-            df = store.query_candles(self.symbol, self.contract, start_ts, end_ts)
-        except Exception as e:
-            logger.warning(f"Backtest query failed ({e}), generating synthetic dataset.")
-            df = pd.DataFrame()
+        """
+        Executes unified backtest via Layer B Backtest Engine for Quant Studio extension.
+        """
+        logger.info(f"Running unified backtest from {start_date} to {end_date}...")
+        from trading_engine.backtest_engine.engine import BacktestEngine
+        engine = BacktestEngine()
+        
+        cap = 20000.0
+        if charges_data and "initial_capital" in charges_data:
+            cap = float(charges_data["initial_capital"])
+        elif self.quant_studio_state.get("parameters", {}).get("capital"):
+            cap = float(self.quant_studio_state["parameters"]["capital"])
 
-        if df.empty or len(df) < 50:
-            try:
-                days = max(1, (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days + 1)
-            except Exception:
-                days = 1
-            total_bars = min(1500, days * 375)
-            df = _generate_synthetic_candles(self.symbol, self.contract, total_bars, date_str=start_date)
+        opt_type = "CE"
+        if charges_data and "option_type" in charges_data:
+            opt_type = str(charges_data["option_type"]).upper()
+        elif self.quant_studio_state.get("parameters", {}).get("optionType"):
+            opt_type = str(self.quant_studio_state["parameters"]["optionType"]).upper()
 
-        cfg = BrokerChargesConfig()
-        cfg.lot_size = get_symbol_lot_size(self.symbol)
+        strat_name = "Adaptive Trend Pro"
+
+        blocked_slots = []
         if charges_data and isinstance(charges_data, dict):
-            if "brokerage_per_order" in charges_data:
-                cfg.brokerage_per_order = float(charges_data["brokerage_per_order"])
-            if "lot_size" in charges_data and charges_data["lot_size"]:
-                cfg.lot_size = int(charges_data["lot_size"])
-            if "stt_rate" in charges_data:
-                cfg.stt_rate = float(charges_data["stt_rate"])
-            if "broker_name" in charges_data:
-                cfg.broker_name = str(charges_data["broker_name"])
+            blocked_slots = charges_data.get("blocked_time_slots") or charges_data.get("blockedTimeSlots") or []
+        if not blocked_slots:
+            blocked_slots = self.quant_studio_state.get("parameters", {}).get("blockedTimeSlots") or []
 
-        backtester = VectorizedBacktester(lot_size=cfg.lot_size, charges_config=cfg)
-        indicator_copy = type(self.indicator)()
-        scorecard = backtester.run_backtest(df, indicator_copy, warmup_bars=self.warmup_bars)
-        result_dict = scorecard.to_dict()
-
-        # Build synchronized history_bars for complete chart display across backtested range
+        params = {
+            "symbol": self.symbol or "NIFTY",
+            "segment": "NSE",
+            "dateFrom": start_date,
+            "dateTo": end_date,
+            "optionType": opt_type,
+            "capital": cap,
+            "strategy": strat_name,
+            "maxTradesPerDay": 4,
+            "blockedTimeSlots": blocked_slots
+        }
+        
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, engine.run_backtest, params)
+        
         history_bars = []
-        for _, row in df.iterrows():
-            history_bars.append({
-                "timestamp": str(row.get("timestamp")),
-                "spot_open": float(row.get("spot_open", row.get("open", 100))),
-                "spot_high": float(row.get("spot_high", row.get("high", 100))),
-                "spot_low": float(row.get("spot_low", row.get("low", 100))),
-                "spot_close": float(row.get("spot_close", row.get("close", 100))),
-                "opt_open": float(row.get("opt_open", 100)),
-                "opt_high": float(row.get("opt_high", 100)),
-                "opt_low": float(row.get("opt_low", 100)),
-                "opt_close": float(row.get("opt_close", 100)),
-            })
-        result_dict["history_bars"] = history_bars
-
         try:
-            report_dir = os.path.join(PROJECT_ROOT, "reports")
-            os.makedirs(report_dir, exist_ok=True)
-            with open(os.path.join(report_dir, "last_backtest_result.json"), "w") as f:
-                json.dump(result_dict, f, indent=2)
-        except Exception as err:
-            logger.debug(f"Could not write last_backtest_result.json: {err}")
-        return result_dict
+            spot_df = engine.feeder.load_spot_candles(self.symbol or "NIFTY", start_date, end_date)
+            if not spot_df.empty:
+                for _, r in spot_df.iterrows():
+                    history_bars.append({
+                        "time": int(pd.to_datetime(r["timestamp"]).timestamp()),
+                        "open": float(r["open"]),
+                        "high": float(r["high"]),
+                        "low": float(r["low"]),
+                        "close": float(r["close"]),
+                        "volume": int(r.get("volume", 1000))
+                    })
+        except Exception as e:
+            logger.warning(f"Could not load history bars: {e}")
+
+        # Adapt trade charges for Quant Studio Extension Webview
+        for tr in result.get("trades", []):
+            if "charges_bifurcation" in tr:
+                tr["charges"] = tr["charges_bifurcation"]
+
+        result["history_bars"] = history_bars
+        if "scorecard" in result and isinstance(result["scorecard"], dict):
+            result["scorecard"]["history_bars"] = history_bars
+            for tr in result["scorecard"].get("trades", []):
+                if "charges_bifurcation" in tr:
+                    tr["charges"] = tr["charges_bifurcation"]
+
+        self.quant_studio_state["last_backtest"] = result
+        self.quant_studio_state["parameters"] = params
+        self._persist_state()
+
+        return result
 
     def play(self, speed: Optional[float] = None):
         """Starts continuous playback task."""
@@ -413,6 +526,12 @@ class ReplayDebugServer:
         try:
             # Send initial session handshake
             await websocket.send(json.dumps(self.get_init_payload()))
+            # Immediately query webview for current DOM parameters
+            await websocket.send(json.dumps({
+                "type": "query_model",
+                "query_id": "connect_boot_sync",
+                "scope": "parameters"
+            }))
 
             async for raw in websocket:
                 try:
@@ -449,9 +568,51 @@ class ReplayDebugServer:
                     elif action == "focus_trade":
                         tr = data.get("trade")
                         idx = data.get("trade_index")
+                        params = data.get("parameters")
+                        if not self.quant_studio_state.get("viewport"):
+                            self.quant_studio_state["viewport"] = {}
                         self.quant_studio_state["viewport"]["focused_trade"] = tr
                         self.quant_studio_state["viewport"]["focused_trade_index"] = idx
+                        if params:
+                            self.quant_studio_state["parameters"] = params
                         self._persist_state()
+                    elif action == "sync_parameters":
+                        params = data.get("parameters")
+                        if params:
+                            cap = params.get("capital")
+                            logger.info(f"⚡ [CAPITAL EVENT] Live parameters received from Webview -> Capital: ₹{cap} (Full payload: {params})")
+                            if "parameters" not in self.quant_studio_state or not isinstance(self.quant_studio_state["parameters"], dict):
+                                self.quant_studio_state["parameters"] = {}
+                            self.quant_studio_state["parameters"].update(params)
+                            self._persist_state()
+                    elif action == "sync_backtest_results":
+                        bt_data = data.get("data")
+                        params = data.get("parameters")
+                        self.quant_studio_state["last_backtest"] = bt_data
+                        if params:
+                            self.quant_studio_state["parameters"] = params
+                        self._persist_state()
+                    elif action == "query_live_model":
+                        scope = data.get("scope", "all")
+                        req_id = data.get("req_id", f"req_{int(time.time() * 1000)}")
+                        res = await self.request_live_model(scope=scope, timeout=2.0, exclude_ws=websocket)
+                        await websocket.send(json.dumps({
+                            "type": "live_model_result",
+                            "req_id": req_id,
+                            "scope": scope,
+                            "data": res
+                        }))
+                    elif action == "model_response":
+                        q_id = data.get("query_id")
+                        payload = data.get("data")
+                        if q_id and q_id in self._pending_model_queries:
+                            fut = self._pending_model_queries[q_id]
+                            if not fut.done():
+                                fut.set_result(payload)
+                        if isinstance(payload, dict):
+                            cap = payload.get("capital") or (payload.get("parameters", {}).get("capital") if isinstance(payload.get("parameters"), dict) else None)
+                            logger.info(f"⚡ [CAPITAL MODEL SYNC] Webview responded -> Capital: ₹{cap}")
+                            self._save_model_snapshot(payload)
                     elif action == "get_state":
                         self._persist_state()
                         await websocket.send(json.dumps({
@@ -462,6 +623,8 @@ class ReplayDebugServer:
                         s_dt = data.get("start_date", self.date_str)
                         e_dt = data.get("end_date", self.date_str)
                         charges_cfg = data.get("charges_config", {})
+                        if "blocked_time_slots" in data and isinstance(charges_cfg, dict):
+                            charges_cfg["blocked_time_slots"] = data["blocked_time_slots"]
                         logger.info(f"Running backtest from {s_dt} to {e_dt} with charges: {charges_cfg}...")
                         result = await self.run_backtest_range(s_dt, e_dt, charges_cfg)
                         self.quant_studio_state["last_backtest"] = result

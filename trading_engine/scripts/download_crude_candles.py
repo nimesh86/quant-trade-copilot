@@ -310,3 +310,4 @@ def run_download(months_back: int = 36):
 if __name__ == "__main__":
     months = int(sys.argv[1]) if len(sys.argv) > 1 else 36
     run_download(months)
+

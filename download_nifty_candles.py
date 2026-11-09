@@ -24,9 +24,12 @@ AI_TRADER_DIR = Path("/Users/admin/Documents/Nimesh/Projects/ai-trade/AI-trader"
 ENV_PATH = AI_TRADER_DIR / ".env"
 load_dotenv(ENV_PATH)
 
-API_KEY = os.getenv("KITE_API_KEY", "").strip() or os.getenv("ZERODHA_API_KEY", "").strip()
-API_SECRET = os.getenv("KITE_API_SECRET", "").strip() or os.getenv("ZERODHA_API_SECRET", "").strip()
-ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN", "").strip() or os.getenv("ZERODHA_ACCESS_TOKEN", "").strip()
+from trading_engine.core.keyvault import get_kite_credentials
+
+_kite_creds = get_kite_credentials()
+API_KEY = _kite_creds.api_key
+API_SECRET = _kite_creds.api_secret
+ACCESS_TOKEN = _kite_creds.access_token
 
 DB_URL = "postgresql+psycopg2://postgres:postgres@localhost:5432/trading"
 NIFTY_TOKEN = 256265  # NSE:NIFTY 50 cash spot index
@@ -67,18 +70,16 @@ class RedirectHandler(BaseHTTPRequestHandler):
 
 
 def save_access_token(token: str):
+    from trading_engine.core.keyvault import set_kite_credentials
+    set_kite_credentials(access_token=token)
     if ENV_PATH.exists():
         content = ENV_PATH.read_text()
         if "KITE_ACCESS_TOKEN=" in content:
             content = re.sub(r"KITE_ACCESS_TOKEN=.*", f"KITE_ACCESS_TOKEN={token}", content)
         else:
             content += f"\nKITE_ACCESS_TOKEN={token}\n"
-        if "ZERODHA_ACCESS_TOKEN=" in content:
-            content = re.sub(r"ZERODHA_ACCESS_TOKEN=.*", f"ZERODHA_ACCESS_TOKEN={token}", content)
-        else:
-            content += f"\nZERODHA_ACCESS_TOKEN={token}\n"
         ENV_PATH.write_text(content)
-        print(f"Saved new access token into {ENV_PATH}")
+    print(f"Saved new access token to KeyVault and {ENV_PATH}")
 
 
 def authenticate_kite():

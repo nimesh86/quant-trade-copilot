@@ -187,3 +187,4 @@ def compute_crude_features(df: pd.DataFrame) -> pd.DataFrame:
     df[CRUDE_FEATURE_COLUMNS] = df[CRUDE_FEATURE_COLUMNS].bfill().ffill().fillna(0.0)
 
     return df
+

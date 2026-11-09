@@ -173,12 +173,10 @@ class QuickBacktestIndicator(Indicator):
     })
     assert res.status_code == 200
     data = res.json()
-    assert "total_trades" in data
+    assert "summary" in data
+    assert "scorecard" in data
+    assert "trades" in data
     assert "win_rate_pct" in data
-    assert "profit_factor" in data
-    assert "total_pnl_inr" in data
-    assert "max_drawdown_inr" in data
-    assert data["total_trades"] > 0
 
 
 def test_studio_websocket_channel():

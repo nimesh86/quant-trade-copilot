@@ -36,8 +36,10 @@ class LiveStreamFeeder(BaseDataFeeder):
 
     def __init__(self, cfg: EngineConfig, api_key: Optional[str] = None, access_token: Optional[str] = None):
         self.cfg = cfg
-        self.api_key = api_key or os.getenv("KITE_API_KEY") or os.getenv("ZERODHA_API_KEY", "")
-        self.access_token = access_token or os.getenv("KITE_ACCESS_TOKEN") or os.getenv("ZERODHA_ACCESS_TOKEN", "")
+        from trading_engine.core.keyvault import get_kite_credentials
+        creds = get_kite_credentials()
+        self.api_key = api_key or creds.api_key
+        self.access_token = access_token or creds.access_token
 
         self.kws = None
         self.is_connected = False
@@ -64,7 +66,7 @@ class LiveStreamFeeder(BaseDataFeeder):
         print("LiveStreamFeeder: Connecting to Zerodha KiteTicker WebSocket...", flush=True)
 
         if not self.api_key or not self.access_token:
-            print("LiveStreamFeeder WARNING: KITE_API_KEY or KITE_ACCESS_TOKEN not found in environment.")
+            print("LiveStreamFeeder WARNING: Kite credentials not configured in KeyVault.")
             print("LiveStreamFeeder: Running in simulated live mode or awaiting broker auth.", flush=True)
             return
 
