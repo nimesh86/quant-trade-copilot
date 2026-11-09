@@ -126,9 +126,6 @@ class UnifiedAITraderStrategy:
 
         rolling_low_10 = float(lows.iloc[-10:-1].min())
         rolling_low_5 = float(lows.iloc[-5:-1].min())
-        sma_20 = float(closes.rolling(min(len(closes), 20)).mean().iloc[-1])
-        ema_50 = float(closes.ewm(span=min(len(closes), 50), adjust=False).mean().iloc[-1])
-        sma_200 = float(closes.rolling(min(len(closes), 200), min_periods=10).mean().iloc[-1])
 
         # Technical Indicators for setups
         ema_9 = float(closes.ewm(span=min(len(closes), 9), adjust=False).mean().iloc[-1])
@@ -168,6 +165,8 @@ class UnifiedAITraderStrategy:
         neg_dm_s = float(pd.Series(neg_dm).ewm(alpha=1.0 / 14, min_periods=5, adjust=False).mean().iloc[-1] or 0.0)
         di_plus = float(100.0 * (pos_dm_s / (atr_14 + 1e-9)))
         di_minus = float(100.0 * (neg_dm_s / (atr_14 + 1e-9)))
+        dx = float(100.0 * abs(di_plus - di_minus) / ((di_plus + di_minus) + 1e-9))
+        adx_1m = dx
 
         signal_dir = None
         setup_name = None

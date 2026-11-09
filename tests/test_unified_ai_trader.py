@@ -177,3 +177,133 @@ def test_concurrent_multi_segment_non_blocking():
     assert daemon.commodity_capital == 50000.0
 
 
+def test_force_exit_by_trade_id():
+    """Verifies that force_exit accurately targets specific positions when multiple trades are active."""
+    from trading_engine.live_engine.paper_trade_daemon import PaperTradeDaemon
+
+    daemon = PaperTradeDaemon.get_instance()
+    daemon.reset_state(20000.0, 50000.0)
+
+    eq_trade = {
+        "id": "PTR_EQ_EXIT_TEST",
+        "symbol": "NIFTY",
+        "contract": "NIFTY26N0924900CE",
+        "segment": "NSE Cash",
+        "entry_price": 100.0,
+        "current_price": 105.0,
+        "units": 50,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "BRR-01 Bear-Trap (CALL)",
+        "probability": "75%"
+    }
+    comm_trade = {
+        "id": "PTR_COMM_EXIT_TEST",
+        "symbol": "CRUDEOIL",
+        "contract": "CRUDEOIL 8450 CE",
+        "segment": "MCX Commodity",
+        "entry_price": 115.0,
+        "current_price": 125.0,
+        "units": 100,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "MCX CRUDEOIL 1H-Trend Sweep (LONG)",
+        "probability": "76%"
+    }
+
+    daemon.active_trade = eq_trade
+    daemon.active_trade = comm_trade
+    assert len(daemon.active_trades) == 2
+
+    # Force exit commodity position specifically by trade_id
+    res = daemon.force_exit(trade_id="PTR_COMM_EXIT_TEST")
+    assert res["status"] == "success"
+    assert "commodity" not in daemon.active_trades
+    assert "equity" in daemon.active_trades
+
+    # Force exit remaining equity position
+    res = daemon.force_exit(trade_id="PTR_EQ_EXIT_TEST")
+    assert res["status"] == "success"
+    assert len(daemon.active_trades) == 0
+
+    daemon.reset_state(20000.0, 50000.0)
+
+
+def test_live_trade_daemon_concurrency_and_dual_fund():
+    """Verifies that LiveTradeDaemon enforces dual fund segregation and non-blocking positions."""
+    from datetime import datetime
+    from trading_engine.live_engine.live_trade_daemon import LiveTradeDaemon
+
+    live = LiveTradeDaemon.get_instance()
+    live.reset_state(20000.0, 50000.0)
+
+    assert live.equity_capital == 20000.0
+    assert live.commodity_capital == 50000.0
+    assert live.capital == 70000.0
+
+    # 1. Open equity live position
+    eq_trade = {
+        "id": "LTR_EQ_TEST",
+        "symbol": "NIFTY",
+        "contract": "NIFTY26N0924900CE",
+        "segment": "NSE Cash",
+        "entry_price": 100.0,
+        "current_price": 110.0,
+        "units": 50,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "BRR-01 Bear-Trap (CALL)",
+        "probability": "75%"
+    }
+    live.active_trade = eq_trade
+    assert "equity" in live.active_trades
+
+    # 2. Open commodity live position concurrently
+    comm_trade = {
+        "id": "LTR_COMM_TEST",
+        "symbol": "CRUDEOIL",
+        "contract": "CRUDEOIL 8450 CE",
+        "segment": "MCX Commodity",
+        "entry_price": 115.0,
+        "current_price": 125.0,
+        "units": 100,
+        "lots": 1,
+        "date": "2026-11-09",
+        "trend": "BULLISH",
+        "strategy": "MCX CRUDEOIL 1H-Trend Sweep (LONG)",
+        "probability": "76%"
+    }
+    live.active_trade = comm_trade
+    assert "commodity" in live.active_trades
+    assert len(live.active_trades) == 2
+
+    # 3. Force exit equity live position specifically
+    res = live.force_exit_active_trade(trade_id="LTR_EQ_TEST")
+    assert res["status"] == "success"
+    assert "equity" not in live.active_trades
+    assert "commodity" in live.active_trades
+    assert live.equity_capital == 20435.0  # +₹435 gain (gross ₹500 - ₹65 charges)
+    assert live.commodity_capital == 50000.0
+
+    # 4. Force exit commodity live position
+    res = live.force_exit_active_trade(trade_id="LTR_COMM_TEST")
+    assert res["status"] == "success"
+    assert len(live.active_trades) == 0
+    assert live.commodity_capital == 50910.0  # +₹910 gain (gross ₹1000 - ₹90 charges)
+
+    # 5. Check get_state() structure
+    state = live.get_state()
+    assert state["summary"]["equity_capital"] == 20435.0
+    assert state["summary"]["commodity_capital"] == 50910.0
+    assert state["summary"]["capital"] == 71345.0
+    assert state["config"]["equity_capital"] == 20435.0
+    assert state["config"]["commodity_capital"] == 50910.0
+
+    live.reset_state(20000.0, 50000.0)
+    assert live.capital == 70000.0
+
+
+

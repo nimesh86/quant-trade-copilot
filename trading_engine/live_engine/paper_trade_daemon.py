@@ -1400,14 +1400,28 @@ class PaperTradeDaemon:
         except Exception as e:
             logger.debug(f"PaperTradeDaemon: DB record skipped: {e}")
 
-    def force_exit(self) -> Dict[str, Any]:
-        """Manually forces immediate market exit of the active trade."""
-        if not self.active_trade:
-            return {"status": "error", "message": "No active trade to exit."}
+    def force_exit(self, trade_id: Optional[str] = None) -> Dict[str, Any]:
+        """Manually forces immediate market exit of the targeted active trade."""
+        if not hasattr(self, "active_trades") or not self.active_trades:
+            if not self.active_trade:
+                return {"status": "error", "message": "No active trade to exit."}
+            target_trade = self.active_trade
+        else:
+            target_trade = None
+            if trade_id:
+                for t in self.active_trades.values():
+                    if t.get("id") == trade_id or t.get("trade_id") == trade_id or t.get("symbol") == trade_id or t.get("segment") == trade_id:
+                        target_trade = t
+                        break
+            if not target_trade:
+                target_trade = self.active_trade
 
-        exit_px = self.active_trade.get("current_price", self.active_trade["entry_price"])
-        self._close_active_trade(reason="Manual Force Exit", exit_price=exit_px, exit_time=datetime.now())
-        return {"status": "success", "message": "Active position successfully exited."}
+        if not target_trade:
+            return {"status": "error", "message": "No matching active trade to exit."}
+
+        exit_px = target_trade.get("current_price", target_trade.get("entry_price", 0.0))
+        self._close_active_trade(reason="Manual Force Exit", exit_price=exit_px, exit_time=datetime.now(), trade_to_close=target_trade)
+        return {"status": "success", "message": f"Active position ({target_trade.get('contract', '')}) successfully exited."}
 
     # ── Summary & Subtab Generation ──────────────────────────────────────────
 

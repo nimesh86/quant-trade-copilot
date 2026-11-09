@@ -1458,9 +1458,10 @@ async def get_paper_trading_state():
 
 
 @app.post("/api/paper/exit")
-async def exit_paper_trading_active_trade():
+async def exit_paper_trading_active_trade(payload: Dict[str, Any] = Body(default={})):
     """1-click Market Exit for the active paper trade."""
-    res = paper_daemon.force_exit()
+    trade_id = payload.get("trade_id")
+    res = paper_daemon.force_exit(trade_id=trade_id)
     try:
         await broadcast_paper_full_state()
     except Exception:
@@ -1583,9 +1584,10 @@ async def toggle_live_trading_armed(payload: Dict[str, Any] = Body(default={})):
 
 
 @app.post("/api/live/exit")
-async def exit_live_trading_active_trade():
+async def exit_live_trading_active_trade(payload: Dict[str, Any] = Body(default={})):
     """1-click Market Exit for the active live trade."""
-    res = live_trade_daemon.force_exit_active_trade()
+    trade_id = payload.get("trade_id")
+    res = live_trade_daemon.force_exit_active_trade(trade_id=trade_id)
     try:
         await broadcast_live_full_state()
     except Exception:
@@ -1595,9 +1597,10 @@ async def exit_live_trading_active_trade():
 
 @app.post("/api/live/reset")
 async def reset_live_trading_account(payload: Dict[str, Any] = Body(default={})):
-    """Resets live account balance to initial capital and clears logs."""
-    cap = float(payload.get("capital", 2336.00))
-    live_trade_daemon.reset_state(cap)
+    """Resets live account balance to initial capital and clears logs with segregated funds."""
+    eq_cap = float(payload.get("equity_capital", payload.get("stock_capital", payload.get("capital", 20000.0))))
+    comm_cap = float(payload.get("commodity_capital", payload.get("crude_capital", 50000.0)))
+    live_trade_daemon.reset_state(equity_capital=eq_cap, commodity_capital=comm_cap)
     try:
         await broadcast_live_full_state()
     except Exception:

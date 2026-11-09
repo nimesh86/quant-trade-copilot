@@ -19,7 +19,7 @@ import json
 import logging
 from datetime import datetime, date, timedelta, time as dt_time, timezone
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import numpy as np
 import pandas as pd
 
@@ -95,8 +95,11 @@ class LiveTradeDaemon:
         self.tgt_pct = 0.50   # 50% Profit Target
 
         # Real-time state
-        self.active_trade: Optional[Dict[str, Any]] = None
+        self._active_trade: Optional[Dict[str, Any]] = None
+        self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.trade_history: List[Dict[str, Any]] = []
+        self.last_crude_exit_time: Optional[datetime] = None
+        self.last_equity_exit_time: Optional[datetime] = None
 
         # Real-time market metrics
         self.current_spot: float = 24536.60
@@ -221,6 +224,36 @@ class LiveTradeDaemon:
         self.load_state()
 
     @property
+    def active_trade(self) -> Optional[Dict[str, Any]]:
+        """Returns the primary active trade or equity/commodity trade."""
+        if not hasattr(self, "active_trades") or not self.active_trades:
+            return getattr(self, "_active_trade", None)
+        if "equity" in self.active_trades:
+            return self.active_trades["equity"]
+        if "commodity" in self.active_trades:
+            return self.active_trades["commodity"]
+        return list(self.active_trades.values())[0]
+
+    @active_trade.setter
+    def active_trade(self, val: Optional[Dict[str, Any]]):
+        if not hasattr(self, "active_trades"):
+            self.active_trades = {}
+        self._active_trade = val
+        if val is None:
+            self.active_trades.clear()
+        else:
+            seg = "commodity" if self._is_commodity_trade(val) else "equity"
+            self.active_trades[seg] = val
+
+    @staticmethod
+    def _is_commodity_trade(trade: Optional[Dict[str, Any]]) -> bool:
+        if not trade:
+            return False
+        sym = str(trade.get("symbol", "")).upper()
+        seg = str(trade.get("segment", "")).upper()
+        return "CRUDE" in sym or "NATURAL" in sym or "MCX" in seg or "COMMODITY" in seg
+
+    @property
     def capital(self) -> float:
         return round(self.equity_capital + self.commodity_capital, 2)
 
@@ -264,16 +297,28 @@ class LiveTradeDaemon:
         """Flips the master safety arming switch."""
         return self.set_armed(not self.is_armed)
 
-    def reset_state(self, capital: float = 20000.0):
-        """Clears live ledger and resets capital."""
-        self.initial_capital = float(capital)
-        self.capital = float(capital)
-        self.blocked_capital = 0.0
-        self.available_capital = float(capital)
-        self.active_trade = None
+    def reset_state(self, equity_capital: float = 20000.0, commodity_capital: float = 50000.0):
+        """Clears live ledger and resets segregated ICICI account balances."""
+        self.equity_initial_capital = float(equity_capital)
+        self.equity_capital = float(equity_capital)
+        self.equity_blocked_capital = 0.0
+        self.equity_available_capital = float(equity_capital)
+
+        self.commodity_initial_capital = float(commodity_capital)
+        self.commodity_capital = float(commodity_capital)
+        self.commodity_blocked_capital = 0.0
+        self.commodity_available_capital = float(commodity_capital)
+
+        self.active_trades.clear()
+        self._active_trade = None
         self.trade_history = []
+        self.last_crude_exit_time = None
+        self.last_equity_exit_time = None
         self.save_state()
-        logger.info(f"🔄 [LIVE ENGINE RESET] Ledger cleared. Capital reset to ₹{capital:,.2f}")
+        logger.info(
+            f"🔄 [LIVE ENGINE RESET] Ledger cleared. Capital reset to Stock: ₹{equity_capital:,.2f} | "
+            f"Crude: ₹{commodity_capital:,.2f} (Total: ₹{self.capital:,.2f})"
+        )
 
     def load_state(self):
         """Restores persistent live trading portfolio from disk."""
@@ -301,22 +346,32 @@ class LiveTradeDaemon:
                         self.api_calls_count = int(data.get("api_calls_count", 4))
                     self.api_quota_limit = int(data.get("api_quota_limit", 5000))
 
-                    saved_cap = float(data.get("capital", self.capital))
-                    if saved_cap == 20000.0:
-                        saved_cap = self.allocated_fno
-                    self.capital = saved_cap
-                    self.initial_capital = float(data.get("initial_capital", self.allocated_fno))
-                    if self.initial_capital == 20000.0:
-                        self.initial_capital = self.allocated_fno
-                    self.blocked_capital = float(data.get("blocked_capital", self.blocked_fno))
-                    if self.blocked_capital == 0.0 and self.blocked_fno > 0:
-                        self.blocked_capital = self.blocked_fno
-                    self.available_capital = float(data.get("available_capital", self.capital - self.blocked_capital))
-                    if self.available_capital == 20000.0 or self.available_capital > self.capital:
-                        self.available_capital = max(0.0, self.capital - self.blocked_capital)
+                    self.equity_initial_capital = float(data.get("equity_initial_capital", 20000.0))
+                    self.equity_capital = float(data.get("equity_capital", 20000.0))
+                    self.equity_blocked_capital = float(data.get("equity_blocked_capital", 0.0))
+                    self.equity_available_capital = float(data.get("equity_available_capital", self.equity_capital - self.equity_blocked_capital))
+
+                    self.commodity_initial_capital = float(data.get("commodity_initial_capital", 50000.0))
+                    self.commodity_capital = float(data.get("commodity_capital", 50000.0))
+                    self.commodity_blocked_capital = float(data.get("commodity_blocked_capital", 0.0))
+                    self.commodity_available_capital = float(data.get("commodity_available_capital", self.commodity_capital - self.commodity_blocked_capital))
+
                     self.max_trades_per_day = int(data.get("max_trades_per_day", self.max_trades_per_day))
+                    self.max_trades_index = int(data.get("max_trades_index", self.max_trades_index))
+                    self.max_trades_commodity = int(data.get("max_trades_commodity", self.max_trades_commodity))
                     self.blocked_time_slots = data.get("blocked_time_slots", self.blocked_time_slots)
-                    self.active_trade = data.get("active_trade")
+
+                    self.active_trades = {}
+                    if "active_trades" in data and isinstance(data["active_trades"], list):
+                        for at in data["active_trades"]:
+                            if isinstance(at, dict):
+                                seg = "commodity" if self._is_commodity_trade(at) else "equity"
+                                self.active_trades[seg] = at
+                    elif "active_trade" in data and isinstance(data["active_trade"], dict):
+                        at = data["active_trade"]
+                        seg = "commodity" if self._is_commodity_trade(at) else "equity"
+                        self.active_trades[seg] = at
+
                     self.trade_history = data.get("trade_history", [])
 
                     for t in self.trade_history:
@@ -333,7 +388,7 @@ class LiveTradeDaemon:
                         if "units" not in t and "quantity" in t:
                             t["units"] = t["quantity"]
 
-                    logger.info(f"LiveTradeDaemon: Restored {len(self.trade_history)} trades. Armed: {self.is_armed} | Real Capital: ₹{self.capital:,.2f}")
+                    logger.info(f"LiveTradeDaemon: Restored {len(self.trade_history)} trades. Armed: {self.is_armed} | Stock: ₹{self.equity_capital:,.2f} | Crude: ₹{self.commodity_capital:,.2f} (Total: ₹{self.capital:,.2f})")
             except Exception as e:
                 logger.error(f"LiveTradeDaemon: Error loading state: {e}")
 
@@ -355,14 +410,28 @@ class LiveTradeDaemon:
                 "api_calls_date": self.api_calls_date,
                 "api_quota_limit": self.api_quota_limit,
                 "strategy": self.strategy,
+                # Aggregated Balances
                 "capital": round(self.capital, 2),
                 "total_capital": round(self.capital, 2),
                 "blocked_capital": round(self.blocked_capital, 2),
                 "available_capital": round(self.available_capital, 2),
                 "initial_capital": round(self.initial_capital, 2),
+                # Segregated ICICI Accounts
+                "equity_capital": round(self.equity_capital, 2),
+                "equity_initial_capital": round(self.equity_initial_capital, 2),
+                "equity_blocked_capital": round(self.equity_blocked_capital, 2),
+                "equity_available_capital": round(self.equity_available_capital, 2),
+                "commodity_capital": round(self.commodity_capital, 2),
+                "commodity_initial_capital": round(self.commodity_initial_capital, 2),
+                "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
+                "commodity_available_capital": round(self.commodity_available_capital, 2),
+                # Limits & Controls
                 "max_trades_per_day": self.max_trades_per_day,
+                "max_trades_index": self.max_trades_index,
+                "max_trades_commodity": self.max_trades_commodity,
                 "blocked_time_slots": self.blocked_time_slots,
                 "active_trade": self.active_trade,
+                "active_trades": list(self.active_trades.values()) if hasattr(self, "active_trades") else ([] if not self.active_trade else [self.active_trade]),
                 "trade_history": self.trade_history,
                 "updated_at": datetime.now().isoformat()
             }
@@ -440,11 +509,13 @@ class LiveTradeDaemon:
         self._update_strength_meter(tick, ltp)
 
         # 3. Active Position Sub-Second Evaluation
-        if self.active_trade:
+        if hasattr(self, "active_trades") and self.active_trades:
+            self._evaluate_active_position_tick(symbol, ltp, now)
+        elif self.active_trade:
             self._evaluate_active_position_tick(symbol, ltp, now)
 
         # 4. 1-Minute Candle Accumulation
-        if canon in ("NIFTY", "NIFTY-I"):
+        if canon in ("NIFTY", "NIFTY-I", "CRUDEOIL", "NATURALGAS"):
             self._accumulate_minute_bar(canon, ltp, int(tick.get("volume", 0) or 0), now)
 
     def _update_strength_meter(self, tick: Dict[str, Any], ltp: float):
@@ -473,44 +544,83 @@ class LiveTradeDaemon:
         self.prev_tick_price = ltp
 
     def _evaluate_active_position_tick(self, symbol: str, ltp: float, now: datetime):
-        pos = self.active_trade
-        if not pos:
-            return
-        contract_sym = pos.get("contract", "")
-
-        # Option LTP update:
-        # 1. Exact match if direct contract tick arrives from broker WebSocket
-        # 2. Delta estimation ONLY against spot index benchmark (NIFTY / NIFTY 50)
-        opt_ltp = pos.get("current_price", pos["entry_price"])
-        if symbol == contract_sym:
-            opt_ltp = ltp
-        elif symbol in ("NIFTY", "NIFTY 50"):
-            spot_diff = ltp - pos.get("spot_at_entry", ltp)
-            delta = 0.55 if pos.get("trend") == "BULLISH" else -0.55
-            opt_ltp = max(5.0, round(pos["entry_price"] + spot_diff * delta, 2))
-        else:
+        if not hasattr(self, "active_trades") or not self.active_trades:
             return
 
-        pos["current_price"] = round(opt_ltp, 2)
-        pos["unrealized_pnl"] = round((opt_ltp - pos["entry_price"]) * pos["units"], 2)
-        pos["points_gained"] = round(opt_ltp - pos["entry_price"], 2)
-        pos["points"] = pos["points_gained"]
-        pos["buyer_strength"] = self.buyer_strength
-        pos["seller_strength"] = self.seller_strength
+        for seg_key in list(self.active_trades.keys()):
+            pos = self.active_trades.get(seg_key)
+            if not pos:
+                continue
 
-        # Check Stop Loss Hit
-        if opt_ltp <= pos["sl"]:
-            self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now)
-            return
+            contract_sym = pos.get("contract", "")
+            is_comm = self._is_commodity_trade(pos)
 
-        # Check Target Hit
-        if opt_ltp >= pos["target"]:
-            self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now)
-            return
+            if is_comm:
+                # MCX Commodity Tick evaluation
+                if symbol == "CRUDEOIL" or symbol == contract_sym:
+                    entry_u = pos.get("entry_underlying", pos.get("spot_at_entry", ltp))
+                    cur_u = ltp
+                    pos["current_underlying"] = cur_u
 
-        # Auto Square-Off at 15:15 IST
-        if now.hour == 15 and now.minute >= 15:
-            self._close_active_trade(reason="15:15 Auto Square-Off", exit_price=opt_ltp, exit_time=now)
+                    delta_u = cur_u - entry_u if pos.get("trend") == "BULLISH" else entry_u - cur_u
+                    est_opt_pts = round(delta_u * 0.55, 2)
+                    opt_cur = max(5.0, round(pos["entry_price"] + est_opt_pts, 2))
+                    pos["current_price"] = opt_cur
+                    pos["unrealized_pnl"] = round(est_opt_pts * pos["units"], 2)
+                    pos["points_gained"] = est_opt_pts
+                    pos["points"] = est_opt_pts
+
+                    # Underlying trailing stop / target checks
+                    tgt_u = pos.get("target_underlying")
+                    sl_u = pos.get("sl_underlying")
+
+                    # Check Target
+                    if (pos.get("trend") == "BULLISH" and cur_u >= tgt_u) or (pos.get("trend") == "BEARISH" and cur_u <= tgt_u):
+                        self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now, trade_to_close=pos)
+                        continue
+
+                    # Check SL
+                    if (pos.get("trend") == "BULLISH" and cur_u <= sl_u) or (pos.get("trend") == "BEARISH" and cur_u >= sl_u):
+                        self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now, trade_to_close=pos)
+                        continue
+
+                    # Auto square-off at 23:25 IST for MCX
+                    if now.hour == 23 and now.minute >= 25:
+                        self._close_active_trade(reason="23:25 MCX Auto Square-Off", exit_price=opt_cur, exit_time=now, trade_to_close=pos)
+                        continue
+            else:
+                # NSE Equity Option evaluation
+                opt_ltp = pos.get("current_price", pos["entry_price"])
+                if symbol == contract_sym:
+                    opt_ltp = ltp
+                elif symbol in ("NIFTY", "NIFTY 50"):
+                    spot_diff = ltp - pos.get("spot_at_entry", ltp)
+                    delta = 0.55 if pos.get("trend") == "BULLISH" else -0.55
+                    opt_ltp = max(5.0, round(pos["entry_price"] + spot_diff * delta, 2))
+                else:
+                    continue
+
+                pos["current_price"] = round(opt_ltp, 2)
+                pos["unrealized_pnl"] = round((opt_ltp - pos["entry_price"]) * pos["units"], 2)
+                pos["points_gained"] = round(opt_ltp - pos["entry_price"], 2)
+                pos["points"] = pos["points_gained"]
+                pos["buyer_strength"] = self.buyer_strength
+                pos["seller_strength"] = self.seller_strength
+
+                # Check Stop Loss Hit
+                if opt_ltp <= pos["sl"]:
+                    self._close_active_trade(reason="Stop Loss Hit", exit_price=pos["sl"], exit_time=now, trade_to_close=pos)
+                    continue
+
+                # Check Target Hit
+                if opt_ltp >= pos["target"]:
+                    self._close_active_trade(reason="Target Hit", exit_price=pos["target"], exit_time=now, trade_to_close=pos)
+                    continue
+
+                # Auto Square-Off at 15:15 IST
+                if now.hour == 15 and now.minute >= 15:
+                    self._close_active_trade(reason="15:15 Auto Square-Off", exit_price=opt_ltp, exit_time=now, trade_to_close=pos)
+                    continue
 
     def _accumulate_minute_bar(self, symbol: str, ltp: float, volume: int, now: datetime):
         minute_key = now.strftime("%Y-%m-%d %H:%M:00")
@@ -545,26 +655,43 @@ class LiveTradeDaemon:
             self.bar_history[symbol].pop(0)
 
         # Operational visibility log
-        if symbol in ("NIFTY", "NIFTY 50"):
+        if symbol in ("NIFTY", "NIFTY 50", "CRUDEOIL"):
             logger.info(f"📊 [LIVE ENGINE - 1-MIN BAR] {symbol} @ {now.strftime('%H:%M:%S')} | O:{bar['open']} H:{bar['high']} L:{bar['low']} C:{bar['close']} | Armed: {self.is_armed}")
 
         # If live engine is DISARMED, do not evaluate execution
         if not self.is_armed:
             return
 
-        # Only evaluate entries if no active position
-        if self.active_trade is not None:
+        # ── Branch A: MCX Commodity Evaluation (CRUDEOIL) ────────────────
+        if symbol in ("CRUDEOIL", "NATURALGAS"):
+            if not self.is_market_open("MCX Commodity"):
+                return
+            if now.hour > 23 or (now.hour == 23 and now.minute >= 15):
+                return
+            if hasattr(self, "active_trades") and "commodity" in self.active_trades:
+                return
+            if self.last_crude_exit_time:
+                mins_since = (now - self.last_crude_exit_time).total_seconds() / 60.0
+                if mins_since < 15.0:
+                    return
+            today_str = now.strftime("%Y-%m-%d")
+            idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+            if self.max_trades_commodity > 0 and comm_cnt >= self.max_trades_commodity:
+                return
+            if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
+                return
+
+            self._evaluate_commodity_strategy_signal(symbol, now)
             return
 
-        # Only evaluate on primary benchmark candle close
+        # ── Branch B: NSE Equity Evaluation (NIFTY) ──────────────────────
         if symbol not in ("NIFTY", "NIFTY 50"):
             return
-
-        # Pre-Market & Regular Hours Gating: NSE market must be open (09:15 - 15:30 IST)
         if not self.is_market_open("NSE Cash"):
             return
+        if hasattr(self, "active_trades") and "equity" in self.active_trades:
+            return
 
-        # Gating 1: Blocked Time Slots (e.g. 09:15 to 10:05 opening volatility noise filter)
         hm = now.strftime("%H:%M")
         for slot in self.blocked_time_slots:
             if isinstance(slot, (list, tuple)) and len(slot) >= 2:
@@ -574,17 +701,21 @@ class LiveTradeDaemon:
                 if slot["start"] <= hm < slot["end"]:
                     return
 
-        # Gating 2: Market Close Gating
         if now.hour > 15 or (now.hour == 15 and now.minute >= 10):
             return
 
-        # Gating 3: Max Trades Per Day Gating
+        if self.last_equity_exit_time:
+            mins_since = (now - self.last_equity_exit_time).total_seconds() / 60.0
+            if mins_since < 15.0:
+                return
+
         today_str = now.strftime("%Y-%m-%d")
-        today_trades = [t for t in self.trade_history if t.get("date") == today_str]
-        if self.max_trades_per_day > 0 and len(today_trades) >= self.max_trades_per_day:
+        idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
+        if self.max_trades_index > 0 and idx_cnt >= self.max_trades_index:
+            return
+        if self.max_trades_per_day > 0 and tot_cnt >= self.max_trades_per_day:
             return
 
-        # Evaluate Strategy Setup
         self._evaluate_strategy_signal(now)
 
     def _evaluate_strategy_signal(self, now: datetime):
@@ -601,6 +732,22 @@ class LiveTradeDaemon:
                 spot_price=sig.spot_price,
                 now=now
             )
+
+    def _evaluate_commodity_strategy_signal(self, symbol: str, now: datetime):
+        """Evaluates 1-Hour Trend & 30-Bar Sweep setups for MCX Commodities via Unified Strategy Evaluator."""
+        bars = self.bar_history.get(symbol) or []
+        if symbol == "CRUDEOIL":
+            sig = self.strategy_evaluator.evaluate_crude(bars)
+            if sig:
+                logger.info(f"🎯 [LIVE COMMODITY SIGNAL DETECTED] Setup: {sig.strategy_name} | Direction: {sig.direction} | Spot: {sig.spot_price:.2f} | Prob: {sig.probability_pct}")
+                self._execute_commodity_live_entry(
+                    symbol=symbol,
+                    direction=sig.direction,
+                    strategy_name=sig.strategy_name,
+                    probability=sig.probability_pct,
+                    current_price=sig.spot_price,
+                    now=now
+                )
 
     def _open_live_trade(
         self,
@@ -630,22 +777,22 @@ class LiveTradeDaemon:
 
         # Institutional Capital Reservation & Margin Blocking
         required_capital = round(est_prem * units, 2)
-        if required_capital > self.available_capital:
+        if required_capital > self.equity_available_capital:
             logger.warning(
-                f"❌ [LIVE TRADE ABORTED] Insufficient available capital. "
-                f"Required: ₹{required_capital:,.2f}, Available: ₹{self.available_capital:,.2f}"
+                f"❌ [LIVE TRADE ABORTED] Insufficient equity capital. "
+                f"Required: ₹{required_capital:,.2f}, Available: ₹{self.equity_available_capital:,.2f}"
             )
             return
 
         # Deduct / block margin immediately upon trade decision
-        self.blocked_capital = required_capital
-        self.available_capital = round(self.capital - self.blocked_capital, 2)
+        self.equity_blocked_capital = required_capital
+        self.equity_available_capital = round(self.equity_capital - self.equity_blocked_capital, 2)
 
         target_px = round(est_prem * (1.0 + self.tgt_pct), 2)
         sl_px = round(est_prem * (1.0 - self.sl_pct), 2)
 
         trade_id = f"LTR_{now.strftime('%Y%m%d_%H%M%S')}"
-        self.active_trade = {
+        trade_obj = {
             "id": trade_id,
             "trade_id": trade_id,
             "entry_time": now.strftime("%H:%M:%S"),
@@ -677,49 +824,163 @@ class LiveTradeDaemon:
             "points": 0.0,
             "buyer_strength": self.buyer_strength,
             "seller_strength": self.seller_strength,
-            "segment": "NIFTY",
+            "segment": "NSE Cash",
             "execution_mode": self.execution_mode,
             "broker_status": "MOCKED_FILLED"  # Order API mocked for safety
         }
+        self.active_trade = trade_obj
 
         logger.info(
-            f"🚨 [LIVE TRADE OPENED - {self.execution_mode}] {contract.symbol} ({self.active_trade['trend']}) "
+            f"🚨 [LIVE TRADE OPENED - {self.execution_mode}] {contract.symbol} ({trade_obj['trend']}) "
             f"@ ₹{est_prem:.2f} | Lots: {lots} ({units} units) | Blocked Margin: ₹{required_capital:,.2f} | "
-            f"Free Capital: ₹{self.available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
+            f"Free Equity Capital: ₹{self.equity_available_capital:,.2f} | TGT: ₹{target_px} | SL: ₹{sl_px}"
         )
         self.save_state()
 
-    def _close_active_trade(self, reason: str, exit_price: float, exit_time: datetime):
-        """Finalizes active trade, unblocks margin, and settles P&L."""
-        if not self.active_trade:
+    def _execute_commodity_live_entry(
+        self,
+        symbol: str,
+        direction: str,
+        strategy_name: str,
+        probability: str,
+        current_price: float,
+        now: datetime
+    ):
+        """Constructs Dynamic CRUDE Option contract with 7% compounding and margin reservation."""
+        lot_size = 100 if symbol == "CRUDEOIL" else (1250 if symbol == "NATURALGAS" else 100)
+        tgt_u = 45.0
+        sl_u = 22.0
+        opt_tgt_pts = 25.0
+        opt_sl_pts = 12.0
+
+        step = 50.0
+        atm_strike = int(round(current_price / step) * step)
+        opt_type = "CE" if direction == "CALL" else "PE"
+        contract_sym = f"CRUDEOIL {atm_strike} {opt_type}"
+
+        est_prem = max(80.0, round(110.0 + (current_price % 50), 2))
+        risk_per_lot = (opt_sl_pts * lot_size) + 90.0
+        lots = self.strategy_evaluator.calculate_lots(self.commodity_capital, self.risk_pct, risk_per_lot, max_lots=50)
+        units = lots * lot_size
+
+        required_margin = round(lots * lot_size * est_prem, 2)
+        if required_margin > self.commodity_available_capital:
+            lots = max(1, int(self.commodity_available_capital // (lot_size * est_prem)))
+            units = lots * lot_size
+            required_margin = round(lots * lot_size * est_prem, 2)
+
+        if required_margin > self.commodity_available_capital:
+            logger.warning(
+                f"❌ [COMMODITY LIVE TRADE ABORTED] Insufficient commodity capital. "
+                f"Required: ₹{required_margin:,.2f}, Available: ₹{self.commodity_available_capital:,.2f}"
+            )
             return
 
-        pos = self.active_trade
-        pts = round(exit_price - pos["entry_price"], 2)
-        gross = round(pts * pos["units"], 2)
+        self.commodity_blocked_capital = required_margin
+        self.commodity_available_capital = round(self.commodity_capital - self.commodity_blocked_capital, 2)
 
-        # Statutory charges + slippage friction via Unified Strategy Engine
-        charges = self.strategy_evaluator.calculate_charges(pos["lots"], pos["units"], is_commodity=False)
+        target_px = round(current_price + tgt_u, 2) if direction == "CALL" else round(current_price - tgt_u, 2)
+        sl_px = round(current_price - sl_u, 2) if direction == "CALL" else round(current_price + sl_u, 2)
+        trend_str = "BULLISH" if direction == "CALL" else "BEARISH"
+
+        trade_id = f"LTR_MCX_{now.strftime('%Y%m%d_%H%M%S')}"
+        trade_obj = {
+            "id": trade_id,
+            "trade_id": trade_id,
+            "entry_time": now.strftime("%H:%M:%S"),
+            "entry_datetime": now.isoformat(),
+            "date": now.strftime("%Y-%m-%d"),
+            "day": now.strftime("%A"),
+            "symbol": symbol,
+            "contract": contract_sym,
+            "strike": atm_strike,
+            "option_type": opt_type,
+            "trend": trend_str,
+            "entry_price": est_prem,
+            "entry_underlying": current_price,
+            "entry_rate": est_prem,
+            "current_price": est_prem,
+            "current_underlying": current_price,
+            "spot_at_entry": current_price,
+            "benchmark_symbol": symbol,
+            "lots": lots,
+            "units": units,
+            "quantity": units,
+            "blocked_margin": required_margin,
+            "target": round(est_prem + opt_tgt_pts, 2),
+            "sl": round(est_prem - opt_sl_pts, 2),
+            "target_underlying": target_px,
+            "sl_underlying": sl_px,
+            "tgt_u": tgt_u,
+            "sl_u": sl_u,
+            "strategy": strategy_name,
+            "indicator": strategy_name,
+            "probability": probability,
+            "unrealized_pnl": 0.0,
+            "points_gained": 0.0,
+            "points": 0.0,
+            "buyer_strength": self.buyer_strength,
+            "seller_strength": self.seller_strength,
+            "segment": "MCX Commodity",
+            "execution_mode": self.execution_mode,
+            "broker_status": "MOCKED_FILLED"
+        }
+        self.active_trade = trade_obj
+        self.save_state()
+        logger.info(
+            f"🚨 [LIVE TRADE OPENED - {self.execution_mode}] {contract_sym} ({trend_str}) @ ₹{est_prem:.2f} | "
+            f"Lots: {lots} ({units} units) | Blocked Margin: ₹{required_margin:,.2f} | "
+            f"Free Crude Capital: ₹{self.commodity_available_capital:,.2f}"
+        )
+
+    def _close_active_trade(
+        self,
+        reason: str,
+        exit_price: float,
+        exit_time: datetime,
+        opt_pts: Optional[float] = None,
+        trade_to_close: Optional[Dict[str, Any]] = None
+    ):
+        """Finalizes active trade, unblocks margin, and settles P&L."""
+        if trade_to_close is None:
+            trade_to_close = self.active_trade
+        if not trade_to_close:
+            return
+
+        pos = trade_to_close
+        is_comm = self._is_commodity_trade(pos)
+        seg_key = "commodity" if is_comm else "equity"
+
+        if opt_pts is not None:
+            pts = round(opt_pts, 2)
+        elif pos.get("trend") in ("BEARISH", "SHORT", "PUT") and is_comm:
+            pts = round(pos["entry_price"] - exit_price, 2)
+        else:
+            pts = round(exit_price - pos["entry_price"], 2)
+
+        gross = round(pts * pos["units"], 2)
+        charges = self.strategy_evaluator.calculate_charges(pos["lots"], pos["units"], is_commodity=is_comm)
         net = round(gross - charges, 2)
-        roi = round((net / (pos["entry_price"] * pos["units"])) * 100.0, 2) if (pos["entry_price"] * pos["units"]) > 0 else 0.0
+        invested = pos["entry_price"] * pos["units"]
+        roi = round((net / invested) * 100.0, 2) if invested > 0 else 0.0
 
         closed_rec = {
-            "id": pos["id"],
-            "trade_id": pos["id"],
-            "date": pos["date"],
-            "day": pos["day"],
-            "symbol": pos["symbol"],
-            "contract": pos["contract"],
-            "strike": pos["strike"],
-            "option_type": pos["option_type"],
-            "trend": pos["trend"],
-            "action": f"BUY_{pos['option_type']}",
-            "indicator": pos["strategy"],
-            "strategy": pos["strategy"],
-            "probability": pos["probability"],
-            "entry_time": pos["entry_time"],
-            "entry_price": pos["entry_price"],
-            "entry_rate": pos["entry_price"],
+            "id": pos.get("id", f"LTR_{exit_time.strftime('%Y%m%d_%H%M%S')}"),
+            "trade_id": pos.get("trade_id", pos.get("id", "")),
+            "date": pos.get("date", exit_time.strftime("%Y-%m-%d")),
+            "day": pos.get("day", exit_time.strftime("%A")),
+            "symbol": pos.get("symbol", "NIFTY"),
+            "contract": pos.get("contract", "NIFTY ATM"),
+            "strike": pos.get("strike", 0.0),
+            "option_type": pos.get("option_type", "CE"),
+            "trend": pos.get("trend", "BULLISH"),
+            "action": f"BUY_{pos.get('option_type', 'CE')}",
+            "indicator": pos.get("strategy", pos.get("indicator", "Unified AI Trader")),
+            "strategy": pos.get("strategy", pos.get("indicator", "Unified AI Trader")),
+            "probability": pos.get("probability", "70%"),
+            "entry_time": pos.get("entry_time", "--"),
+            "entry_price": pos.get("entry_price", pos.get("entry_rate", 0.0)),
+            "entry_rate": pos.get("entry_rate", pos.get("entry_price", 0.0)),
             "exit_time": exit_time.strftime("%H:%M:%S"),
             "exit_price": round(exit_price, 2),
             "exit_rate": round(exit_price, 2),
@@ -730,36 +991,74 @@ class LiveTradeDaemon:
             "charges": charges,
             "net": net,
             "roi": roi,
-            "lots": pos["lots"],
-            "units": pos["units"],
-            "quantity": pos["units"],
+            "lots": pos.get("lots", 1),
+            "units": pos.get("units", pos.get("quantity", 50)),
+            "quantity": pos.get("units", pos.get("quantity", 50)),
             "blocked_margin": pos.get("blocked_margin", 0.0),
-            "segment": pos.get("segment", "NIFTY"),
+            "segment": pos.get("segment", "NSE Cash" if not is_comm else "MCX Commodity"),
             "execution_mode": pos.get("execution_mode", "DRY_RUN")
         }
 
         self.trade_history.append(closed_rec)
 
-        # Capital Settlement: Release blocked capital and add Net Realized P&L
-        self.blocked_capital = 0.0
-        self.capital = round(self.capital + net, 2)
-        self.available_capital = self.capital
-        self.active_trade = None
+        if is_comm:
+            self.commodity_blocked_capital = 0.0
+            self.commodity_capital = round(self.commodity_capital + net, 2)
+            self.commodity_available_capital = self.commodity_capital
+            self.last_crude_exit_time = exit_time
+            acc_name = "Crude Fund"
+            acc_cap = self.commodity_capital
+        else:
+            self.equity_blocked_capital = 0.0
+            self.equity_capital = round(self.equity_capital + net, 2)
+            self.equity_available_capital = self.equity_capital
+            self.last_equity_exit_time = exit_time
+            acc_name = "Stock Fund"
+            acc_cap = self.equity_capital
+
+        if hasattr(self, "active_trades") and seg_key in self.active_trades:
+            del self.active_trades[seg_key]
+        if hasattr(self, "active_trades") and not self.active_trades:
+            self._active_trade = None
 
         self.save_state()
         logger.info(
             f"✅ [LIVE TRADE CLOSED - {closed_rec['execution_mode']}] {closed_rec['contract']} | "
-            f"Net PnL: {net:+,.2f} ({pts:+.2f} pts) | Reason: {reason} | Capital: ₹{self.capital:,.2f}"
+            f"Net PnL: {net:+,.2f} ({pts:+.2f} pts) | Reason: {reason} | {acc_name}: ₹{acc_cap:,.2f} | Total Capital: ₹{self.capital:,.2f}"
         )
 
     def force_exit_active_trade(self, trade_id: Optional[str] = None) -> Dict[str, Any]:
-        """Manually forces market exit for current active position."""
-        if not self.active_trade:
-            return {"status": "error", "message": "No active live trade to exit"}
+        """Manually forces market exit for targeted active position."""
+        if not hasattr(self, "active_trades") or not self.active_trades:
+            if not self.active_trade:
+                return {"status": "error", "message": "No active live trade to exit"}
+            target_trade = self.active_trade
+        else:
+            target_trade = None
+            if trade_id:
+                for t in self.active_trades.values():
+                    if t.get("id") == trade_id or t.get("trade_id") == trade_id or t.get("symbol") == trade_id or t.get("segment") == trade_id:
+                        target_trade = t
+                        break
+            if not target_trade:
+                target_trade = self.active_trade
+
+        if not target_trade:
+            return {"status": "error", "message": "No matching active live trade to exit"}
+
         now = datetime.now()
-        exit_px = self.active_trade.get("current_price", self.active_trade["entry_price"])
-        self._close_active_trade(reason="Manual Force Market Exit", exit_price=exit_px, exit_time=now)
-        return {"status": "ok", "message": "Active live trade forcefully squared off at market"}
+        exit_px = target_trade.get("current_price", target_trade.get("entry_price", 0.0))
+        self._close_active_trade(reason="Manual Force Market Exit", exit_price=exit_px, exit_time=now, trade_to_close=target_trade)
+        return {"status": "success", "message": f"Active position ({target_trade.get('contract', '')}) forcefully squared off at market"}
+
+    def get_today_trade_counts(self, today_str: Optional[str] = None) -> Tuple[int, int, int]:
+        """Returns (index_trades_count, commodity_trades_count, total_trades_count) for today."""
+        if not today_str:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+        today_trades = [t for t in self.trade_history if t.get("date") == today_str]
+        comm_cnt = sum(1 for t in today_trades if self._is_commodity_trade(t))
+        idx_cnt = len(today_trades) - comm_cnt
+        return idx_cnt, comm_cnt, len(today_trades)
 
     def sync_broker_data(self, force: bool = False) -> Dict[str, Any]:
         """
@@ -986,23 +1285,42 @@ class LiveTradeDaemon:
         All data is served strictly from memory/cache and updated via WebSocket ticks.
         Unrealized P&L is calculated 100% offline.
         """
-        # Offline Unrealized P&L calculation for active position (0 REST calls)
-        if self.active_trade:
+        # Offline Unrealized P&L calculation for active positions (0 REST calls)
+        if hasattr(self, "active_trades") and self.active_trades:
+            for seg_key, pos in self.active_trades.items():
+                is_comm = self._is_commodity_trade(pos)
+                if is_comm:
+                    entry_px = float(pos.get("entry_price") or pos.get("entry_rate") or 0.0)
+                    cur_px = float(pos.get("current_price") or entry_px)
+                    qty = int(pos.get("quantity") or pos.get("units") or 100)
+                    pts = round(cur_px - entry_px, 2)
+                    u_pnl = round(pts * qty, 2)
+                    pos["points"] = pts
+                    pos["unrealized_pnl"] = u_pnl
+                    pos["current_pnl"] = u_pnl
+                else:
+                    entry_px = float(pos.get("entry_price") or pos.get("entry_rate") or 0.0)
+                    cur_px = float(pos.get("current_price") or entry_px)
+                    qty = int(pos.get("quantity") or pos.get("units") or 65)
+                    spot_px = float(self.current_spot or 0.0)
+                    spot_entry = float(pos.get("spot_at_entry") or spot_px)
+                    if spot_px > 0 and spot_entry > 0 and cur_px == entry_px:
+                        trend = (pos.get("trend") or "BULLISH").upper()
+                        delta = 0.55 if trend in ("BULLISH", "CALL", "CE") else -0.55
+                        spot_diff = spot_px - spot_entry
+                        cur_px = max(1.0, round(entry_px + spot_diff * delta, 2))
+                        pos["current_price"] = cur_px
+
+                    pts = round(cur_px - entry_px, 2)
+                    u_pnl = round(pts * qty, 2)
+                    pos["points"] = pts
+                    pos["unrealized_pnl"] = u_pnl
+                    pos["current_pnl"] = u_pnl
+        elif self.active_trade:
             pos = self.active_trade
             entry_px = float(pos.get("entry_price") or pos.get("entry_rate") or 0.0)
             cur_px = float(pos.get("current_price") or entry_px)
             qty = int(pos.get("quantity") or pos.get("units") or 65)
-
-            # Estimate option LTP movement from live benchmark spot tick if direct contract has not ticked
-            spot_px = float(self.current_spot or 0.0)
-            spot_entry = float(pos.get("spot_at_entry") or spot_px)
-            if spot_px > 0 and spot_entry > 0 and cur_px == entry_px:
-                trend = (pos.get("trend") or "BULLISH").upper()
-                delta = 0.55 if trend in ("BULLISH", "CALL", "CE") else -0.55
-                spot_diff = spot_px - spot_entry
-                cur_px = max(1.0, round(entry_px + spot_diff * delta, 2))
-                pos["current_price"] = cur_px
-
             pts = round(cur_px - entry_px, 2)
             u_pnl = round(pts * qty, 2)
             pos["points"] = pts
@@ -1021,6 +1339,11 @@ class LiveTradeDaemon:
         win_rate = round((wins / len(all_tr)) * 100.0, 1) if all_tr else 0.0
 
         today_net = round(sum(t.get("net", 0.0) for t in today_tr), 2)
+        equity_trades = [t for t in all_tr if not self._is_commodity_trade(t)]
+        commodity_trades = [t for t in all_tr if self._is_commodity_trade(t)]
+        equity_net_pnl = sum(t.get("net", 0.0) for t in equity_trades)
+        commodity_net_pnl = sum(t.get("net", 0.0) for t in commodity_trades)
+        idx_cnt, comm_cnt, tot_cnt = self.get_today_trade_counts(today_str)
 
         # Monthly breakdown
         monthly_map: Dict[str, Dict[str, Any]] = {}
@@ -1058,8 +1381,24 @@ class LiveTradeDaemon:
             "blocked_capital": round(self.blocked_capital, 2),
             "available_capital": round(self.available_capital, 2),
             "initial_capital": round(self.initial_capital, 2),
+            # Segregated ICICI Accounts
+            "equity_capital": round(self.equity_capital, 2),
+            "equity_initial_capital": round(self.equity_initial_capital, 2),
+            "equity_blocked_capital": round(self.equity_blocked_capital, 2),
+            "equity_available_capital": round(self.equity_available_capital, 2),
+            "equity_net_pnl": round(equity_net_pnl, 2),
+            "commodity_capital": round(self.commodity_capital, 2),
+            "commodity_initial_capital": round(self.commodity_initial_capital, 2),
+            "commodity_blocked_capital": round(self.commodity_blocked_capital, 2),
+            "commodity_available_capital": round(self.commodity_available_capital, 2),
+            "commodity_net_pnl": round(commodity_net_pnl, 2),
             "today_net": today_net,
             "today_trades_count": len(today_tr),
+            "today_trades_index": idx_cnt,
+            "today_trades_commodity": comm_cnt,
+            "max_trades_total": self.max_trades_per_day,
+            "max_trades_index": self.max_trades_index,
+            "max_trades_commodity": self.max_trades_commodity,
             "monthly_breakdown": list(monthly_map.values()),
             "today_trades": today_tr,
             "all_trades": all_tr,
@@ -1084,6 +1423,7 @@ class LiveTradeDaemon:
             "is_armed": self.is_armed,
             "execution_mode": self.execution_mode,
             "active_trade": self.active_trade,
+            "active_trades": list(self.active_trades.values()) if hasattr(self, "active_trades") else ([] if not self.active_trade else [self.active_trade]),
             "summary": summary,
             "broker_info": {
                 "broker_name": self.broker_name,
@@ -1106,10 +1446,16 @@ class LiveTradeDaemon:
                 "blocked_capital": self.blocked_capital,
                 "available_capital": self.available_capital,
                 "initial_capital": self.initial_capital,
+                "equity_capital": round(self.equity_capital, 2),
+                "equity_initial_capital": round(self.equity_initial_capital, 2),
+                "commodity_capital": round(self.commodity_capital, 2),
+                "commodity_initial_capital": round(self.commodity_initial_capital, 2),
                 "max_trades_per_day": self.max_trades_per_day,
+                "max_trades_index": self.max_trades_index,
+                "max_trades_commodity": self.max_trades_commodity,
                 "blocked_time_slots": self.blocked_time_slots,
                 "symbol": self.symbol,
-                "segment": "NIFTY (Auto - Segment Detector Ready)",
+                "segment": "Multi-Segment (NSE Cash & MCX Commodity)",
                 "contract": "Dynamic ATM (CE & PE)"
             },
             "buyer_strength": self.buyer_strength,
